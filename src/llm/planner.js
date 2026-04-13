@@ -25,10 +25,19 @@ function sceneDescription(scene) {
   return map[scene] || "当前场景信息有限，需要先侦查再行动。";
 }
 
-function buildPrompt({ instruction, scene, history }) {
+function buildPrompt({ instruction, scene, history, perception }) {
   const recentHistory = history.length === 0
     ? "无历史上下文。"
     : history.map((item, index) => `${index + 1}. 指令：${item.instruction}；选择：${item.plan.selectedStrategy}`).join("\n");
+  const perceptionContext = !perception
+    ? "暂无截图识别结果。"
+    : [
+      `截图总结：${perception.summary}`,
+      `OCR 文字：${perception.ocrText || "无"}`,
+      `NPC：${perception.npcNames.join("、") || "无"}`,
+      `交互项：${perception.interactiveOptions.join("、") || "无"}`,
+      `警告：${perception.alerts.join("、") || "无"}`
+    ].join("\n");
 
   return `
 你在为《灵枢绘世》AI玩家控制系统生成第一阶段的受控行动规划。
@@ -51,6 +60,9 @@ ${instruction}
 
 最近历史：
 ${recentHistory}
+
+最近一张截图识别结果：
+${perceptionContext}
 
 返回 JSON，格式必须为：
 {
@@ -133,11 +145,11 @@ function buildFallbackPlan({ instruction, scene }) {
   };
 }
 
-export async function createTurnPlan({ instruction, scene, history }) {
+export async function createTurnPlan({ instruction, scene, history, perception }) {
   try {
     const response = await generateText({
       systemPrompt: "你是一个负责生成受控游戏行动计划的中文助手，必须严格返回 JSON。",
-      userPrompt: buildPrompt({ instruction, scene, history }),
+      userPrompt: buildPrompt({ instruction, scene, history, perception }),
       useReasoningModel: false,
       maxTokens: 700,
       temperature: 0.6

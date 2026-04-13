@@ -139,6 +139,14 @@ body {
   grid-column: span 2;
 }
 
+.panel-perception {
+  grid-column: span 1;
+}
+
+.panel-recognition {
+  grid-column: span 2;
+}
+
 .panel-logs {
   grid-column: span 1;
 }
@@ -156,12 +164,14 @@ body {
 
 textarea,
 select,
+input,
 button {
   font: inherit;
 }
 
 textarea,
-select {
+select,
+input[type="file"] {
   width: 100%;
   border: 1px solid rgba(51, 38, 25, 0.18);
   border-radius: 16px;
@@ -171,7 +181,8 @@ select {
 }
 
 textarea:focus,
-select:focus {
+select:focus,
+input[type="file"]:focus {
   outline: 2px solid rgba(159, 42, 42, 0.25);
   border-color: rgba(159, 42, 42, 0.4);
 }
@@ -212,6 +223,27 @@ button.danger {
   margin-top: 18px;
 }
 
+.image-preview-wrap {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.image-preview {
+  width: 100%;
+  max-height: 240px;
+  object-fit: contain;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.image-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .thought-list,
 .status-grid,
 .action-list,
@@ -247,6 +279,10 @@ button.danger {
   border-radius: 16px;
   padding: 14px;
   min-height: 100px;
+}
+
+.recognition-grid div:last-child {
+  grid-column: span 2;
 }
 
 .status-grid dt {
@@ -352,6 +388,7 @@ button.danger {
   }
 
   .panel-actions,
+  .panel-recognition,
   .panel-logs {
     grid-column: span 2;
   }
@@ -372,11 +409,16 @@ button.danger {
 
   .panel,
   .panel-actions,
+  .panel-recognition,
   .panel-logs {
     grid-column: span 1;
   }
 
   .status-grid {
     grid-template-columns: 1fr;
+  }
+
+  .recognition-grid div:last-child {
+    grid-column: span 1;
   }
 }

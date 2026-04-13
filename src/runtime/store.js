@@ -3,6 +3,7 @@ function createInitialState() {
     status: "idle",
     scene: "town_dialogue",
     currentTurn: null,
+    latestPerception: null,
     logs: [],
     history: [],
     lastError: null
@@ -46,6 +47,10 @@ export function setCurrentTurn(turn) {
   state.currentTurn = turn;
 }
 
+export function setLatestPerception(perception) {
+  state.latestPerception = perception;
+}
+
 export function pushHistory(item) {
   state.history.push(item);
   state.history = state.history.slice(-12);
@@ -60,6 +65,7 @@ export function resetRuntime() {
   state.status = next.status;
   state.scene = next.scene;
   state.currentTurn = next.currentTurn;
+  state.latestPerception = next.latestPerception;
   state.logs = [];
   state.history = [];
   state.lastError = null;

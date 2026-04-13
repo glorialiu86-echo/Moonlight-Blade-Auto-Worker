@@ -4,6 +4,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createTurnPlan } from "../llm/planner.js";
+import { analyzeScreenshot } from "../perception/analyzer.js";
 import { runMockExecution } from "../runtime/mock-executor.js";
 import {
   appendLog,
@@ -12,6 +13,7 @@ import {
   resetRuntime,
   setCurrentTurn,
   setLastError,
+  setLatestPerception,
   setScene,
   setStatus
 } from "../runtime/store.js";
@@ -46,6 +48,14 @@ async function readRequestBody(request) {
   }
 
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+function requireDataUrl(imageDataUrl) {
+  if (typeof imageDataUrl !== "string" || !imageDataUrl.startsWith("data:image/")) {
+    throw new Error("imageDataUrl must be a valid image data URL");
+  }
+
+  return imageDataUrl;
 }
 
 function statePayload() {
@@ -128,7 +138,8 @@ async function handleTurn(request, response) {
     const plan = await createTurnPlan({
       instruction,
       scene,
-      history: nextState.history
+      history: nextState.history,
+      perception: nextState.latestPerception
     });
     const execution = runMockExecution(plan);
     const turn = {
@@ -184,6 +195,52 @@ async function handleTurn(request, response) {
   }
 }
 
+async function handleAnalyzeImage(request, response) {
+  const body = await readRequestBody(request);
+  const imageDataUrl = requireDataUrl(body.imageDataUrl);
+  const imageName = String(body.imageName || "untitled-image").trim();
+
+  appendLog("info", `收到截图分析请求：${imageName}`);
+
+  try {
+    const perception = await analyzeScreenshot({
+      imageInput: imageDataUrl
+    });
+
+    setLatestPerception({
+      ...perception,
+      imageName,
+      analyzedAt: new Date().toISOString()
+    });
+
+    appendLog("info", "截图 OCR 完成", {
+      imageName,
+      extractedLength: perception.ocrText.length
+    });
+    appendLog("info", "截图场景识别完成", {
+      sceneType: perception.sceneType,
+      npcCount: perception.npcNames.length,
+      optionCount: perception.interactiveOptions.length
+    });
+
+    return sendJson(response, 200, {
+      ok: true,
+      state: getState()
+    });
+  } catch (error) {
+    setLastError(error.message);
+    appendLog("error", "截图分析失败", {
+      imageName,
+      error: error.message
+    });
+    return sendJson(response, 500, {
+      ok: false,
+      error: error.message,
+      state: getState()
+    });
+  }
+}
+
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host}`);
 
@@ -202,6 +259,10 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/turn") {
       return handleTurn(request, response);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/analyze-image") {
+      return handleAnalyzeImage(request, response);
     }
 
     if (request.method === "GET") {

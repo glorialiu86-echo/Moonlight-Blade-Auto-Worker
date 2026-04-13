@@ -4,8 +4,12 @@ const state = {
 
 const elements = {
   commandForm: document.querySelector("#commandForm"),
+  perceptionForm: document.querySelector("#perceptionForm"),
   instructionInput: document.querySelector("#instructionInput"),
   sceneSelect: document.querySelector("#sceneSelect"),
+  imageInput: document.querySelector("#imageInput"),
+  imagePreview: document.querySelector("#imagePreview"),
+  imageHint: document.querySelector("#imageHint"),
   statusBadge: document.querySelector("#statusBadge"),
   sceneBadge: document.querySelector("#sceneBadge"),
   thoughtList: document.querySelector("#thoughtList"),
@@ -17,6 +21,12 @@ const elements = {
   executorValue: document.querySelector("#executorValue"),
   actionsList: document.querySelector("#actionsList"),
   outcomeValue: document.querySelector("#outcomeValue"),
+  recognizedSceneValue: document.querySelector("#recognizedSceneValue"),
+  recognizedSummaryValue: document.querySelector("#recognizedSummaryValue"),
+  recognizedNpcValue: document.querySelector("#recognizedNpcValue"),
+  recognizedOptionsValue: document.querySelector("#recognizedOptionsValue"),
+  recognizedAlertsValue: document.querySelector("#recognizedAlertsValue"),
+  recognizedOcrValue: document.querySelector("#recognizedOcrValue"),
   logList: document.querySelector("#logList"),
   thoughtTemplate: document.querySelector("#thoughtTemplate"),
   actionTemplate: document.querySelector("#actionTemplate"),
@@ -55,6 +65,9 @@ function renderStatus(runtimeState) {
   elements.sceneSelect.value = runtimeState.scene;
 
   const turn = runtimeState.currentTurn;
+  const perception = runtimeState.latestPerception;
+
+  renderPerception(perception);
 
   if (!turn) {
     elements.intentValue.textContent = "等待指令";
@@ -80,6 +93,34 @@ function renderStatus(runtimeState) {
 
   renderThoughts(plan.thinkingChain);
   renderActions(execution.steps);
+}
+
+function renderPerception(perception) {
+  if (!perception) {
+    elements.recognizedSceneValue.textContent = "未分析";
+    elements.recognizedSummaryValue.textContent = "等待上传截图";
+    elements.recognizedNpcValue.textContent = "-";
+    elements.recognizedOptionsValue.textContent = "-";
+    elements.recognizedAlertsValue.textContent = "-";
+    elements.recognizedOcrValue.textContent = "-";
+    return;
+  }
+
+  elements.recognizedSceneValue.textContent = `${perception.sceneLabel} (${perception.sceneType})`;
+  elements.recognizedSummaryValue.textContent = perception.summary || "-";
+  elements.recognizedNpcValue.textContent = perception.npcNames.join(" / ") || "-";
+  elements.recognizedOptionsValue.textContent = perception.interactiveOptions.join(" / ") || "-";
+  elements.recognizedAlertsValue.textContent = perception.alerts.join(" / ") || "-";
+  elements.recognizedOcrValue.textContent = perception.ocrText || "-";
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("读取截图失败"));
+    reader.readAsDataURL(file);
+  });
 }
 
 function renderThoughts(thoughts) {
@@ -142,6 +183,49 @@ elements.commandForm.addEventListener("submit", async (event) => {
     const payload = await request("/api/turn", {
       method: "POST",
       body: JSON.stringify({ instruction, scene })
+    });
+
+    renderStatus(payload.state);
+    renderLogs(payload.state.logs);
+  } catch (error) {
+    window.alert(error.message);
+    await refresh();
+  }
+});
+
+elements.imageInput.addEventListener("change", async () => {
+  const file = elements.imageInput.files?.[0];
+
+  if (!file) {
+    elements.imagePreview.hidden = true;
+    elements.imageHint.textContent = "尚未选择截图。建议上传当前游戏窗口截图。";
+    return;
+  }
+
+  const dataUrl = await readFileAsDataUrl(file);
+  elements.imagePreview.src = dataUrl;
+  elements.imagePreview.hidden = false;
+  elements.imageHint.textContent = `已选择：${file.name}`;
+});
+
+elements.perceptionForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const file = elements.imageInput.files?.[0];
+
+  if (!file) {
+    window.alert("请先选择一张截图。");
+    return;
+  }
+
+  try {
+    const imageDataUrl = await readFileAsDataUrl(file);
+    const payload = await request("/api/analyze-image", {
+      method: "POST",
+      body: JSON.stringify({
+        imageName: file.name,
+        imageDataUrl
+      })
     });
 
     renderStatus(payload.state);

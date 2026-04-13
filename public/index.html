@@ -60,6 +60,26 @@
           </div>
         </section>
 
+        <section class="panel panel-perception">
+          <div class="panel-head">
+            <h2>截图识别</h2>
+            <p>上传一张截图，跑 OCR + 场景理解</p>
+          </div>
+          <form id="perceptionForm" class="perception-form">
+            <label class="field">
+              <span>截图文件</span>
+              <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" />
+            </label>
+            <div class="actions">
+              <button type="submit" class="primary">分析当前截图</button>
+            </div>
+          </form>
+          <div class="image-preview-wrap">
+            <img id="imagePreview" class="image-preview" alt="截图预览" hidden />
+            <p id="imageHint" class="image-hint">尚未选择截图。建议上传当前游戏窗口截图。</p>
+          </div>
+        </section>
+
         <section class="panel panel-thoughts">
           <div class="panel-head">
             <h2>思考链</h2>
@@ -108,6 +128,39 @@
           </div>
           <div id="actionsList" class="action-list"></div>
           <p id="outcomeValue" class="outcome">等待计划生成</p>
+        </section>
+
+        <section class="panel panel-recognition">
+          <div class="panel-head">
+            <h2>识别结果</h2>
+            <p>供规划器引用的最新视觉上下文</p>
+          </div>
+          <dl class="status-grid recognition-grid">
+            <div>
+              <dt>识别场景</dt>
+              <dd id="recognizedSceneValue">未分析</dd>
+            </div>
+            <div>
+              <dt>截图总结</dt>
+              <dd id="recognizedSummaryValue">等待上传截图</dd>
+            </div>
+            <div>
+              <dt>NPC / 目标</dt>
+              <dd id="recognizedNpcValue">-</dd>
+            </div>
+            <div>
+              <dt>可交互项</dt>
+              <dd id="recognizedOptionsValue">-</dd>
+            </div>
+            <div>
+              <dt>风险提示</dt>
+              <dd id="recognizedAlertsValue">-</dd>
+            </div>
+            <div>
+              <dt>OCR 文本</dt>
+              <dd id="recognizedOcrValue">-</dd>
+            </div>
+          </dl>
         </section>
 
         <section class="panel panel-logs">

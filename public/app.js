@@ -15,7 +15,13 @@ const state = {
 
 const elements = {
   composerForm: document.querySelector("#composerForm"),
+  headerPill: document.querySelector("#headerPill"),
   instructionInput: document.querySelector("#instructionInput"),
+  agentStatusValue: document.querySelector("#agentStatusValue"),
+  agentModeValue: document.querySelector("#agentModeValue"),
+  agentObjectiveValue: document.querySelector("#agentObjectiveValue"),
+  agentSourceValue: document.querySelector("#agentSourceValue"),
+  agentQueueValue: document.querySelector("#agentQueueValue"),
   messageList: document.querySelector("#messageList"),
   voiceStartButton: document.querySelector("#voiceStartButton"),
   voiceStopButton: document.querySelector("#voiceStopButton"),
@@ -68,6 +74,48 @@ function renderEmptyState() {
   `;
 }
 
+function formatAgentMode(mode, phase) {
+  if (mode === "user_priority") {
+    if (phase === "queued") {
+      return "等待抢占";
+    }
+
+    return "用户优先";
+  }
+
+  if (phase === "cooldown") {
+    return "优先冷却";
+  }
+
+  if (phase === "waiting") {
+    return "待机";
+  }
+
+  return "自主运行";
+}
+
+function formatTurnSource(source) {
+  if (source === "user") {
+    return "用户输入";
+  }
+
+  if (source === "agent") {
+    return "AI 自主";
+  }
+
+  return "-";
+}
+
+function renderAgentPanel(runtimeState) {
+  const agent = runtimeState.agent || {};
+  elements.agentStatusValue.textContent = runtimeState.status || "idle";
+  elements.agentModeValue.textContent = formatAgentMode(agent.mode, agent.phase);
+  elements.agentObjectiveValue.textContent = agent.currentObjective || "等待自主目标";
+  elements.agentSourceValue.textContent = formatTurnSource(agent.lastTurnSource);
+  elements.agentQueueValue.textContent = agent.queuedUserObjective || "暂无";
+  elements.headerPill.textContent = `当前模式：${formatAgentMode(agent.mode, agent.phase)}`;
+}
+
 function renderAssistantMessage(message) {
   const node = elements.assistantMessageTemplate.content.firstElementChild.cloneNode(true);
   node.querySelector(".message-text").textContent = message.text || "本轮暂无回复。";
@@ -105,6 +153,8 @@ function renderAssistantMessage(message) {
 
 function renderUserMessage(message) {
   const node = elements.userMessageTemplate.content.firstElementChild.cloneNode(true);
+  node.dataset.origin = message.origin || "user";
+  node.querySelector(".message-role").textContent = message.origin === "agent" ? "AI 自主目标" : "籽岷";
   node.querySelector(".message-text").textContent = message.text || "";
   return node;
 }
@@ -130,6 +180,7 @@ function renderMessages(messages) {
 
 async function refresh() {
   const payload = await request("/api/state");
+  renderAgentPanel(payload.state);
   renderMessages(payload.state.messages);
 }
 
@@ -394,6 +445,7 @@ elements.composerForm.addEventListener("submit", async (event) => {
     });
 
     elements.instructionInput.value = "";
+    renderAgentPanel(payload.state);
     renderMessages(payload.state.messages);
     updateVoiceStatus("本轮处理完成，可以继续输入文字或语音。");
   } catch (error) {
@@ -418,3 +470,7 @@ initVoiceInput();
 refresh().catch((error) => {
   updateVoiceStatus(`初始化失败：${error.message}`);
 });
+
+window.setInterval(() => {
+  refresh().catch(() => {});
+}, 5000);

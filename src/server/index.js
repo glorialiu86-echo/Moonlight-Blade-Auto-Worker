@@ -17,12 +17,26 @@ import {
   setLastError,
   setLatestPerception,
   setScene,
-  setStatus
+  setStatus,
+  updateAgent
 } from "../runtime/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../../public");
 const port = Number(process.env.PORT || 3000);
+const AUTONOMOUS_INTERVAL_MS = 35000;
+const AUTONOMOUS_START_DELAY_MS = 6000;
+const USER_PRIORITY_COOLDOWN_MS = 60000;
+const TURN_SLOT_POLL_MS = 150;
+const TURN_SLOT_TIMEOUT_MS = 45000;
+const AUTONOMOUS_OBJECTIVE_POOL = [
+  "先去主城里找一个看起来最有故事的 NPC，试着套近乎并观察他会不会给出任务线索。",
+  "去看看有没有适合顺手接下来的轻量任务，优先选能稳定推进等级或声望的路线。",
+  "先用不太高调的方式赚一点快钱，观察有没有交易、跑腿或低风险社交机会。",
+  "在附近转一圈，找找值得主动互动的 NPC、任务点或资源点，别原地发呆。"
+];
+
+let turnInFlight = false;
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -105,6 +119,12 @@ function statePayload() {
   return { ok: true, state: getState() };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 async function serveStatic(response, pathname) {
   const target = pathname === "/" ? "/index.html" : pathname;
   const filePath = path.join(publicDir, target);
@@ -129,12 +149,13 @@ function buildAssistantMessage({ plan, execution, perceptionSummary }) {
   };
 }
 
-function buildUserMessage({ instruction, scene, perception }) {
+function buildUserMessage({ instruction, scene, perception, origin = "user" }) {
   return {
     role: "user",
     text: instruction,
     scene,
-    perception
+    perception,
+    origin
   };
 }
 
@@ -159,6 +180,190 @@ function appendAssistantPlanMessage({ plan, execution, perceptionSummary }) {
     }),
     plannerContext: buildPlannerContext(plan)
   });
+}
+
+function pickAutonomousObjective(runtimeState) {
+  const nextIndex = runtimeState.agent.autonomousTurnCount % AUTONOMOUS_OBJECTIVE_POOL.length;
+  return AUTONOMOUS_OBJECTIVE_POOL[nextIndex];
+}
+
+function shouldRunAutonomousTurn(runtimeState) {
+  if (!runtimeState.agent.autonomousEnabled) {
+    return false;
+  }
+
+  if (runtimeState.status === "paused" || runtimeState.status === "stopped") {
+    return false;
+  }
+
+  if (!runtimeState.agent.lastTurnAt) {
+    return true;
+  }
+
+  if (runtimeState.agent.lastTurnSource === "user") {
+    return Date.now() - new Date(runtimeState.agent.lastTurnAt).getTime() >= USER_PRIORITY_COOLDOWN_MS;
+  }
+
+  return true;
+}
+
+async function runPlannedTurn({
+  instruction,
+  scene,
+  perception,
+  source,
+  perceptionSummary
+}) {
+  const runtimeBefore = getState();
+
+  appendMessage(buildUserMessage({
+    instruction,
+    scene,
+    perception,
+    origin: source
+  }));
+  appendLog("info", source === "agent" ? `自主目标开始：${instruction}` : `收到对话输入：${instruction}`, {
+    instruction,
+    scene,
+    source
+  });
+
+  updateAgent({
+    mode: source === "user" ? "user_priority" : "autonomous",
+    phase: source === "user" ? "user_priority" : "autonomous",
+    currentObjective: instruction,
+    queuedUserObjective: source === "user" ? instruction : null,
+    lastUserInstruction: source === "user" ? instruction : runtimeBefore.agent.lastUserInstruction,
+    lastAutonomousInstruction: source === "agent" ? instruction : runtimeBefore.agent.lastAutonomousInstruction
+  });
+
+  const nextState = getState();
+  const plan = await createTurnPlan({
+    instruction,
+    scene,
+    conversationMessages: nextState.messages.slice(0, -1),
+    perception
+  });
+  const execution = runMockExecution(plan);
+  const turn = {
+    id: `turn-${Date.now()}`,
+    instruction,
+    scene,
+    createdAt: new Date().toISOString(),
+    source,
+    plan,
+    execution,
+    perception: perception || null
+  };
+
+  setCurrentTurn(turn);
+
+  appendLog("info", "意图解析完成", {
+    intent: plan.intent,
+    strategy: plan.selectedStrategy,
+    source
+  });
+  appendLog("info", "行为计划已生成", {
+    actionCount: plan.actions.length,
+    riskLevel: plan.riskLevel,
+    source
+  });
+  appendLog("info", "模拟执行器返回结果", {
+    executor: execution.executor,
+    outcome: execution.outcome,
+    source
+  });
+
+  if (plan.fallbackReason) {
+    appendLog("warn", "本轮使用了回退规划", {
+      reason: plan.fallbackReason,
+      source
+    });
+  }
+
+  appendAssistantPlanMessage({
+    plan,
+    execution,
+    perceptionSummary
+  });
+
+  const agentBeforeUpdate = getState().agent;
+  updateAgent({
+    mode: "autonomous",
+    phase: source === "user" ? "cooldown" : "autonomous",
+    currentObjective: plan.selectedStrategy,
+    queuedUserObjective: source === "user" ? null : agentBeforeUpdate.queuedUserObjective,
+    lastTurnSource: source,
+    lastTurnAt: new Date().toISOString(),
+    autonomousTurnCount: source === "agent"
+      ? agentBeforeUpdate.autonomousTurnCount + 1
+      : agentBeforeUpdate.autonomousTurnCount
+  });
+
+  return getState();
+}
+
+async function maybeRunAutonomousTurn() {
+  if (turnInFlight) {
+    return;
+  }
+
+  const runtimeState = getState();
+
+  if (!shouldRunAutonomousTurn(runtimeState)) {
+    return;
+  }
+
+  turnInFlight = true;
+
+  try {
+    if (runtimeState.status === "idle") {
+      setStatus("running");
+      appendLog("info", "系统进入自主运行模式");
+    }
+
+    const scene = runtimeState.scene;
+    const instruction = pickAutonomousObjective(runtimeState);
+    updateAgent({
+      mode: "autonomous",
+      phase: "autonomous",
+      currentObjective: instruction
+    });
+
+    await runPlannedTurn({
+      instruction,
+      scene,
+      perception: runtimeState.latestPerception,
+      source: "agent",
+      perceptionSummary: runtimeState.latestPerception
+        ? "本轮自主目标结合了最新截图识别结果。"
+        : "当前处于自主运行骨架阶段，尚未接入近实时截图识别。"
+    });
+  } catch (error) {
+    setLastError(error.message);
+    updateAgent({
+      phase: "waiting"
+    });
+    appendLog("error", "自主运行回合失败", {
+      error: error.message
+    });
+  } finally {
+    turnInFlight = false;
+  }
+}
+
+async function waitForTurnSlot() {
+  const startedAt = Date.now();
+
+  while (turnInFlight) {
+    if (Date.now() - startedAt >= TURN_SLOT_TIMEOUT_MS) {
+      throw new Error("当前已有回合在执行，等待超时。");
+    }
+
+    await sleep(TURN_SLOT_POLL_MS);
+  }
+
+  turnInFlight = true;
 }
 
 async function handleControl(request, response) {
@@ -218,66 +423,34 @@ async function handleTurn(request, response) {
 
   setScene(scene);
   setLastError(null);
-  appendMessage(buildUserMessage({
-    instruction,
-    scene,
-    perception: state.latestPerception
-  }));
-  appendLog("info", `收到新指令：${instruction}`, { instruction, scene });
+  updateAgent({
+    mode: "user_priority",
+    phase: turnInFlight ? "queued" : "user_priority",
+    queuedUserObjective: instruction,
+    currentObjective: instruction
+  });
 
   try {
-    const nextState = getState();
-    const plan = await createTurnPlan({
+    await waitForTurnSlot();
+    const nextState = await runPlannedTurn({
       instruction,
       scene,
-      conversationMessages: nextState.messages.slice(0, -1),
-      perception: nextState.latestPerception
-    });
-    const execution = runMockExecution(plan);
-    const turn = {
-      id: `turn-${Date.now()}`,
-      instruction,
-      scene,
-      createdAt: new Date().toISOString(),
-      plan,
-      execution
-    };
-
-    setCurrentTurn(turn);
-
-    appendLog("info", "意图解析完成", {
-      intent: plan.intent,
-      strategy: plan.selectedStrategy
-    });
-    appendLog("info", "行为计划已生成", {
-      actionCount: plan.actions.length,
-      riskLevel: plan.riskLevel
-    });
-    appendLog("info", "模拟执行器返回结果", {
-      executor: execution.executor,
-      outcome: execution.outcome
-    });
-
-    if (plan.fallbackReason) {
-      appendLog("warn", "本轮使用了回退规划", {
-        reason: plan.fallbackReason
-      });
-    }
-
-    appendAssistantPlanMessage({
-      plan,
-      execution,
-      perceptionSummary: nextState.latestPerception
+      perception: state.latestPerception,
+      source: "user",
+      perceptionSummary: state.latestPerception
         ? "本轮结合最新截图识别结果生成。"
         : "截图识别暂未接入当前对话主链，当前回复基于文本指令和既有上下文生成。"
     });
 
     return sendJson(response, 200, {
       ok: true,
-      state: getState()
+      state: nextState
     });
   } catch (error) {
     setLastError(error.message);
+    updateAgent({
+      phase: "waiting"
+    });
     appendLog("error", "本轮执行失败", { error: error.message });
     appendMessage({
       role: "assistant",
@@ -293,6 +466,8 @@ async function handleTurn(request, response) {
       error: error.message,
       state: getState()
     });
+  } finally {
+    turnInFlight = false;
   }
 }
 
@@ -388,69 +563,36 @@ async function handleChat(request, response) {
 
   setStatus("running");
   setLastError(null);
-  appendMessage(buildUserMessage({
-    instruction,
-    scene: getState().scene,
-    perception: null
-  }));
-  appendLog("info", `收到对话输入：${instruction}`);
+  updateAgent({
+    mode: "user_priority",
+    phase: turnInFlight ? "queued" : "user_priority",
+    queuedUserObjective: instruction,
+    currentObjective: instruction
+  });
 
   try {
     const state = getState();
     const scene = state.scene;
 
     setScene(scene);
-
-    const plan = await createTurnPlan({
+    await waitForTurnSlot();
+    const nextState = await runPlannedTurn({
       instruction,
       scene,
-      conversationMessages: state.messages.slice(0, -1),
-      perception: null
-    });
-    const execution = runMockExecution(plan);
-    const turn = {
-      id: `turn-${Date.now()}`,
-      instruction,
-      scene,
-      createdAt: new Date().toISOString(),
-      plan,
-      execution,
-      perception: null
-    };
-
-    setCurrentTurn(turn);
-
-    appendLog("info", "意图解析完成", {
-      intent: plan.intent,
-      strategy: plan.selectedStrategy
-    });
-    appendLog("info", "行为计划已生成", {
-      actionCount: plan.actions.length,
-      riskLevel: plan.riskLevel
-    });
-    appendLog("info", "模拟执行器返回结果", {
-      executor: execution.executor,
-      outcome: execution.outcome
-    });
-
-    if (plan.fallbackReason) {
-      appendLog("warn", "本轮使用了回退规划", {
-        reason: plan.fallbackReason
-      });
-    }
-
-    appendAssistantPlanMessage({
-      plan,
-      execution,
+      perception: null,
+      source: "user",
       perceptionSummary: "截图识别暂未接入当前对话主链，当前回复基于文本指令和既有上下文生成。"
     });
 
     return sendJson(response, 200, {
       ok: true,
-      state: getState()
+      state: nextState
     });
   } catch (error) {
     setLastError(error.message);
+    updateAgent({
+      phase: "waiting"
+    });
     appendLog("error", "本轮对话执行失败", { error: error.message });
     appendMessage({
       role: "assistant",
@@ -466,6 +608,8 @@ async function handleChat(request, response) {
       error: error.message,
       state: getState()
     });
+  } finally {
+    turnInFlight = false;
   }
 }
 
@@ -519,4 +663,14 @@ const server = http.createServer(async (request, response) => {
 server.listen(port, () => {
   appendLog("info", "第一阶段对话框服务已启动", { port });
   console.log(`Moonlight Blade Auto Worker listening on http://localhost:${port}`);
+  setTimeout(() => {
+    maybeRunAutonomousTurn().catch((error) => {
+      appendLog("error", "自主运行启动失败", { error: error.message });
+    });
+  }, AUTONOMOUS_START_DELAY_MS);
+  setInterval(() => {
+    maybeRunAutonomousTurn().catch((error) => {
+      appendLog("error", "自主运行定时任务失败", { error: error.message });
+    });
+  }, AUTONOMOUS_INTERVAL_MS);
 });

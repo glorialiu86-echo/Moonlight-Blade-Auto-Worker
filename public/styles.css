@@ -84,6 +84,41 @@ body {
   gap: 16px;
 }
 
+.agent-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.agent-card {
+  padding: 14px 16px;
+  border-radius: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.agent-card-wide {
+  grid-column: span 2;
+}
+
+.agent-label,
+.agent-value {
+  margin: 0;
+}
+
+.agent-label {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-value {
+  margin-top: 8px;
+  line-height: 1.55;
+}
+
 .message-list {
   min-height: 58vh;
   max-height: 66vh;
@@ -104,6 +139,10 @@ body {
 .message-user {
   margin-left: 14%;
   background: var(--user);
+}
+
+.message-user[data-origin="agent"] {
+  background: rgba(216, 205, 192, 0.85);
 }
 
 .message-assistant {
@@ -276,6 +315,14 @@ button.primary {
 
   .chat-header {
     flex-direction: column;
+  }
+
+  .agent-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-card-wide {
+    grid-column: span 1;
   }
 
   .message-list {

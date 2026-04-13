@@ -1,9 +1,25 @@
+function createInitialAgentState() {
+  return {
+    autonomousEnabled: true,
+    mode: "autonomous",
+    phase: "waiting",
+    currentObjective: "等待自主目标",
+    queuedUserObjective: null,
+    lastUserInstruction: null,
+    lastAutonomousInstruction: null,
+    lastTurnSource: null,
+    lastTurnAt: null,
+    autonomousTurnCount: 0
+  };
+}
+
 function createInitialState() {
   return {
     status: "idle",
     scene: "town_dialogue",
     currentTurn: null,
     latestPerception: null,
+    agent: createInitialAgentState(),
     messages: [],
     logs: [],
     lastError: null
@@ -51,6 +67,15 @@ export function setLatestPerception(perception) {
   state.latestPerception = perception;
 }
 
+export function updateAgent(patch) {
+  state.agent = {
+    ...state.agent,
+    ...patch
+  };
+
+  return state.agent;
+}
+
 export function appendMessage(message) {
   state.messages.push({
     id: message.id || `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -71,6 +96,7 @@ export function resetRuntime() {
   state.scene = next.scene;
   state.currentTurn = next.currentTurn;
   state.latestPerception = next.latestPerception;
+  state.agent = next.agent;
   state.messages = [];
   state.logs = [];
   state.lastError = null;

@@ -14,10 +14,33 @@
           <h1>天涯明月刀 AI 对话框</h1>
           <p class="subtitle">籽岷只管输入文字或语音。当前 macOS 版本先验证对话体验、思考链和动作规划，截图识别暂不接入主对话链路。</p>
         </div>
-        <span class="header-pill">当前模式：纯对话规划</span>
+        <span id="headerPill" class="header-pill">当前模式：自主骨架</span>
       </header>
 
       <main class="chat-stage">
+        <section class="agent-panel" aria-label="Agent 状态">
+          <div class="agent-card">
+            <p class="agent-label">运行状态</p>
+            <p id="agentStatusValue" class="agent-value">idle</p>
+          </div>
+          <div class="agent-card">
+            <p class="agent-label">当前模式</p>
+            <p id="agentModeValue" class="agent-value">autonomous</p>
+          </div>
+          <div class="agent-card agent-card-wide">
+            <p class="agent-label">当前目标</p>
+            <p id="agentObjectiveValue" class="agent-value">等待自主目标</p>
+          </div>
+          <div class="agent-card">
+            <p class="agent-label">最近来源</p>
+            <p id="agentSourceValue" class="agent-value">-</p>
+          </div>
+          <div class="agent-card agent-card-wide">
+            <p class="agent-label">用户插队</p>
+            <p id="agentQueueValue" class="agent-value">暂无</p>
+          </div>
+        </section>
+
         <section id="messageList" class="message-list" aria-live="polite"></section>
 
         <form id="composerForm" class="composer">

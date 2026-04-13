@@ -1,4 +1,4 @@
-import { generateText } from "./deepseek.js";
+import { generateText } from "./qwen.js";
 import { extractJsonObject } from "../lib/json.js";
 
 const allowedActions = [

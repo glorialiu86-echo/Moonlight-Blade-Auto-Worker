@@ -1,5 +1,5 @@
 import "../src/config/load-env.js";
-import { generateText } from "../src/llm/deepseek.js";
+import { generateText } from "../src/llm/qwen.js";
 
 function parseArgs(argv) {
   const useReasoningModel = argv.includes("--reasoner");
@@ -7,7 +7,7 @@ function parseArgs(argv) {
 
   return {
     useReasoningModel,
-    prompt: prompt || "Reply with a one-line acknowledgement that the DeepSeek connection works."
+    prompt: prompt || "Reply with a one-line acknowledgement that the Qwen connection works."
   };
 }
 

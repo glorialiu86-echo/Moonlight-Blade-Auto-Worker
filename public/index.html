@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>灵枢绘世 · 第一阶段控制台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Phase 1 MVP</p>
+          <h1>灵枢绘世 AI 控制台</h1>
+          <p class="subtitle">先把会想、会演、会规划的 AI 玩家做出来。真实控制层后接。</p>
+        </div>
+        <div class="hero-status">
+          <span id="statusBadge" class="badge badge-idle">idle</span>
+          <span id="sceneBadge" class="badge badge-scene">town_dialogue</span>
+        </div>
+      </header>
+
+      <main class="grid">
+        <section class="panel panel-input">
+          <div class="panel-head">
+            <h2>指令输入</h2>
+            <p>文字指挥 + 手动场景输入</p>
+          </div>
+          <form id="commandForm" class="command-form">
+            <label class="field">
+              <span>当前场景</span>
+              <select id="sceneSelect" name="scene">
+                <option value="town_dialogue">城镇对话</option>
+                <option value="bag_management">背包管理</option>
+                <option value="market_trade">交易市场</option>
+                <option value="jail_warning">牢房 / 高风险</option>
+                <option value="field_patrol">野外巡逻</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>主播指令</span>
+              <textarea
+                id="instructionInput"
+                name="instruction"
+                rows="5"
+                placeholder="例如：帮我和这个 NPC 混熟，但别太老实。"
+              ></textarea>
+            </label>
+            <div class="actions">
+              <button type="submit" class="primary">生成一轮计划</button>
+            </div>
+          </form>
+
+          <div class="controls">
+            <button data-control="start">开始</button>
+            <button data-control="pause">暂停</button>
+            <button data-control="resume">继续</button>
+            <button data-control="stop" class="danger">急停</button>
+            <button data-control="reset">清空上下文</button>
+          </div>
+        </section>
+
+        <section class="panel panel-thoughts">
+          <div class="panel-head">
+            <h2>思考链</h2>
+            <p>直播展示用，分段揭示</p>
+          </div>
+          <ol id="thoughtList" class="thought-list"></ol>
+        </section>
+
+        <section class="panel panel-status">
+          <div class="panel-head">
+            <h2>行为状态</h2>
+            <p>结构化视图</p>
+          </div>
+          <dl class="status-grid">
+            <div>
+              <dt>当前目标</dt>
+              <dd id="intentValue">等待指令</dd>
+            </div>
+            <div>
+              <dt>环境判断</dt>
+              <dd id="environmentValue">等待输入</dd>
+            </div>
+            <div>
+              <dt>候选策略</dt>
+              <dd id="strategiesValue">-</dd>
+            </div>
+            <div>
+              <dt>已选策略</dt>
+              <dd id="selectedStrategyValue">-</dd>
+            </div>
+            <div>
+              <dt>风险等级</dt>
+              <dd id="riskValue">-</dd>
+            </div>
+            <div>
+              <dt>执行器</dt>
+              <dd id="executorValue">MockExecutor</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="panel panel-actions">
+          <div class="panel-head">
+            <h2>下一步动作</h2>
+            <p>模拟执行器输出</p>
+          </div>
+          <div id="actionsList" class="action-list"></div>
+          <p id="outcomeValue" class="outcome">等待计划生成</p>
+        </section>
+
+        <section class="panel panel-logs">
+          <div class="panel-head">
+            <h2>系统日志</h2>
+            <p>关键节点可追踪</p>
+          </div>
+          <div id="logList" class="log-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <template id="thoughtTemplate">
+      <li class="thought-item"></li>
+    </template>
+
+    <template id="actionTemplate">
+      <article class="action-item">
+        <div class="action-meta">
+          <span class="action-type"></span>
+          <span class="action-title"></span>
+        </div>
+        <p class="action-detail"></p>
+      </article>
+    </template>
+
+    <template id="logTemplate">
+      <article class="log-item">
+        <div class="log-top">
+          <span class="log-level"></span>
+          <time class="log-time"></time>
+        </div>
+        <p class="log-message"></p>
+      </article>
+    </template>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

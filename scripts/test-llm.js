@@ -1,3 +1,4 @@
+import "../src/config/load-env.js";
 import { generateText } from "../src/llm/deepseek.js";
 
 function parseArgs(argv) {

@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createTurnPlan } from "../llm/planner.js";
 import { analyzeScreenshot } from "../perception/analyzer.js";
+import { transcribeAudio } from "../llm/qwen.js";
 import { runMockExecution } from "../runtime/mock-executor.js";
 import {
   appendLog,
@@ -57,6 +58,14 @@ function requireDataUrl(imageDataUrl) {
   }
 
   return imageDataUrl;
+}
+
+function requireAudioDataUrl(audioDataUrl) {
+  if (typeof audioDataUrl !== "string" || !/^data:audio\/[a-z0-9.+-]+;base64,/i.test(audioDataUrl)) {
+    throw new Error("audioDataUrl must be a valid audio data URL");
+  }
+
+  return audioDataUrl;
 }
 
 function statePayload() {
@@ -254,6 +263,36 @@ async function handleAnalyzeImage(request, response) {
   }
 }
 
+async function handleVoiceTranscription(request, response) {
+  const body = await readRequestBody(request);
+  const audioDataUrl = requireAudioDataUrl(body.audioDataUrl);
+
+  appendLog("info", "收到语音转写请求");
+
+  try {
+    const result = await transcribeAudio({
+      audioInput: audioDataUrl
+    });
+
+    appendLog("info", "语音转写完成", {
+      textLength: result.text.length
+    });
+
+    return sendJson(response, 200, {
+      ok: true,
+      text: result.text
+    });
+  } catch (error) {
+    appendLog("error", "语音转写失败", {
+      error: error.message
+    });
+    return sendJson(response, 500, {
+      ok: false,
+      error: error.message
+    });
+  }
+}
+
 async function handleChat(request, response) {
   const body = await readRequestBody(request);
   const instruction = String(body.instruction || "").trim();
@@ -374,6 +413,10 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/analyze-image") {
       return handleAnalyzeImage(request, response);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/voice/transcribe") {
+      return handleVoiceTranscription(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/chat") {

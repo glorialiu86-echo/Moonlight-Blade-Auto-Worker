@@ -8,6 +8,11 @@ function requireEnv(name) {
   return value;
 }
 
+function optionalEnv(name, fallback) {
+  const value = process.env[name]?.trim();
+  return value || fallback;
+}
+
 export function getLlmConfig() {
   const provider = requireEnv("LLM_PROVIDER");
 
@@ -22,6 +27,7 @@ export function getLlmConfig() {
     reasoningModel: requireEnv("LLM_REASONING_MODEL"),
     visionModel: requireEnv("LLM_VISION_MODEL"),
     ocrModel: requireEnv("LLM_OCR_MODEL"),
+    speechModel: optionalEnv("LLM_SPEECH_MODEL", "qwen3.5-omni-plus"),
     apiKey: requireEnv("LLM_API_KEY")
   };
 }

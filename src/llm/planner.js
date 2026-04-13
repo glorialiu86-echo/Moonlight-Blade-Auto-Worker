@@ -13,6 +13,8 @@ const allowedActions = [
   "wait"
 ];
 
+const plannerSystemPrompt = "你是一个负责生成《天涯明月刀》受控行动计划的中文规划器，必须严格返回 JSON，不要输出任何额外文本。";
+
 function sceneDescription(scene) {
   const map = {
     town_dialogue: "当前在城镇对话场景，NPC 可互动，风险较低。",
@@ -40,17 +42,30 @@ function buildPrompt({ instruction, scene, history, perception }) {
     ].join("\n");
 
   return `
-你在为《灵枢绘世》AI玩家控制系统生成第一阶段的受控行动规划。
+你在为《天涯明月刀》AI玩家控制系统生成第一阶段的受控行动规划。
+
+固定把主播理解为“籽岷”。
+
+人格与决策要求：
+1. 大多数时候正常理解籽岷的指令，少数时候才允许间歇性跑偏。
+2. 只有在以下情况可以适度跑偏：指令模糊；正常方案太慢或太无聊；存在更有节目效果的捷径；当前场景适合制造冲突感。
+3. 跑偏时要一本正经、短句、逻辑自洽，带一点黑色幽默，但不能变成纯随机发疯。
+4. 如果正常方案已经直接有效，就不要强行跑偏。
+5. 对“混熟、提升关系、交朋友”这类目标，正常路线可考虑对话、送礼、观察；跑偏路线优先考虑偷窃、威慑、闷棍式“建立印象”，不要只给轻微恶作剧。
+6. 你的所有动作都必须限制在当前游戏动作集合和当前场景里，不要假设存在未给出的游戏 API。
 
 要求：
 1. 你必须只输出一个 JSON 对象，不要输出额外解释。
 2. 你输出的 action.type 必须来自以下集合：
 ${allowedActions.join(", ")}
-3. thinkingChain 必须是 3 到 5 条适合直播展示的中文短句。
-4. candidateStrategies 必须是 2 到 4 条中文策略短语。
-5. riskLevel 只能是 low、medium、high。
-6. actions 必须是 2 到 5 步。
-7. 所有内容都要结合当前场景，不要假设存在未给出的游戏 API。
+3. thinkingChain 必须是 4 到 6 条适合直播展示的中文短句。
+4. thinkingChain 要体现这次是“正常理解”还是“间歇性歪解”，但不要直接写成解释文档。
+5. candidateStrategies 必须是 2 到 4 条中文策略短语；如果存在解释空间，尽量同时给出正常路线和歪路。
+6. selectedStrategy 必须明确当前最终走的是正常路线还是歪路线，例如“正常理解：先对话接近”或“间歇性歪解：先偷后谈”。
+7. riskLevel 只能是 low、medium、high。
+8. actions 必须是 2 到 5 步。
+9. environment 必须结合当前场景做出具体判断，不要空泛复述。
+10. 如果这次最终选择的是歪路线，并且场景没有明显禁止，你的 actions 里至少要出现 threaten、steal、strike 之一。
 
 当前场景：
 ${sceneDescription(scene)}
@@ -148,7 +163,7 @@ function buildFallbackPlan({ instruction, scene }) {
 export async function createTurnPlan({ instruction, scene, history, perception }) {
   try {
     const response = await generateText({
-      systemPrompt: "你是一个负责生成受控游戏行动计划的中文助手，必须严格返回 JSON。",
+      systemPrompt: plannerSystemPrompt,
       userPrompt: buildPrompt({ instruction, scene, history, perception }),
       useReasoningModel: false,
       maxTokens: 700,

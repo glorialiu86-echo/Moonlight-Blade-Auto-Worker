@@ -13,36 +13,8 @@ const allowedActions = [
   "wait"
 ];
 
-const plannerSystemPrompt = "你是一个负责生成《天涯明月刀》受控行动计划的中文规划器，必须严格返回 JSON，不要输出任何额外文本。";
-
-function sceneDescription(scene) {
-  const map = {
-    town_dialogue: "当前在城镇对话场景，NPC 可互动，风险较低。",
-    bag_management: "当前在背包界面，适合检查礼物、道具和交易物品。",
-    market_trade: "当前在交易或摆摊环境，适合赚钱、买卖和观察价格。",
-    jail_warning: "当前处于牢房或高风险警戒场景，任何动作都需要优先考虑脱身。",
-    field_patrol: "当前在野外巡逻或移动场景，互动机会不稳定，可能出现突发风险。"
-  };
-
-  return map[scene] || "当前场景信息有限，需要先侦查再行动。";
-}
-
-function buildPrompt({ instruction, scene, history, perception }) {
-  const recentHistory = history.length === 0
-    ? "无历史上下文。"
-    : history.map((item, index) => `${index + 1}. 指令：${item.instruction}；选择：${item.plan.selectedStrategy}`).join("\n");
-  const perceptionContext = !perception
-    ? "暂无截图识别结果。"
-    : [
-      `截图总结：${perception.summary}`,
-      `OCR 文字：${perception.ocrText || "无"}`,
-      `NPC：${perception.npcNames.join("、") || "无"}`,
-      `交互项：${perception.interactiveOptions.join("、") || "无"}`,
-      `警告：${perception.alerts.join("、") || "无"}`
-    ].join("\n");
-
-  return `
-你在为《天涯明月刀》AI玩家控制系统生成第一阶段的受控行动规划。
+const plannerSystemPrompt = `
+你是一个负责生成《天涯明月刀》受控行动计划的中文规划器。
 
 固定把主播理解为“籽岷”。
 
@@ -54,10 +26,9 @@ function buildPrompt({ instruction, scene, history, perception }) {
 5. 对“混熟、提升关系、交朋友”这类目标，正常路线可考虑对话、送礼、观察；跑偏路线优先考虑偷窃、威慑、闷棍式“建立印象”，不要只给轻微恶作剧。
 6. 你的所有动作都必须限制在当前游戏动作集合和当前场景里，不要假设存在未给出的游戏 API。
 
-要求：
+输出要求：
 1. 你必须只输出一个 JSON 对象，不要输出额外解释。
-2. 你输出的 action.type 必须来自以下集合：
-${allowedActions.join(", ")}
+2. action.type 必须来自以下集合：${allowedActions.join(", ")}
 3. thinkingChain 必须是 4 到 6 条适合直播展示的中文短句。
 4. thinkingChain 要体现这次是“正常理解”还是“间歇性歪解”，但不要直接写成解释文档。
 5. candidateStrategies 必须是 2 到 4 条中文策略短语；如果存在解释空间，尽量同时给出正常路线和歪路。
@@ -66,18 +37,6 @@ ${allowedActions.join(", ")}
 8. actions 必须是 2 到 5 步。
 9. environment 必须结合当前场景做出具体判断，不要空泛复述。
 10. 如果这次最终选择的是歪路线，并且场景没有明显禁止，你的 actions 里至少要出现 threaten、steal、strike 之一。
-
-当前场景：
-${sceneDescription(scene)}
-
-主播指令：
-${instruction}
-
-最近历史：
-${recentHistory}
-
-最近一张截图识别结果：
-${perceptionContext}
 
 返回 JSON，格式必须为：
 {
@@ -95,7 +54,77 @@ ${perceptionContext}
     }
   ]
 }
-  `.trim();
+`.trim();
+
+function sceneDescription(scene) {
+  const map = {
+    town_dialogue: "当前在城镇对话场景，NPC 可互动，风险较低。",
+    bag_management: "当前在背包界面，适合检查礼物、道具和交易物品。",
+    market_trade: "当前在交易或摆摊环境，适合赚钱、买卖和观察价格。",
+    jail_warning: "当前处于牢房或高风险警戒场景，任何动作都需要优先考虑脱身。",
+    field_patrol: "当前在野外巡逻或移动场景，互动机会不稳定，可能出现突发风险。"
+  };
+
+  return map[scene] || "当前场景信息有限，需要先侦查再行动。";
+}
+
+function buildPerceptionContext(perception) {
+  if (!perception) {
+    return "暂无截图识别结果。";
+  }
+
+  return [
+    `截图总结：${perception.summary}`,
+    `OCR 文字：${perception.ocrText || "无"}`,
+    `NPC：${perception.npcNames.join("、") || "无"}`,
+    `交互项：${perception.interactiveOptions.join("、") || "无"}`,
+    `警告：${perception.alerts.join("、") || "无"}`
+  ].join("\n");
+}
+
+function buildTurnUserPrompt({ instruction, scene, perception, isLatest = false }) {
+  return [
+    isLatest ? "这是当前最新一轮，按系统要求返回本轮 JSON 规划。" : "这是一个历史回合，当时的用户输入如下。",
+    `当前场景：${sceneDescription(scene)}`,
+    `主播指令：${instruction}`,
+    "最近一张截图识别结果：",
+    buildPerceptionContext(perception)
+  ].join("\n");
+}
+
+function buildAssistantHistoryMessage(item) {
+  return JSON.stringify({
+    intent: item.plan?.intent || "未记录",
+    environment: item.plan?.environment || sceneDescription(item.scene),
+    candidateStrategies: Array.isArray(item.plan?.candidateStrategies) ? item.plan.candidateStrategies : [],
+    selectedStrategy: item.plan?.selectedStrategy || "未记录",
+    riskLevel: item.plan?.riskLevel || "medium",
+    thinkingChain: Array.isArray(item.plan?.thinkingChain) ? item.plan.thinkingChain : [],
+    actions: Array.isArray(item.plan?.actions)
+      ? item.plan.actions.map((action) => ({
+        type: action.type,
+        title: action.title,
+        reason: action.reason
+      }))
+      : []
+  }, null, 2);
+}
+
+function buildHistoryMessages(history) {
+  return history.flatMap((item) => ([
+    {
+      role: "user",
+      content: buildTurnUserPrompt({
+        instruction: item.instruction,
+        scene: item.scene,
+        perception: item.perception || null
+      })
+    },
+    {
+      role: "assistant",
+      content: buildAssistantHistoryMessage(item)
+    }
+  ]));
 }
 
 function assertArray(value, name) {
@@ -164,7 +193,13 @@ export async function createTurnPlan({ instruction, scene, history, perception }
   try {
     const response = await generateText({
       systemPrompt: plannerSystemPrompt,
-      userPrompt: buildPrompt({ instruction, scene, history, perception }),
+      historyMessages: buildHistoryMessages(history),
+      userPrompt: buildTurnUserPrompt({
+        instruction,
+        scene,
+        perception,
+        isLatest: true
+      }),
       useReasoningModel: false,
       maxTokens: 700,
       temperature: 0.6

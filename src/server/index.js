@@ -8,6 +8,7 @@ import { analyzeScreenshot } from "../perception/analyzer.js";
 import { runMockExecution } from "../runtime/mock-executor.js";
 import {
   appendLog,
+  appendMessage,
   getState,
   pushHistory,
   resetRuntime,
@@ -72,6 +73,18 @@ async function serveStatic(response, pathname) {
     "Content-Type": contentTypes[ext] || "application/octet-stream"
   });
   response.end(content);
+}
+
+function buildAssistantMessage({ plan, execution, perceptionSummary }) {
+  return {
+    role: "assistant",
+    text: `我会先按“${plan.selectedStrategy}”推进。${execution.outcome}`,
+    thinkingChain: plan.thinkingChain,
+    perceptionSummary,
+    sceneLabel: plan.environment,
+    riskLevel: plan.riskLevel,
+    actions: execution.steps
+  };
 }
 
 async function handleControl(request, response) {
@@ -241,6 +254,104 @@ async function handleAnalyzeImage(request, response) {
   }
 }
 
+async function handleChat(request, response) {
+  const body = await readRequestBody(request);
+  const instruction = String(body.instruction || "").trim();
+
+  if (!instruction) {
+    return sendJson(response, 400, { ok: false, error: "Instruction is required" });
+  }
+
+  setStatus("running");
+  setLastError(null);
+  appendMessage({
+    role: "user",
+    text: instruction
+  });
+  appendLog("info", `收到对话输入：${instruction}`);
+
+  try {
+    const state = getState();
+    const scene = state.scene;
+
+    setScene(scene);
+
+    const plan = await createTurnPlan({
+      instruction,
+      scene,
+      history: state.history,
+      perception: null
+    });
+    const execution = runMockExecution(plan);
+    const turn = {
+      id: `turn-${Date.now()}`,
+      instruction,
+      scene,
+      createdAt: new Date().toISOString(),
+      plan,
+      execution,
+      perception: null
+    };
+
+    setCurrentTurn(turn);
+    pushHistory({
+      instruction,
+      scene,
+      plan: {
+        selectedStrategy: plan.selectedStrategy,
+        riskLevel: plan.riskLevel
+      }
+    });
+
+    appendLog("info", "意图解析完成", {
+      intent: plan.intent,
+      strategy: plan.selectedStrategy
+    });
+    appendLog("info", "行为计划已生成", {
+      actionCount: plan.actions.length,
+      riskLevel: plan.riskLevel
+    });
+    appendLog("info", "模拟执行器返回结果", {
+      executor: execution.executor,
+      outcome: execution.outcome
+    });
+
+    if (plan.fallbackReason) {
+      appendLog("warn", "本轮使用了回退规划", {
+        reason: plan.fallbackReason
+      });
+    }
+
+    appendMessage(buildAssistantMessage({
+      plan,
+      execution,
+      perceptionSummary: "截图识别暂未接入当前对话主链，当前回复基于文本指令和既有上下文生成。"
+    }));
+
+    return sendJson(response, 200, {
+      ok: true,
+      state: getState()
+    });
+  } catch (error) {
+    setLastError(error.message);
+    appendLog("error", "本轮对话执行失败", { error: error.message });
+    appendMessage({
+      role: "assistant",
+      text: `这轮处理失败了：${error.message}`,
+      thinkingChain: [],
+      perceptionSummary: "截图识别暂未接入当前对话主链。",
+      sceneLabel: "执行失败",
+      riskLevel: "high",
+      actions: []
+    });
+    return sendJson(response, 500, {
+      ok: false,
+      error: error.message,
+      state: getState()
+    });
+  }
+}
+
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host}`);
 
@@ -265,6 +376,10 @@ const server = http.createServer(async (request, response) => {
       return handleAnalyzeImage(request, response);
     }
 
+    if (request.method === "POST" && url.pathname === "/api/chat") {
+      return handleChat(request, response);
+    }
+
     if (request.method === "GET") {
       return serveStatic(response, url.pathname);
     }
@@ -281,6 +396,6 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(port, () => {
-  appendLog("info", `第一阶段控制台已启动`, { port });
+  appendLog("info", "第一阶段对话框服务已启动", { port });
   console.log(`Moonlight Blade Auto Worker listening on http://localhost:${port}`);
 });

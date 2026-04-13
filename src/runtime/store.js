@@ -4,6 +4,7 @@ function createInitialState() {
     scene: "town_dialogue",
     currentTurn: null,
     latestPerception: null,
+    messages: [],
     logs: [],
     history: [],
     lastError: null
@@ -51,6 +52,16 @@ export function setLatestPerception(perception) {
   state.latestPerception = perception;
 }
 
+export function appendMessage(message) {
+  state.messages.push({
+    id: message.id || `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: message.createdAt || new Date().toISOString(),
+    ...message
+  });
+  state.messages = state.messages.slice(-40);
+  return state.messages[state.messages.length - 1];
+}
+
 export function pushHistory(item) {
   state.history.push(item);
   state.history = state.history.slice(-12);
@@ -66,6 +77,7 @@ export function resetRuntime() {
   state.scene = next.scene;
   state.currentTurn = next.currentTurn;
   state.latestPerception = next.latestPerception;
+  state.messages = [];
   state.logs = [];
   state.history = [];
   state.lastError = null;

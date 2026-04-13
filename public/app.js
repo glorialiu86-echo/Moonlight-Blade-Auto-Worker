@@ -1,43 +1,19 @@
 const state = {
-  revealedThoughts: [],
-  recognition: null,
   speechRecognition: null,
-  speechSupported: false
+  speechSupported: false,
+  submitting: false
 };
 
 const elements = {
-  commandForm: document.querySelector("#commandForm"),
-  perceptionForm: document.querySelector("#perceptionForm"),
+  composerForm: document.querySelector("#composerForm"),
   instructionInput: document.querySelector("#instructionInput"),
-  sceneSelect: document.querySelector("#sceneSelect"),
-  imageInput: document.querySelector("#imageInput"),
-  imagePreview: document.querySelector("#imagePreview"),
-  imageHint: document.querySelector("#imageHint"),
+  messageList: document.querySelector("#messageList"),
   voiceStartButton: document.querySelector("#voiceStartButton"),
   voiceStopButton: document.querySelector("#voiceStopButton"),
   voiceStatus: document.querySelector("#voiceStatus"),
-  adoptSceneButton: document.querySelector("#adoptSceneButton"),
-  statusBadge: document.querySelector("#statusBadge"),
-  sceneBadge: document.querySelector("#sceneBadge"),
-  thoughtList: document.querySelector("#thoughtList"),
-  intentValue: document.querySelector("#intentValue"),
-  environmentValue: document.querySelector("#environmentValue"),
-  strategiesValue: document.querySelector("#strategiesValue"),
-  selectedStrategyValue: document.querySelector("#selectedStrategyValue"),
-  riskValue: document.querySelector("#riskValue"),
-  executorValue: document.querySelector("#executorValue"),
-  actionsList: document.querySelector("#actionsList"),
-  outcomeValue: document.querySelector("#outcomeValue"),
-  recognizedSceneValue: document.querySelector("#recognizedSceneValue"),
-  recognizedSummaryValue: document.querySelector("#recognizedSummaryValue"),
-  recognizedNpcValue: document.querySelector("#recognizedNpcValue"),
-  recognizedOptionsValue: document.querySelector("#recognizedOptionsValue"),
-  recognizedAlertsValue: document.querySelector("#recognizedAlertsValue"),
-  recognizedOcrValue: document.querySelector("#recognizedOcrValue"),
-  logList: document.querySelector("#logList"),
-  thoughtTemplate: document.querySelector("#thoughtTemplate"),
-  actionTemplate: document.querySelector("#actionTemplate"),
-  logTemplate: document.querySelector("#logTemplate")
+  userMessageTemplate: document.querySelector("#userMessageTemplate"),
+  assistantMessageTemplate: document.querySelector("#assistantMessageTemplate"),
+  actionTemplate: document.querySelector("#actionTemplate")
 };
 
 async function request(path, options = {}) {
@@ -56,103 +32,106 @@ async function request(path, options = {}) {
   return payload;
 }
 
-function formatTime(isoString) {
-  return new Date(isoString).toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  });
-}
-
-function renderStatus(runtimeState) {
-  elements.statusBadge.textContent = runtimeState.status;
-  elements.statusBadge.className = `badge badge-${runtimeState.status}`;
-  elements.sceneBadge.textContent = runtimeState.scene;
-  elements.sceneBadge.className = "badge badge-scene";
-  elements.sceneSelect.value = runtimeState.scene;
-
-  const turn = runtimeState.currentTurn;
-  const perception = runtimeState.latestPerception;
-  state.recognition = perception;
-
-  renderPerception(perception);
-
-  if (!turn) {
-    elements.intentValue.textContent = "等待指令";
-    elements.environmentValue.textContent = "等待输入";
-    elements.strategiesValue.textContent = "-";
-    elements.selectedStrategyValue.textContent = "-";
-    elements.riskValue.textContent = runtimeState.lastError || "-";
-    elements.executorValue.textContent = "MockExecutor";
-    elements.actionsList.innerHTML = "";
-    elements.outcomeValue.textContent = "等待计划生成";
-    elements.thoughtList.innerHTML = "";
-    return;
-  }
-
-  const { plan, execution } = turn;
-  elements.intentValue.textContent = plan.intent;
-  elements.environmentValue.textContent = plan.environment;
-  elements.strategiesValue.textContent = plan.candidateStrategies.join(" / ");
-  elements.selectedStrategyValue.textContent = plan.selectedStrategy;
-  elements.riskValue.textContent = plan.riskLevel;
-  elements.executorValue.textContent = execution.executor;
-  elements.outcomeValue.textContent = execution.outcome;
-
-  renderThoughts(plan.thinkingChain);
-  renderActions(execution.steps);
-}
-
-function renderPerception(perception) {
-  if (!perception) {
-    elements.recognizedSceneValue.textContent = "未分析";
-    elements.recognizedSummaryValue.textContent = "等待上传截图";
-    elements.recognizedNpcValue.textContent = "-";
-    elements.recognizedOptionsValue.textContent = "-";
-    elements.recognizedAlertsValue.textContent = "-";
-    elements.recognizedOcrValue.textContent = "-";
-    elements.adoptSceneButton.disabled = true;
-    return;
-  }
-
-  elements.recognizedSceneValue.textContent = `${perception.sceneLabel} (${perception.sceneType})`;
-  elements.recognizedSummaryValue.textContent = perception.summary || "-";
-  elements.recognizedNpcValue.textContent = perception.npcNames.join(" / ") || "-";
-  elements.recognizedOptionsValue.textContent = perception.interactiveOptions.join(" / ") || "-";
-  elements.recognizedAlertsValue.textContent = perception.alerts.join(" / ") || "-";
-  elements.recognizedOcrValue.textContent = perception.ocrText || "-";
-  elements.adoptSceneButton.disabled = ![
-    "town_dialogue",
-    "bag_management",
-    "market_trade",
-    "jail_warning",
-    "field_patrol"
-  ].includes(perception.sceneType);
-}
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("读取截图失败"));
-    reader.readAsDataURL(file);
-  });
-}
-
 function updateVoiceStatus(message) {
   elements.voiceStatus.textContent = message;
 }
 
 function setVoiceButtons({ listening }) {
-  elements.voiceStartButton.disabled = listening || !state.speechSupported;
-  elements.voiceStopButton.disabled = !listening;
+  elements.voiceStartButton.disabled = listening || !state.speechSupported || state.submitting;
+  elements.voiceStopButton.disabled = !listening || state.submitting;
+}
+
+function setSubmitting(submitting) {
+  state.submitting = submitting;
+  elements.instructionInput.disabled = submitting;
+  elements.composerForm.querySelector('button[type="submit"]').disabled = submitting;
+  setVoiceButtons({ listening: submitting ? false : false });
+}
+
+function scrollMessagesToBottom() {
+  elements.messageList.scrollTop = elements.messageList.scrollHeight;
+}
+
+function renderEmptyState() {
+  elements.messageList.innerHTML = `
+    <article class="message message-assistant empty-state">
+      <div class="message-role">AI 助手</div>
+      <p class="message-text">可以直接开始对话。当前只验证文字 / 语音输入、AI 回复、思考链条和动作规划。</p>
+      <p class="message-meta">当前只保留对话框，不暴露手动截图、场景切换或控制按钮；截图识别会在后续 Windows 链路里再接入。</p>
+    </article>
+  `;
+}
+
+function renderAssistantMessage(message) {
+  const node = elements.assistantMessageTemplate.content.firstElementChild.cloneNode(true);
+  node.querySelector(".message-text").textContent = message.text || "本轮暂无回复。";
+  node.querySelector(".message-meta").textContent = `环境：${message.sceneLabel || "未判定"} | 风险：${message.riskLevel || "-"}`;
+  node.querySelector(".message-perception").textContent = message.perceptionSummary || "未挂上截图识别结果。";
+
+  const thinkingBlock = node.querySelector('[data-block="thinking"]');
+  const actionBlock = node.querySelector('[data-block="actions"]');
+  const thinkingList = node.querySelector(".thinking-list");
+  const actionList = node.querySelector(".action-list");
+
+  if (Array.isArray(message.thinkingChain) && message.thinkingChain.length > 0) {
+    message.thinkingChain.forEach((item) => {
+      const li = document.createElement("li");
+      li.textContent = item;
+      thinkingList.appendChild(li);
+    });
+  } else {
+    thinkingBlock.hidden = true;
+  }
+
+  if (Array.isArray(message.actions) && message.actions.length > 0) {
+    message.actions.forEach((action) => {
+      const actionNode = elements.actionTemplate.content.firstElementChild.cloneNode(true);
+      actionNode.querySelector(".action-title").textContent = action.title || "未命名动作";
+      actionNode.querySelector(".action-detail").textContent = action.detail || "";
+      actionList.appendChild(actionNode);
+    });
+  } else {
+    actionBlock.hidden = true;
+  }
+
+  return node;
+}
+
+function renderUserMessage(message) {
+  const node = elements.userMessageTemplate.content.firstElementChild.cloneNode(true);
+  node.querySelector(".message-text").textContent = message.text || "";
+  return node;
+}
+
+function renderMessages(messages) {
+  elements.messageList.innerHTML = "";
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    renderEmptyState();
+    scrollMessagesToBottom();
+    return;
+  }
+
+  messages.forEach((message) => {
+    const node = message.role === "assistant"
+      ? renderAssistantMessage(message)
+      : renderUserMessage(message);
+    elements.messageList.appendChild(node);
+  });
+
+  scrollMessagesToBottom();
+}
+
+async function refresh() {
+  const payload = await request("/api/state");
+  renderMessages(payload.state.messages);
 }
 
 function initSpeechRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   if (!SpeechRecognition) {
-    updateVoiceStatus("当前浏览器不支持语音输入 demo。建议在支持 Web Speech API 的浏览器中测试。");
+    updateVoiceStatus("当前浏览器不支持语音输入 demo。建议用支持 Web Speech API 的浏览器测试。");
     setVoiceButtons({ listening: false });
     return;
   }
@@ -163,12 +142,13 @@ function initSpeechRecognition() {
   recognition.continuous = true;
   state.speechRecognition = recognition;
   state.speechSupported = true;
-  updateVoiceStatus("语音输入可用。点击“开始语音输入”后，可把识别文字写入指令框。");
+  updateVoiceStatus("语音输入可用。点击“开始语音”后，识别文本会直接写入对话输入框。");
   setVoiceButtons({ listening: false });
 
   recognition.onstart = () => {
     updateVoiceStatus("语音输入进行中。浏览器正在监听麦克风。");
-    setVoiceButtons({ listening: true });
+    elements.voiceStartButton.disabled = true;
+    elements.voiceStopButton.disabled = false;
   };
 
   recognition.onend = () => {
@@ -197,146 +177,46 @@ function initSpeechRecognition() {
 
     if (finalText) {
       const current = elements.instructionInput.value.trim();
-      elements.instructionInput.value = current ? `${current}${current.endsWith("。") ? "" : "，"}${finalText}` : finalText;
+      elements.instructionInput.value = current
+        ? `${current}${current.endsWith("。") ? "" : "，"}${finalText}`
+        : finalText;
     }
 
     updateVoiceStatus(interimText ? `语音识别中：${interimText}` : "语音输入进行中。浏览器正在监听麦克风。");
   };
 }
 
-function renderThoughts(thoughts) {
-  elements.thoughtList.innerHTML = "";
-  state.revealedThoughts = [];
-
-  thoughts.forEach((thought, index) => {
-    window.setTimeout(() => {
-      const node = elements.thoughtTemplate.content.firstElementChild.cloneNode(true);
-      node.textContent = thought;
-      node.style.animationDelay = `${index * 120}ms`;
-      elements.thoughtList.appendChild(node);
-    }, index * 180);
-  });
-}
-
-function renderActions(actions) {
-  elements.actionsList.innerHTML = "";
-
-  actions.forEach((action) => {
-    const node = elements.actionTemplate.content.firstElementChild.cloneNode(true);
-    node.querySelector(".action-type").textContent = action.status;
-    node.querySelector(".action-title").textContent = action.title;
-    node.querySelector(".action-detail").textContent = action.detail;
-    elements.actionsList.appendChild(node);
-  });
-}
-
-function renderLogs(logs) {
-  elements.logList.innerHTML = "";
-
-  logs.forEach((log) => {
-    const node = elements.logTemplate.content.firstElementChild.cloneNode(true);
-    const levelNode = node.querySelector(".log-level");
-    levelNode.textContent = log.level;
-    levelNode.dataset.level = log.level;
-    node.querySelector(".log-time").textContent = formatTime(log.timestamp);
-    node.querySelector(".log-message").textContent = log.message;
-    elements.logList.appendChild(node);
-  });
-}
-
-async function refresh() {
-  const payload = await request("/api/state");
-  renderStatus(payload.state);
-  renderLogs(payload.state.logs);
-}
-
-elements.commandForm.addEventListener("submit", async (event) => {
+elements.composerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const instruction = elements.instructionInput.value.trim();
-  const scene = elements.sceneSelect.value;
 
-  if (!instruction) {
+  if (!instruction || state.submitting) {
     return;
   }
+
+  setSubmitting(true);
+  updateVoiceStatus("正在处理本轮对话。");
 
   try {
-    const payload = await request("/api/turn", {
+    const payload = await request("/api/chat", {
       method: "POST",
-      body: JSON.stringify({ instruction, scene })
+      body: JSON.stringify({ instruction })
     });
 
-    renderStatus(payload.state);
-    renderLogs(payload.state.logs);
+    elements.instructionInput.value = "";
+    renderMessages(payload.state.messages);
+    updateVoiceStatus("本轮处理完成，可以继续输入文字或语音。");
   } catch (error) {
-    window.alert(error.message);
-    await refresh();
+    updateVoiceStatus(`本轮处理失败：${error.message}`);
+    await refresh().catch(() => {});
+  } finally {
+    setSubmitting(false);
   }
-});
-
-elements.imageInput.addEventListener("change", async () => {
-  const file = elements.imageInput.files?.[0];
-
-  if (!file) {
-    elements.imagePreview.hidden = true;
-    elements.imageHint.textContent = "尚未选择截图。建议上传当前游戏窗口截图。";
-    return;
-  }
-
-  const dataUrl = await readFileAsDataUrl(file);
-  elements.imagePreview.src = dataUrl;
-  elements.imagePreview.hidden = false;
-  elements.imageHint.textContent = `已选择：${file.name}`;
-});
-
-elements.perceptionForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-
-  const file = elements.imageInput.files?.[0];
-
-  if (!file) {
-    window.alert("请先选择一张截图。");
-    return;
-  }
-
-  try {
-    const imageDataUrl = await readFileAsDataUrl(file);
-    const payload = await request("/api/analyze-image", {
-      method: "POST",
-      body: JSON.stringify({
-        imageName: file.name,
-        imageDataUrl
-      })
-    });
-
-    renderStatus(payload.state);
-    renderLogs(payload.state.logs);
-  } catch (error) {
-    window.alert(error.message);
-    await refresh();
-  }
-});
-
-elements.adoptSceneButton.addEventListener("click", () => {
-  const sceneType = state.recognition?.sceneType;
-
-  if (!sceneType) {
-    return;
-  }
-
-  const option = Array.from(elements.sceneSelect.options).find((item) => item.value === sceneType);
-
-  if (!option) {
-    window.alert("当前识别场景不在可用场景列表内。");
-    return;
-  }
-
-  elements.sceneSelect.value = sceneType;
-  updateVoiceStatus(`已采用识别场景：${option.textContent}`);
 });
 
 elements.voiceStartButton.addEventListener("click", () => {
-  if (!state.speechRecognition) {
+  if (!state.speechRecognition || state.submitting) {
     return;
   }
 
@@ -344,35 +224,15 @@ elements.voiceStartButton.addEventListener("click", () => {
 });
 
 elements.voiceStopButton.addEventListener("click", () => {
-  if (!state.speechRecognition) {
+  if (!state.speechRecognition || state.submitting) {
     return;
   }
 
   state.speechRecognition.stop();
 });
 
-document.querySelectorAll("[data-control]").forEach((button) => {
-  button.addEventListener("click", async () => {
-    try {
-      const payload = await request("/api/control", {
-        method: "POST",
-        body: JSON.stringify({
-          action: button.dataset.control,
-          scene: elements.sceneSelect.value
-        })
-      });
-
-      renderStatus(payload.state);
-      renderLogs(payload.state.logs);
-    } catch (error) {
-      window.alert(error.message);
-      await refresh();
-    }
-  });
-});
-
 initSpeechRecognition();
 
 refresh().catch((error) => {
-  window.alert(error.message);
+  updateVoiceStatus(`初始化失败：${error.message}`);
 });

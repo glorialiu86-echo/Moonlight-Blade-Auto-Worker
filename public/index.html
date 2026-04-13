@@ -46,6 +46,11 @@
                 placeholder="例如：帮我和这个 NPC 混熟，但别太老实。"
               ></textarea>
             </label>
+            <div class="voice-tools">
+              <button id="voiceStartButton" type="button">开始语音输入</button>
+              <button id="voiceStopButton" type="button" disabled>停止语音输入</button>
+            </div>
+            <p id="voiceStatus" class="helper-text">语音输入未启动。当前为浏览器 demo，仅依赖本机麦克风权限。</p>
             <div class="actions">
               <button type="submit" class="primary">生成一轮计划</button>
             </div>
@@ -72,6 +77,7 @@
             </label>
             <div class="actions">
               <button type="submit" class="primary">分析当前截图</button>
+              <button id="adoptSceneButton" type="button">采用识别场景</button>
             </div>
           </form>
           <div class="image-preview-wrap">

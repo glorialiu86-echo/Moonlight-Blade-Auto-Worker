@@ -189,6 +189,8 @@ input[type="file"]:focus {
 
 .actions {
   display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 button {
@@ -221,6 +223,20 @@ button.danger {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 18px;
+}
+
+.voice-tools {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.helper-text {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .image-preview-wrap {

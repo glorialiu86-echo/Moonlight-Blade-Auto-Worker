@@ -1,5 +1,8 @@
 const state = {
-  revealedThoughts: []
+  revealedThoughts: [],
+  recognition: null,
+  speechRecognition: null,
+  speechSupported: false
 };
 
 const elements = {
@@ -10,6 +13,10 @@ const elements = {
   imageInput: document.querySelector("#imageInput"),
   imagePreview: document.querySelector("#imagePreview"),
   imageHint: document.querySelector("#imageHint"),
+  voiceStartButton: document.querySelector("#voiceStartButton"),
+  voiceStopButton: document.querySelector("#voiceStopButton"),
+  voiceStatus: document.querySelector("#voiceStatus"),
+  adoptSceneButton: document.querySelector("#adoptSceneButton"),
   statusBadge: document.querySelector("#statusBadge"),
   sceneBadge: document.querySelector("#sceneBadge"),
   thoughtList: document.querySelector("#thoughtList"),
@@ -66,6 +73,7 @@ function renderStatus(runtimeState) {
 
   const turn = runtimeState.currentTurn;
   const perception = runtimeState.latestPerception;
+  state.recognition = perception;
 
   renderPerception(perception);
 
@@ -103,6 +111,7 @@ function renderPerception(perception) {
     elements.recognizedOptionsValue.textContent = "-";
     elements.recognizedAlertsValue.textContent = "-";
     elements.recognizedOcrValue.textContent = "-";
+    elements.adoptSceneButton.disabled = true;
     return;
   }
 
@@ -112,6 +121,13 @@ function renderPerception(perception) {
   elements.recognizedOptionsValue.textContent = perception.interactiveOptions.join(" / ") || "-";
   elements.recognizedAlertsValue.textContent = perception.alerts.join(" / ") || "-";
   elements.recognizedOcrValue.textContent = perception.ocrText || "-";
+  elements.adoptSceneButton.disabled = ![
+    "town_dialogue",
+    "bag_management",
+    "market_trade",
+    "jail_warning",
+    "field_patrol"
+  ].includes(perception.sceneType);
 }
 
 function readFileAsDataUrl(file) {
@@ -121,6 +137,71 @@ function readFileAsDataUrl(file) {
     reader.onerror = () => reject(new Error("读取截图失败"));
     reader.readAsDataURL(file);
   });
+}
+
+function updateVoiceStatus(message) {
+  elements.voiceStatus.textContent = message;
+}
+
+function setVoiceButtons({ listening }) {
+  elements.voiceStartButton.disabled = listening || !state.speechSupported;
+  elements.voiceStopButton.disabled = !listening;
+}
+
+function initSpeechRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    updateVoiceStatus("当前浏览器不支持语音输入 demo。建议在支持 Web Speech API 的浏览器中测试。");
+    setVoiceButtons({ listening: false });
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = "zh-CN";
+  recognition.interimResults = true;
+  recognition.continuous = true;
+  state.speechRecognition = recognition;
+  state.speechSupported = true;
+  updateVoiceStatus("语音输入可用。点击“开始语音输入”后，可把识别文字写入指令框。");
+  setVoiceButtons({ listening: false });
+
+  recognition.onstart = () => {
+    updateVoiceStatus("语音输入进行中。浏览器正在监听麦克风。");
+    setVoiceButtons({ listening: true });
+  };
+
+  recognition.onend = () => {
+    updateVoiceStatus("语音输入已停止。");
+    setVoiceButtons({ listening: false });
+  };
+
+  recognition.onerror = (event) => {
+    updateVoiceStatus(`语音输入失败：${event.error}`);
+    setVoiceButtons({ listening: false });
+  };
+
+  recognition.onresult = (event) => {
+    let finalText = "";
+    let interimText = "";
+
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const transcript = event.results[index][0]?.transcript || "";
+
+      if (event.results[index].isFinal) {
+        finalText += transcript;
+      } else {
+        interimText += transcript;
+      }
+    }
+
+    if (finalText) {
+      const current = elements.instructionInput.value.trim();
+      elements.instructionInput.value = current ? `${current}${current.endsWith("。") ? "" : "，"}${finalText}` : finalText;
+    }
+
+    updateVoiceStatus(interimText ? `语音识别中：${interimText}` : "语音输入进行中。浏览器正在监听麦克风。");
+  };
 }
 
 function renderThoughts(thoughts) {
@@ -236,6 +317,40 @@ elements.perceptionForm.addEventListener("submit", async (event) => {
   }
 });
 
+elements.adoptSceneButton.addEventListener("click", () => {
+  const sceneType = state.recognition?.sceneType;
+
+  if (!sceneType) {
+    return;
+  }
+
+  const option = Array.from(elements.sceneSelect.options).find((item) => item.value === sceneType);
+
+  if (!option) {
+    window.alert("当前识别场景不在可用场景列表内。");
+    return;
+  }
+
+  elements.sceneSelect.value = sceneType;
+  updateVoiceStatus(`已采用识别场景：${option.textContent}`);
+});
+
+elements.voiceStartButton.addEventListener("click", () => {
+  if (!state.speechRecognition) {
+    return;
+  }
+
+  state.speechRecognition.start();
+});
+
+elements.voiceStopButton.addEventListener("click", () => {
+  if (!state.speechRecognition) {
+    return;
+  }
+
+  state.speechRecognition.stop();
+});
+
 document.querySelectorAll("[data-control]").forEach((button) => {
   button.addEventListener("click", async () => {
     try {
@@ -255,6 +370,8 @@ document.querySelectorAll("[data-control]").forEach((button) => {
     }
   });
 });
+
+initSpeechRecognition();
 
 refresh().catch((error) => {
   window.alert(error.message);

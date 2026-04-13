@@ -277,7 +277,7 @@ async function stopVoiceRecording() {
   state.voice.recording = false;
   state.voice.transcribing = true;
   syncUiState();
-  updateVoiceStatus("录音结束，正在上传到服务端做语音转写。");
+  updateVoiceStatus("录音结束，正在上传到本地 Faster-Whisper 做转写。");
 
   try {
     const pcmChunks = [...state.voice.pcmChunks];
@@ -348,7 +348,7 @@ async function startVoiceRecording() {
     sourceNode.connect(processorNode);
     processorNode.connect(audioContext.destination);
 
-    updateVoiceStatus("录音中。再次点击“停止语音”后，会把录音上传到服务端转写。");
+    updateVoiceStatus("录音中。再次点击“停止语音”后，会把录音交给本地 Faster-Whisper 转写。");
     syncUiState();
   } catch (error) {
     await releaseVoiceCapture();
@@ -370,7 +370,7 @@ function initVoiceInput() {
   }
 
   state.voiceSupported = true;
-  updateVoiceStatus("语音输入已正式接入。点击“开始语音”录音，停止后会调用服务端转写。");
+  updateVoiceStatus("语音输入已正式接入。点击“开始语音”录音，停止后会调用本地 Faster-Whisper 转写。");
   syncUiState();
 }
 

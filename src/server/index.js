@@ -1,11 +1,12 @@
 import "../config/load-env.js";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { transcribeWithLocalWhisper } from "../asr/local-whisper-client.js";
 import { createTurnPlan } from "../llm/planner.js";
 import { analyzeScreenshot } from "../perception/analyzer.js";
-import { transcribeAudio } from "../llm/qwen.js";
 import { runMockExecution } from "../runtime/mock-executor.js";
 import {
   appendLog,
@@ -65,6 +66,39 @@ function requireAudioDataUrl(audioDataUrl) {
   }
 
   return audioDataUrl;
+}
+
+function parseAudioDataUrl(audioDataUrl) {
+  const normalized = requireAudioDataUrl(audioDataUrl);
+  const match = normalized.match(/^data:audio\/([a-z0-9.+-]+);base64,(.+)$/i);
+
+  if (!match) {
+    throw new Error("audioDataUrl must include audio mime type and base64 payload");
+  }
+
+  const mimeSubtype = match[1].toLowerCase();
+  const extensionMap = {
+    "mpeg": "mp3",
+    "mpga": "mp3",
+    "wav": "wav",
+    "x-wav": "wav",
+    "webm": "webm",
+    "ogg": "ogg",
+    "mp4": "m4a",
+    "aac": "aac"
+  };
+
+  return {
+    extension: extensionMap[mimeSubtype] || "wav",
+    buffer: Buffer.from(match[2], "base64")
+  };
+}
+
+async function writeTempAudioFile(audioDataUrl) {
+  const { extension, buffer } = parseAudioDataUrl(audioDataUrl);
+  const filePath = path.join(os.tmpdir(), `moonlight-blade-voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`);
+  await writeFile(filePath, buffer);
+  return filePath;
 }
 
 function statePayload() {
@@ -311,21 +345,23 @@ async function handleAnalyzeImage(request, response) {
 async function handleVoiceTranscription(request, response) {
   const body = await readRequestBody(request);
   const audioDataUrl = requireAudioDataUrl(body.audioDataUrl);
+  let audioPath = null;
 
   appendLog("info", "收到语音转写请求");
 
   try {
-    const result = await transcribeAudio({
-      audioInput: audioDataUrl
+    audioPath = await writeTempAudioFile(audioDataUrl);
+    const text = await transcribeWithLocalWhisper({
+      audioPath
     });
 
     appendLog("info", "语音转写完成", {
-      textLength: result.text.length
+      textLength: text.length
     });
 
     return sendJson(response, 200, {
       ok: true,
-      text: result.text
+      text
     });
   } catch (error) {
     appendLog("error", "语音转写失败", {
@@ -335,6 +371,10 @@ async function handleVoiceTranscription(request, response) {
       ok: false,
       error: error.message
     });
+  } finally {
+    if (audioPath) {
+      await rm(audioPath, { force: true }).catch(() => {});
+    }
   }
 }
 

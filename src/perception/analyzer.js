@@ -54,7 +54,7 @@ function sanitizePerception(raw, ocrText, visionText) {
 
 function buildVisionPrompt() {
   return `
-你在分析一张游戏截图，用于《灵枢绘世》AI玩家控制系统的第二阶段视觉感知。
+你在分析一张游戏截图，用于《天涯明月刀》AI玩家控制系统的第二阶段视觉感知。
 
 请严格只输出一个 JSON 对象，不要输出额外解释。
 

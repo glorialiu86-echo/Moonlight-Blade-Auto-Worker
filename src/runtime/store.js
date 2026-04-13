@@ -6,7 +6,6 @@ function createInitialState() {
     latestPerception: null,
     messages: [],
     logs: [],
-    history: [],
     lastError: null
   };
 }
@@ -62,11 +61,6 @@ export function appendMessage(message) {
   return state.messages[state.messages.length - 1];
 }
 
-export function pushHistory(item) {
-  state.history.push(item);
-  state.history = state.history.slice(-12);
-}
-
 export function setLastError(errorMessage) {
   state.lastError = errorMessage;
 }
@@ -79,6 +73,5 @@ export function resetRuntime() {
   state.latestPerception = next.latestPerception;
   state.messages = [];
   state.logs = [];
-  state.history = [];
   state.lastError = null;
 }

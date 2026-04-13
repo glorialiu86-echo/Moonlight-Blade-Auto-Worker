@@ -11,7 +11,6 @@ import {
   appendLog,
   appendMessage,
   getState,
-  pushHistory,
   resetRuntime,
   setCurrentTurn,
   setLastError,
@@ -96,6 +95,38 @@ function buildAssistantMessage({ plan, execution, perceptionSummary }) {
   };
 }
 
+function buildUserMessage({ instruction, scene, perception }) {
+  return {
+    role: "user",
+    text: instruction,
+    scene,
+    perception
+  };
+}
+
+function buildPlannerContext(plan) {
+  return {
+    intent: plan.intent,
+    environment: plan.environment,
+    candidateStrategies: plan.candidateStrategies,
+    selectedStrategy: plan.selectedStrategy,
+    riskLevel: plan.riskLevel,
+    thinkingChain: plan.thinkingChain,
+    actions: plan.actions
+  };
+}
+
+function appendAssistantPlanMessage({ plan, execution, perceptionSummary }) {
+  return appendMessage({
+    ...buildAssistantMessage({
+      plan,
+      execution,
+      perceptionSummary
+    }),
+    plannerContext: buildPlannerContext(plan)
+  });
+}
+
 async function handleControl(request, response) {
   const { action, scene } = await readRequestBody(request);
 
@@ -153,6 +184,11 @@ async function handleTurn(request, response) {
 
   setScene(scene);
   setLastError(null);
+  appendMessage(buildUserMessage({
+    instruction,
+    scene,
+    perception: state.latestPerception
+  }));
   appendLog("info", `收到新指令：${instruction}`, { instruction, scene });
 
   try {
@@ -160,7 +196,7 @@ async function handleTurn(request, response) {
     const plan = await createTurnPlan({
       instruction,
       scene,
-      history: nextState.history,
+      conversationMessages: nextState.messages.slice(0, -1),
       perception: nextState.latestPerception
     });
     const execution = runMockExecution(plan);
@@ -174,14 +210,6 @@ async function handleTurn(request, response) {
     };
 
     setCurrentTurn(turn);
-    pushHistory({
-      instruction,
-      scene,
-      plan: {
-        selectedStrategy: plan.selectedStrategy,
-        riskLevel: plan.riskLevel
-      }
-    });
 
     appendLog("info", "意图解析完成", {
       intent: plan.intent,
@@ -202,6 +230,14 @@ async function handleTurn(request, response) {
       });
     }
 
+    appendAssistantPlanMessage({
+      plan,
+      execution,
+      perceptionSummary: nextState.latestPerception
+        ? "本轮结合最新截图识别结果生成。"
+        : "截图识别暂未接入当前对话主链，当前回复基于文本指令和既有上下文生成。"
+    });
+
     return sendJson(response, 200, {
       ok: true,
       state: getState()
@@ -209,6 +245,15 @@ async function handleTurn(request, response) {
   } catch (error) {
     setLastError(error.message);
     appendLog("error", "本轮执行失败", { error: error.message });
+    appendMessage({
+      role: "assistant",
+      text: `这轮处理失败了：${error.message}`,
+      thinkingChain: [],
+      perceptionSummary: "截图识别暂未接入当前对话主链。",
+      sceneLabel: "执行失败",
+      riskLevel: "high",
+      actions: []
+    });
     return sendJson(response, 500, {
       ok: false,
       error: error.message,
@@ -303,10 +348,11 @@ async function handleChat(request, response) {
 
   setStatus("running");
   setLastError(null);
-  appendMessage({
-    role: "user",
-    text: instruction
-  });
+  appendMessage(buildUserMessage({
+    instruction,
+    scene: getState().scene,
+    perception: null
+  }));
   appendLog("info", `收到对话输入：${instruction}`);
 
   try {
@@ -318,7 +364,7 @@ async function handleChat(request, response) {
     const plan = await createTurnPlan({
       instruction,
       scene,
-      history: state.history,
+      conversationMessages: state.messages.slice(0, -1),
       perception: null
     });
     const execution = runMockExecution(plan);
@@ -333,14 +379,6 @@ async function handleChat(request, response) {
     };
 
     setCurrentTurn(turn);
-    pushHistory({
-      instruction,
-      scene,
-      plan: {
-        selectedStrategy: plan.selectedStrategy,
-        riskLevel: plan.riskLevel
-      }
-    });
 
     appendLog("info", "意图解析完成", {
       intent: plan.intent,
@@ -361,11 +399,11 @@ async function handleChat(request, response) {
       });
     }
 
-    appendMessage(buildAssistantMessage({
+    appendAssistantPlanMessage({
       plan,
       execution,
       perceptionSummary: "截图识别暂未接入当前对话主链，当前回复基于文本指令和既有上下文生成。"
-    }));
+    });
 
     return sendJson(response, 200, {
       ok: true,

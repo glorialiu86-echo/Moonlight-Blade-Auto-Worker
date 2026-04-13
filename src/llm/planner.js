@@ -92,16 +92,20 @@ function buildTurnUserPrompt({ instruction, scene, perception, isLatest = false 
   ].join("\n");
 }
 
-function buildAssistantHistoryMessage(item) {
+function buildAssistantHistoryMessage(message) {
+  if (!message?.plannerContext) {
+    return String(message?.text || "无历史 assistant 内容。").trim();
+  }
+
   return JSON.stringify({
-    intent: item.plan?.intent || "未记录",
-    environment: item.plan?.environment || sceneDescription(item.scene),
-    candidateStrategies: Array.isArray(item.plan?.candidateStrategies) ? item.plan.candidateStrategies : [],
-    selectedStrategy: item.plan?.selectedStrategy || "未记录",
-    riskLevel: item.plan?.riskLevel || "medium",
-    thinkingChain: Array.isArray(item.plan?.thinkingChain) ? item.plan.thinkingChain : [],
-    actions: Array.isArray(item.plan?.actions)
-      ? item.plan.actions.map((action) => ({
+    intent: message.plannerContext.intent || "未记录",
+    environment: message.plannerContext.environment || "环境信息不足",
+    candidateStrategies: Array.isArray(message.plannerContext.candidateStrategies) ? message.plannerContext.candidateStrategies : [],
+    selectedStrategy: message.plannerContext.selectedStrategy || "未记录",
+    riskLevel: message.plannerContext.riskLevel || "medium",
+    thinkingChain: Array.isArray(message.plannerContext.thinkingChain) ? message.plannerContext.thinkingChain : [],
+    actions: Array.isArray(message.plannerContext.actions)
+      ? message.plannerContext.actions.map((action) => ({
         type: action.type,
         title: action.title,
         reason: action.reason
@@ -110,21 +114,19 @@ function buildAssistantHistoryMessage(item) {
   }, null, 2);
 }
 
-function buildHistoryMessages(history) {
-  return history.flatMap((item) => ([
-    {
-      role: "user",
-      content: buildTurnUserPrompt({
-        instruction: item.instruction,
-        scene: item.scene,
-        perception: item.perception || null
-      })
-    },
-    {
-      role: "assistant",
-      content: buildAssistantHistoryMessage(item)
-    }
-  ]));
+function buildHistoryMessages(conversationMessages) {
+  return conversationMessages
+    .filter((message) => message?.role === "user" || message?.role === "assistant")
+    .map((message) => ({
+      role: message.role,
+      content: message.role === "user"
+        ? buildTurnUserPrompt({
+          instruction: message.text,
+          scene: message.scene,
+          perception: message.perception || null
+        })
+        : buildAssistantHistoryMessage(message)
+    }));
 }
 
 function assertArray(value, name) {
@@ -189,11 +191,11 @@ function buildFallbackPlan({ instruction, scene }) {
   };
 }
 
-export async function createTurnPlan({ instruction, scene, history, perception }) {
+export async function createTurnPlan({ instruction, scene, conversationMessages = [], perception }) {
   try {
     const response = await generateText({
       systemPrompt: plannerSystemPrompt,
-      historyMessages: buildHistoryMessages(history),
+      historyMessages: buildHistoryMessages(conversationMessages),
       userPrompt: buildTurnUserPrompt({
         instruction,
         scene,

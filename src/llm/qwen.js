@@ -242,6 +242,7 @@ export async function createChatCompletion({ messages, model, maxTokens, tempera
 
 export async function generateText({
   systemPrompt,
+  historyMessages = [],
   userPrompt,
   useReasoningModel = false,
   maxTokens,
@@ -252,6 +253,10 @@ export async function generateText({
 
   if (systemPrompt) {
     messages.push({ role: "system", content: systemPrompt });
+  }
+
+  if (historyMessages.length > 0) {
+    messages.push(...historyMessages);
   }
 
   messages.push({ role: "user", content: userPrompt });

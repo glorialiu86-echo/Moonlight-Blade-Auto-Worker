@@ -58,6 +58,15 @@ def crop_roi(image: np.ndarray, roi: tuple[float, float, float, float]) -> np.nd
     return image[top:bottom, left:right].copy()
 
 
+def crop_rect(image: np.ndarray, left: int, top: int, right: int, bottom: int) -> np.ndarray:
+    height, width = image.shape[:2]
+    bounded_left = max(0, min(width, int(left)))
+    bounded_top = max(0, min(height, int(top)))
+    bounded_right = max(bounded_left + 1, min(width, int(right)))
+    bounded_bottom = max(bounded_top + 1, min(height, int(bottom)))
+    return image[bounded_top:bounded_bottom, bounded_left:bounded_right].copy()
+
+
 def roi_to_screen_point(hwnd: int, roi: tuple[float, float, float, float], local_x: int, local_y: int) -> tuple[int, int]:
     bounds = input_worker.get_window_bounds(hwnd)
     roi_left = bounds["left"] + int(bounds["width"] * roi[0])
@@ -115,7 +124,47 @@ def detect_cross_symbol(cross_image: np.ndarray) -> bool:
     return positive >= 1 and negative >= 1
 
 
-def detect_selected_state(full_image: np.ndarray) -> dict:
+def detect_world_hp_bar(full_image: np.ndarray, fixed_target: dict | None) -> bool:
+    if fixed_target is None:
+        return False
+
+    target = fixed_target["target"]
+    bbox_x = int(target["bboxX"])
+    bbox_y = int(target["bboxY"])
+    bbox_width = int(target["bboxWidth"])
+    bbox_height = int(target["bboxHeight"])
+    roi = crop_rect(
+        full_image,
+        bbox_x - round(bbox_width * 1.4),
+        bbox_y - round(bbox_height * 2.2),
+        bbox_x + round(bbox_width * 2.4),
+        bbox_y + round(bbox_height * 0.8),
+    )
+
+    blue_mask = (
+        (roi[:, :, 0] >= 150)
+        & (roi[:, :, 1] >= 145)
+        & (roi[:, :, 2] <= 150)
+    ).astype(np.uint8) * 255
+    blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_OPEN, np.ones((3, 3), dtype=np.uint8))
+    contours, _hierarchy = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    min_width = max(24, round(bbox_width * 0.45))
+    max_height = max(12, round(bbox_height * 0.5))
+
+    for contour in contours:
+        x, y, width, height = cv2.boundingRect(contour)
+        if width < min_width:
+            continue
+        if height < 3 or height > max_height:
+            continue
+        if (width / max(height, 1)) < 3.0:
+            continue
+        return True
+
+    return False
+
+
+def detect_selected_state(full_image: np.ndarray, fixed_target: dict | None = None) -> dict:
     panel_image = crop_roi(full_image, SELECTED_PANEL_ROI)
     name_image = crop_roi(full_image, SELECTED_NAME_ROI)
     cross_image = crop_roi(full_image, CROSS_TEMPLATE_ROI)
@@ -123,12 +172,14 @@ def detect_selected_state(full_image: np.ndarray) -> dict:
     name_text = extract_best_name(name_image)
     has_avatar = detect_avatar_block(panel_image)
     has_cross = detect_cross_symbol(cross_image)
-    selected = has_cross and (has_avatar or bool(name_text))
+    has_world_hp_bar = detect_world_hp_bar(full_image, fixed_target)
+    selected = (has_cross and (has_avatar or bool(name_text))) or has_world_hp_bar
     return {
         "selected": selected,
         "name": name_text,
         "hasAvatar": has_avatar,
         "hasCross": has_cross,
+        "hasWorldHpBar": has_world_hp_bar,
     }
 
 
@@ -260,9 +311,9 @@ def click_target(hwnd: int, click_target: dict, target_name: str) -> dict:
     }
 
 
-def try_close_current_selection(hwnd: int) -> None:
+def try_close_current_selection(hwnd: int, fixed_target: dict | None = None) -> None:
     image = capture_full_client(hwnd)
-    state = detect_selected_state(image)
+    state = detect_selected_state(image, fixed_target)
     if not state["selected"]:
         return
     template = build_cross_template(image)
@@ -277,12 +328,12 @@ def calibrate_body_probe(hwnd: int, fixed_target: dict) -> dict:
     calibration_results = []
     for probe_ratio_y in TARGET_BODY_Y_PROBE_RATIOS:
         for probe_ratio_x in TARGET_BODY_X_PROBE_RATIOS:
-            try_close_current_selection(hwnd)
+            try_close_current_selection(hwnd, fixed_target)
             click_target_state = build_click_target(hwnd, fixed_target, probe_ratio_x, probe_ratio_y)
             click_result = click_target(hwnd, click_target_state, fixed_target["targetName"])
             time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
             image = capture_full_client(hwnd)
-            selected_state = detect_selected_state(image)
+            selected_state = detect_selected_state(image, fixed_target)
             result = {
                 "probeRatioX": probe_ratio_x,
                 "probeRatioY": probe_ratio_y,
@@ -290,13 +341,14 @@ def calibrate_body_probe(hwnd: int, fixed_target: dict) -> dict:
                 "probeOffsetY": click_target_state["probeOffsetY"],
                 "selected": bool(selected_state["selected"]),
                 "ocrName": selected_state["name"],
+                "hasWorldHpBar": selected_state["hasWorldHpBar"],
                 "clickClientX": click_target_state["clientX"],
                 "clickClientY": click_target_state["clientY"],
             }
             calibration_results.append(result)
             print(json.dumps({"phase": "calibration", **result}, ensure_ascii=False))
             if selected_state["selected"]:
-                try_close_current_selection(hwnd)
+                try_close_current_selection(hwnd, fixed_target)
                 return {
                     "probeRatioX": probe_ratio_x,
                     "probeRatioY": probe_ratio_y,
@@ -322,7 +374,7 @@ def run_phase_one(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
         click_result = click_target(hwnd, click_target_state, fixed_target["targetName"])
         time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
         full_image = capture_full_client(hwnd)
-        selected_state = detect_selected_state(full_image)
+        selected_state = detect_selected_state(full_image, fixed_target)
         screenshot_path = save_debug_image(full_image, f"phase1-{index:02d}.png")
 
         success = bool(selected_state["selected"])
@@ -337,6 +389,7 @@ def run_phase_one(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
             "ocrName": selected_state["name"],
             "hasAvatar": selected_state["hasAvatar"],
             "hasCross": selected_state["hasCross"],
+            "hasWorldHpBar": selected_state["hasWorldHpBar"],
             "targetName": click_result["targetName"],
             "probeRatioX": probe_ratio_x,
             "probeRatioY": probe_ratio_y,
@@ -371,7 +424,7 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
         click_result = click_target(hwnd, click_target_state, fixed_target["targetName"])
         time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
         selected_image = capture_full_client(hwnd)
-        selected_state = detect_selected_state(selected_image)
+        selected_state = detect_selected_state(selected_image, fixed_target)
         if not selected_state["selected"]:
             row = {
                 "phase": 2,
@@ -379,6 +432,7 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
                 "status": "FAIL",
                 "reason": "SELECT_NOT_REACHED",
                 "ocrName": selected_state["name"],
+                "hasWorldHpBar": selected_state["hasWorldHpBar"],
                 "targetName": click_result["targetName"],
                 "probeRatioX": probe_ratio_x,
                 "probeRatioY": probe_ratio_y,
@@ -402,6 +456,7 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
                 "status": "FAIL",
                 "reason": "CROSS_NOT_FOUND",
                 "ocrName": selected_state["name"],
+                "hasWorldHpBar": selected_state["hasWorldHpBar"],
                 "targetName": click_result["targetName"],
                 "probeRatioX": probe_ratio_x,
                 "probeRatioY": probe_ratio_y,
@@ -417,7 +472,7 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
         input_worker.click_screen_point(hwnd, cross_match["screenX"], cross_match["screenY"], "left")
         time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
         after_image = capture_full_client(hwnd)
-        after_state = detect_selected_state(after_image)
+        after_state = detect_selected_state(after_image, fixed_target)
         screenshot_path = save_debug_image(after_image, f"phase2-{index:02d}.png")
 
         success = not after_state["selected"]
@@ -430,6 +485,7 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
             "status": "SUCCESS" if success else "FAIL",
             "ocrName": after_state["name"],
             "detectedSelectedAfterClose": after_state["selected"],
+            "hasWorldHpBarAfterClose": after_state["hasWorldHpBar"],
             "crossScore": cross_match["score"],
             "targetName": click_result["targetName"],
             "probeRatioX": probe_ratio_x,

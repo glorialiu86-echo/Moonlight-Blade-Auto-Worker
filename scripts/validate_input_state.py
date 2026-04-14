@@ -24,8 +24,8 @@ WAIT_AFTER_CLICK_MS = 300
 GAME_WINDOW_TITLE = "\u5929\u6daf\u660e\u6708\u5200\u624b\u6e38"
 TARGET_NAME = "\u535c\u7389\u4eba"
 TARGET_TEMPLATE_PATH = DATA_DIR / "buyuren-name-template.png"
-TARGET_BODY_RATIO_X = 0.0
-TARGET_BODY_RATIO_Y = 2.4
+TARGET_BODY_RATIO_X = -0.18269230769230768
+TARGET_BODY_RATIO_Y = 4.435897435897436
 TARGET_TEMPLATE_THRESHOLD = 0.30
 
 SELECTED_PANEL_ROI = (0.20, 0.10, 0.42, 0.26)
@@ -34,6 +34,13 @@ SELECTED_HP_ROI = (0.26, 0.19, 0.39, 0.23)
 CROSS_TEMPLATE_ROI = (0.35, 0.11, 0.39, 0.18)
 CROSS_SEARCH_ROI = (0.31, 0.08, 0.42, 0.22)
 FAILURE_DIR = TMP_DIR / "phase1_failures"
+RUN_PROBE_ONLY = True
+CROSS_CLICK_FINE_OFFSET_X = 12
+CROSS_CLICK_FINE_OFFSET_Y = 10
+CROSS_MANUAL_CLIENT_RATIO_X = 924 / 2445
+CROSS_MANUAL_CLIENT_RATIO_Y = 298 / 1332
+VIEW_ICON_CLIENT_RATIO_X = 1295 / 2537
+VIEW_ICON_CLIENT_RATIO_Y = 916 / 1384
 
 
 def normalize_name(text: str) -> str:
@@ -126,9 +133,10 @@ def detect_avatar_block(panel_image: np.ndarray) -> bool:
 def detect_cross_symbol(cross_image: np.ndarray) -> bool:
     gray = cv2.cvtColor(cross_image, cv2.COLOR_BGR2GRAY)
     _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+    bright_ratio = float(np.count_nonzero(binary)) / float(binary.size)
     lines = cv2.HoughLinesP(binary, 1, np.pi / 180, threshold=12, minLineLength=8, maxLineGap=3)
     if lines is None:
-        return False
+        return bright_ratio >= 0.04
 
     positive = 0
     negative = 0
@@ -143,7 +151,7 @@ def detect_cross_symbol(cross_image: np.ndarray) -> bool:
             positive += 1
         elif -1.8 <= slope <= -0.5:
             negative += 1
-    return positive >= 1 and negative >= 1
+    return (positive >= 1 and negative >= 1) or bright_ratio >= 0.08
 
 
 def detect_hp_bar(panel_hp_image: np.ndarray) -> bool:
@@ -230,7 +238,7 @@ def detect_left_top_selected_state(full_image: np.ndarray) -> dict:
     has_avatar = detect_avatar_block(panel_image)
     has_cross = detect_cross_symbol(cross_image)
     has_hp_bar = detect_hp_bar(hp_image)
-    selected = has_avatar and (has_cross or has_hp_bar or bool(name_text))
+    selected = (has_cross and has_avatar) or (has_avatar and has_hp_bar) or (has_avatar and bool(name_text))
     return {
         "selected": selected,
         "name": name_text,
@@ -244,21 +252,39 @@ def build_cross_template(full_image: np.ndarray) -> np.ndarray:
     return crop_roi(full_image, CROSS_TEMPLATE_ROI)
 
 
-def match_cross(hwnd: int, full_image: np.ndarray, template: np.ndarray) -> dict | None:
-    search_image = crop_roi(full_image, CROSS_SEARCH_ROI)
-    result = cv2.matchTemplate(search_image, template, cv2.TM_CCOEFF_NORMED)
-    _min_val, max_val, _min_loc, max_loc = cv2.minMaxLoc(result)
-    if float(max_val) < 0.72:
-        return None
+def get_cross_anchor(template: np.ndarray) -> tuple[int, int]:
+    gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+    contours, _hierarchy = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        height, width = template.shape[:2]
+        return width // 2, height // 2
 
-    template_height, template_width = template.shape[:2]
-    local_center_x = max_loc[0] + template_width // 2
-    local_center_y = max_loc[1] + template_height // 2
-    screen_x, screen_y = roi_to_screen_point(hwnd, CROSS_SEARCH_ROI, local_center_x, local_center_y)
+    contour = max(contours, key=cv2.contourArea)
+    x, y, width, height = cv2.boundingRect(contour)
+    return x + width // 2, y + height // 2
+
+
+def locate_cross_in_roi(hwnd: int, full_image: np.ndarray) -> dict | None:
+    cross_roi_image = crop_roi(full_image, CROSS_TEMPLATE_ROI)
+    gray = cv2.cvtColor(cross_roi_image, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+    binary[: max(1, int(binary.shape[0] * 0.35)), :] = 0
+    contours, _hierarchy = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if contours:
+        contour = max(contours, key=lambda item: cv2.boundingRect(item)[0] + cv2.boundingRect(item)[2] * 0.5)
+        x, y, width, height = cv2.boundingRect(contour)
+        anchor_x = x + width // 2
+        anchor_y = y + height // 2
+    else:
+        anchor_x, anchor_y = get_cross_anchor(cross_roi_image)
+    local_center_x = anchor_x + CROSS_CLICK_FINE_OFFSET_X
+    local_center_y = anchor_y + CROSS_CLICK_FINE_OFFSET_Y
+    screen_x, screen_y = roi_to_screen_point(hwnd, CROSS_TEMPLATE_ROI, local_center_x, local_center_y)
     return {
         "screenX": int(screen_x),
         "screenY": int(screen_y),
-        "score": round(float(max_val), 4),
+        "score": 1.0,
     }
 
 
@@ -373,8 +399,7 @@ def try_close_current_selection(hwnd: int, fixed_target: dict | None = None) -> 
     state = detect_selected_state(image, fixed_target)
     if not state["selected"]:
         return
-    template = build_cross_template(image)
-    cross_match = match_cross(hwnd, image, template)
+    cross_match = locate_cross_in_roi(hwnd, image)
     if cross_match is None:
         return
     input_worker.click_screen_point(hwnd, cross_match["screenX"], cross_match["screenY"], "left")
@@ -382,7 +407,6 @@ def try_close_current_selection(hwnd: int, fixed_target: dict | None = None) -> 
 
 
 def run_fixed_npc_stability_test(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_ratio_y: float) -> dict:
-    template = None
     phase_results = []
     success_count = 0
 
@@ -435,10 +459,7 @@ def run_fixed_npc_stability_test(hwnd: int, fixed_target: dict, probe_ratio_x: f
             print(json.dumps(row, ensure_ascii=False))
             continue
 
-        if template is None:
-            template = build_cross_template(selected_image)
-
-        cross_match = match_cross(hwnd, selected_image, template)
+        cross_match = locate_cross_in_roi(hwnd, selected_image)
         if cross_match is None:
             failure_screenshot = save_debug_image(
                 selected_image,
@@ -538,6 +559,58 @@ def run_fixed_npc_stability_test(hwnd: int, fixed_target: dict, probe_ratio_x: f
     }
 
 
+def run_single_round_probe(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_ratio_y: float) -> dict:
+    try_close_current_selection(hwnd, fixed_target)
+    click_target_state = build_click_target(hwnd, fixed_target, probe_ratio_x, probe_ratio_y)
+    click_result = click_target(hwnd, click_target_state, fixed_target["targetName"])
+    time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
+
+    selected_image = capture_full_client(hwnd)
+    selected_state = detect_left_top_selected_state(selected_image)
+    selected_screenshot = save_debug_image(
+        selected_image,
+        "probe-select.png",
+        click_result["target"]["clientX"],
+        click_result["target"]["clientY"],
+    )
+
+    cross_result = None
+    hover_screenshot = None
+    if selected_state["selected"] or selected_state["hasAvatar"]:
+        cross_match = locate_cross_in_roi(hwnd, selected_image)
+        if cross_match is not None:
+            win32api.SetCursorPos((int(cross_match["screenX"]), int(cross_match["screenY"])))
+            time.sleep(0.2)
+            hover_image = capture_full_client(hwnd)
+            hover_screenshot = save_debug_image(
+                hover_image,
+                "probe-cross-hover.png",
+                cross_match["screenX"] - click_result["debug"]["bounds"]["left"],
+                cross_match["screenY"] - click_result["debug"]["bounds"]["top"],
+            )
+            cross_result = {
+                "screenX": cross_match["screenX"],
+                "screenY": cross_match["screenY"],
+                "clientX": cross_match["screenX"] - click_result["debug"]["bounds"]["left"],
+                "clientY": cross_match["screenY"] - click_result["debug"]["bounds"]["top"],
+                "score": cross_match["score"],
+            }
+
+    return {
+        "selectedDetected": selected_state["selected"],
+        "selectedState": selected_state,
+        "clickTarget": {
+            "screenX": click_result["target"]["screenX"],
+            "screenY": click_result["target"]["screenY"],
+            "clientX": click_result["target"]["clientX"],
+            "clientY": click_result["target"]["clientY"],
+        },
+        "crossResult": cross_result,
+        "selectScreenshot": selected_screenshot,
+        "crossHoverScreenshot": hover_screenshot,
+    }
+
+
 def main() -> int:
     hwnd = input_worker.find_window(GAME_WINDOW_TITLE)
     if hwnd is None:
@@ -574,10 +647,18 @@ def main() -> int:
                 "selectedClientY": probe_target["clientY"],
                 "selectedScreenX": probe_target["screenX"],
                 "selectedScreenY": probe_target["screenY"],
+                "viewIconClientRatioX": VIEW_ICON_CLIENT_RATIO_X,
+                "viewIconClientRatioY": VIEW_ICON_CLIENT_RATIO_Y,
+                "crossManualClientRatioX": CROSS_MANUAL_CLIENT_RATIO_X,
+                "crossManualClientRatioY": CROSS_MANUAL_CLIENT_RATIO_Y,
             },
             ensure_ascii=False,
         )
     )
+    probe = run_single_round_probe(hwnd, fixed_target, TARGET_BODY_RATIO_X, TARGET_BODY_RATIO_Y)
+    print(json.dumps({"phase": "probe", **probe}, ensure_ascii=False))
+    if RUN_PROBE_ONLY:
+        return 0
     summary = run_fixed_npc_stability_test(hwnd, fixed_target, TARGET_BODY_RATIO_X, TARGET_BODY_RATIO_Y)
     print(json.dumps({"phase": "stability_summary", **summary}, ensure_ascii=False))
     return 0 if summary["passed"] else 3

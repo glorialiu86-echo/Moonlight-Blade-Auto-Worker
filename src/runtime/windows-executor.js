@@ -193,3 +193,43 @@ export async function runWindowsExecution(plan) {
   const actions = createWorkerActions(plan);
   return runWindowsActions(actions);
 }
+
+export function createPrimitiveActions(sequenceName) {
+  switch (sequenceName) {
+    case "town_movement_smoke":
+      return [
+        {
+          id: "primitive-1",
+          title: "Focus Game Window",
+          type: "focus_window",
+          postDelayMs: 200
+        },
+        {
+          id: "primitive-2",
+          title: "Small Forward Step",
+          type: "move_forward_pulse",
+          movePulseMs: 180,
+          postDelayMs: 300
+        },
+        {
+          id: "primitive-3",
+          title: "Rotate Camera Right",
+          type: "drag_camera",
+          startRatio: [0.52, 0.48],
+          endRatio: [0.68, 0.48],
+          durationMs: 240,
+          postDelayMs: 300
+        },
+        {
+          id: "primitive-4",
+          title: "Center Click Probe",
+          type: "click_relative",
+          xRatio: 0.50,
+          yRatio: 0.46,
+          postDelayMs: 300
+        }
+      ];
+    default:
+      throw new Error(`Unsupported primitive action sequence: ${sequenceName}`);
+  }
+}

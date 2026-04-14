@@ -251,6 +251,21 @@ def pulse_forward(hwnd: int, move_pulse_ms: int) -> dict[str, Any]:
     }
 
 
+def run_move_forward_pulse(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "move_forward_pulse")
+    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
+    state = pulse_forward(hwnd, move_pulse_ms)
+    time.sleep((int(action.get("postDelayMs") or DEFAULT_POST_DELAY_MS)) / 1000)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Moved forward for {move_pulse_ms}ms",
+        "input": state,
+    }
+
+
 def drag_camera(hwnd: int, start_ratio: tuple[float, float], end_ratio: tuple[float, float], duration_ms: int) -> dict[str, Any]:
     bounds = focus_window(hwnd)
     start_x = round(bounds["left"] + bounds["width"] * start_ratio[0])
@@ -269,6 +284,32 @@ def drag_camera(hwnd: int, start_ratio: tuple[float, float], end_ratio: tuple[fl
         "endX": end_x,
         "endY": end_y,
         "durationMs": duration_ms,
+    }
+
+
+def run_drag_camera(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "drag_camera")
+    start_ratio = action.get("startRatio") or [0.52, 0.48]
+    end_ratio = action.get("endRatio") or [0.66, 0.48]
+    duration_ms = int(action.get("durationMs") or DEFAULT_CAMERA_DRAG_MS)
+    state = drag_camera(
+        hwnd,
+        (float(start_ratio[0]), float(start_ratio[1])),
+        (float(end_ratio[0]), float(end_ratio[1])),
+        duration_ms,
+    )
+    time.sleep((int(action.get("postDelayMs") or DEFAULT_POST_DELAY_MS)) / 1000)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Dragged camera for {duration_ms}ms",
+        "input": {
+            "startRatio": start_ratio,
+            "endRatio": end_ratio,
+            **state,
+        },
     }
 
 
@@ -627,6 +668,12 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "town_npc_social_loop":
         return run_town_npc_social_loop(hwnd, action)
+
+    if action_type == "move_forward_pulse":
+        return run_move_forward_pulse(hwnd, action)
+
+    if action_type == "drag_camera":
+        return run_drag_camera(hwnd, action)
 
     if action_type == "type_text":
         text = str(action.get("text") or "").strip()

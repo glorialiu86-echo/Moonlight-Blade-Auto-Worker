@@ -13,6 +13,9 @@
 - 本地 Python 作为 ASR 与 Windows 输入执行层
 - 浏览器访问本地页面
 - 最终运行环境固定为当前 Windows 主机
+- 前端分为两页：
+  - `/`：主播首页，只保留聊天与系统启停
+  - `/debug`：调试页，承载截图、环境摘要、实验记录和调试消息流
 
 ### 已完成能力
 
@@ -34,6 +37,7 @@
 
 - 当前是真控最小闭环，不代表最终动作设计
 - 后续需要把动作语义与游戏内具体行为进一步对齐
+- 主播首页不暴露手动截图入口，截图相关操作只留在调试页
 
 ## 未完成能力
 
@@ -50,14 +54,9 @@
 - `capture-game-window.ps1` 可直接输出窗口截图 JSON
 - `src/capture/windows-game-window.js` 可成功抓取窗口图像
 - `src/runtime/windows-executor.js` 可成功定位窗口并发送实际输入
-- 新服务实例上，`POST /api/chat` 可完成：
-  - LLM 规划
-  - Windows 输入执行
-  - 状态回写
-- 新服务实例上，自动截图可完成：
-  - 窗口抓取
-  - 图片分析
-  - `latestPerception` 更新
+- `GET /` 返回主播首页 HTML
+- `GET /debug` 返回调试页 HTML
+- `GET /api/health` 返回 `ok: true`
 
 ## 下一步建议
 

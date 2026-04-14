@@ -152,7 +152,11 @@ function sleep(ms) {
 }
 
 async function serveStatic(response, pathname) {
-  const target = pathname === "/" ? "/index.html" : pathname;
+  const target = pathname === "/"
+    ? "/index.html"
+    : pathname === "/debug"
+      ? "/debug.html"
+      : pathname;
   const filePath = path.join(publicDir, target);
   const ext = path.extname(filePath);
   const content = await readFile(filePath);
@@ -461,10 +465,19 @@ async function handleControl(request, response) {
   }
 
   const transitions = {
-    start: () => setStatus("running"),
+    start: () => {
+      setStatus("running");
+      autoCaptureService.start();
+    },
     pause: () => setStatus("paused"),
-    resume: () => setStatus("running"),
-    stop: () => setStatus("stopped"),
+    resume: () => {
+      setStatus("running");
+      autoCaptureService.resume();
+    },
+    stop: () => {
+      setStatus("stopped");
+      autoCaptureService.stop();
+    },
     reset: () => {
       autoCaptureService.stop();
       resetRuntime();

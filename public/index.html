@@ -3,168 +3,69 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>天涯明月刀 · 籽小刀实验台</title>
+    <title>天涯明月刀 · 主播控制台</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
-    <div class="app-shell">
-      <header class="hero">
+  <body class="host-page">
+    <div class="host-shell">
+      <header class="host-header">
         <div>
-          <p class="eyebrow">Windows Video Lab</p>
-          <h1>籽小刀实验台</h1>
-          <p class="subtitle">
-            这里不是普通聊天框，而是《灵枢绘世》视频实验面板。主播下任务，籽小刀负责误读、规划、解释和留后果。
-          </p>
+          <p class="host-eyebrow">Broadcaster Console</p>
+          <h1>主播对话窗口</h1>
+          <p class="host-subtitle">主播只需要下达任务、观察 AI 回复，并通过主按钮控制整套本地程序的启停。</p>
         </div>
-        <span id="headerPill" class="header-pill">当前模式：待机</span>
+        <a class="debug-link" href="/debug">打开调试页</a>
       </header>
 
-      <main class="layout">
-        <section class="main-column">
-          <section class="agent-panel" aria-label="运行状态">
-            <div class="agent-card">
-              <p class="agent-label">运行状态</p>
-              <p id="agentStatusValue" class="agent-value">idle</p>
-            </div>
-            <div class="agent-card">
-              <p class="agent-label">当前模式</p>
-              <p id="agentModeValue" class="agent-value">autonomous</p>
-            </div>
-            <div class="agent-card agent-card-wide">
-              <p class="agent-label">当前目标</p>
-              <p id="agentObjectiveValue" class="agent-value">等待目标</p>
-            </div>
-            <div class="agent-card">
-              <p class="agent-label">最近来源</p>
-              <p id="agentSourceValue" class="agent-value">-</p>
-            </div>
-            <div class="agent-card agent-card-wide">
-              <p class="agent-label">用户插队</p>
-              <p id="agentQueueValue" class="agent-value">暂无</p>
-            </div>
-          </section>
+      <section class="run-panel">
+        <div class="run-status">
+          <p class="run-label">系统状态</p>
+          <p id="runStatusText" class="run-value">待机</p>
+          <p id="runStatusHint" class="run-hint">当前还没有开始执行任务。</p>
+        </div>
+        <button id="runToggleButton" class="run-toggle" type="button">开始执行任务</button>
+      </section>
 
-          <section class="panel">
-            <div class="panel-head">
-              <h2>当前实验</h2>
-              <p>每轮都显示任务、误读、动作和补救台词，方便录制与复盘。</p>
-            </div>
-            <div id="messageList" class="message-list" aria-live="polite"></div>
-          </section>
+      <main class="chat-panel">
+        <section id="messageList" class="chat-list" aria-live="polite"></section>
 
-          <form id="composerForm" class="composer">
-            <div class="composer-top">
-              <div class="voice-row">
-                <button id="voiceStartButton" type="button">开始语音</button>
-                <button id="voiceStopButton" type="button" disabled>停止语音</button>
-                <p id="voiceStatus" class="voice-status">语音输入未启动。录音会发到本地服务，再由本地 Faster-Whisper 转写。</p>
-              </div>
-              <div class="image-row">
-                <label class="upload-button" for="screenshotInput">上传截图</label>
-                <input id="screenshotInput" type="file" accept="image/*" hidden />
-                <p id="imageStatus" class="image-status">还没有截图输入。你可以手动上传一张游戏截图，让籽小刀在决策时参考当前场景。</p>
-              </div>
+        <form id="composerForm" class="chat-composer">
+          <div class="composer-tools">
+            <div class="tool-row">
+              <button id="voiceStartButton" type="button">开始语音</button>
+              <button id="voiceStopButton" type="button" disabled>停止语音</button>
+              <p id="voiceStatus" class="tool-status">语音输入未启动。</p>
             </div>
+          </div>
 
-            <label class="composer-field">
-              <textarea
-                id="instructionInput"
-                name="instruction"
-                rows="4"
-                placeholder="例如：让所有人都认识我，但别用太正常的办法。"
-              ></textarea>
-            </label>
+          <label class="chat-field">
+            <textarea
+              id="instructionInput"
+              name="instruction"
+              rows="4"
+              placeholder="例如：先观察一下附近，再决定下一步。"
+            ></textarea>
+          </label>
 
-            <div class="composer-actions">
-              <button type="submit" class="primary">开始实验</button>
-            </div>
-          </form>
-        </section>
-
-        <aside class="side-column">
-          <section class="panel side-panel">
-            <div class="panel-head">
-              <h2>自动窗口截图</h2>
-              <p>自动感知只截取《天涯明月刀手游》窗口。手动上传截图仅作为调试入口，不接管主感知链路。</p>
-            </div>
-            <div id="captureSummaryCard" class="summary-card">
-              <p class="summary-title">未启动</p>
-              <p class="summary-body">启动后会周期性抓取游戏窗口，并将识别结果持续写入当前环境摘要。</p>
-            </div>
-            <div class="capture-actions">
-              <button id="captureStartButton" type="button">开始自动截图</button>
-              <button id="capturePauseButton" type="button">暂停</button>
-              <button id="captureTriggerButton" type="button">单次抓取</button>
-              <button id="captureStopButton" type="button">停止</button>
-            </div>
-          </section>
-
-          <section class="panel side-panel">
-            <div class="panel-head">
-              <h2>环境摘要</h2>
-              <p>截图识别优先服务场景判断和后果展示，不直接负责自动点击。</p>
-            </div>
-            <div id="perceptionSummaryCard" class="summary-card">
-              <p class="summary-title">暂无截图</p>
-              <p class="summary-body">上传一张截图后，这里会显示场景、NPC、可交互项和风险提示。</p>
-            </div>
-          </section>
-
-          <section class="panel side-panel">
-            <div class="panel-head">
-              <h2>实验记录</h2>
-              <p>最近几轮会保留在这里，方便回看桥段和失败原因。</p>
-            </div>
-            <div id="experimentList" class="experiment-list"></div>
-          </section>
-        </aside>
+          <div class="chat-actions">
+            <button type="submit" class="primary">发送任务</button>
+          </div>
+        </form>
       </main>
     </div>
 
     <template id="userMessageTemplate">
-      <article class="message message-user">
-        <div class="message-role">主播输入</div>
-        <p class="message-text"></p>
+      <article class="chat-message chat-message-user">
+        <div class="chat-role">主播</div>
+        <p class="chat-text"></p>
       </article>
     </template>
 
     <template id="assistantMessageTemplate">
-      <article class="message message-assistant">
-        <div class="message-role">籽小刀</div>
-        <p class="message-text"></p>
-        <p class="message-meta"></p>
-        <p class="message-perception"></p>
-        <section class="message-block" data-block="interpretation">
-          <h2>角色化误读</h2>
-          <p class="message-interpretation"></p>
-        </section>
-        <section class="message-block" data-block="thinking">
-          <h2>思考链</h2>
-          <ol class="thinking-list"></ol>
-        </section>
-        <section class="message-block" data-block="actions">
-          <h2>行动方案</h2>
-          <div class="action-list"></div>
-        </section>
-        <section class="message-block" data-block="recovery">
-          <h2>翻车说辞</h2>
-          <p class="message-recovery"></p>
-        </section>
-      </article>
-    </template>
-
-    <template id="actionTemplate">
-      <div class="action-item">
-        <span class="action-title"></span>
-        <span class="action-detail"></span>
-      </div>
-    </template>
-
-    <template id="experimentTemplate">
-      <article class="experiment-item">
-        <p class="experiment-title"></p>
-        <p class="experiment-meta"></p>
-        <p class="experiment-outcome"></p>
+      <article class="chat-message chat-message-assistant">
+        <div class="chat-role">AI 助手</div>
+        <p class="chat-text"></p>
+        <p class="chat-meta"></p>
       </article>
     </template>
 

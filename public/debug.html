@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>天涯明月刀 · 调试页</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="debug-page">
+    <div class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Windows Debug Console</p>
+          <h1>调试页</h1>
+          <p class="subtitle">这里保留截图状态、环境摘要、实验记录和详细消息流。主播首页不再承载这些调试信息。</p>
+        </div>
+        <div class="hero-actions">
+          <span id="headerPill" class="header-pill">当前模式：待机</span>
+          <a class="debug-link" href="/">返回主播页</a>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="main-column">
+          <section class="agent-panel" aria-label="运行状态">
+            <div class="agent-card">
+              <p class="agent-label">运行状态</p>
+              <p id="agentStatusValue" class="agent-value">idle</p>
+            </div>
+            <div class="agent-card">
+              <p class="agent-label">当前模式</p>
+              <p id="agentModeValue" class="agent-value">autonomous</p>
+            </div>
+            <div class="agent-card agent-card-wide">
+              <p class="agent-label">当前目标</p>
+              <p id="agentObjectiveValue" class="agent-value">等待目标</p>
+            </div>
+            <div class="agent-card">
+              <p class="agent-label">最近来源</p>
+              <p id="agentSourceValue" class="agent-value">-</p>
+            </div>
+            <div class="agent-card agent-card-wide">
+              <p class="agent-label">用户插队</p>
+              <p id="agentQueueValue" class="agent-value">暂无</p>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>完整消息流</h2>
+              <p>保留每一轮用户输入、AI 解释、动作方案和补救话术，便于排查执行逻辑。</p>
+            </div>
+            <div id="messageList" class="message-list" aria-live="polite"></div>
+          </section>
+
+          <form id="composerForm" class="composer">
+            <div class="composer-top">
+              <div class="voice-row">
+                <button id="voiceStartButton" type="button">开始语音</button>
+                <button id="voiceStopButton" type="button" disabled>停止语音</button>
+                <p id="voiceStatus" class="voice-status">语音输入未启动。录音会发到本地服务，再由本地 Faster-Whisper 转写。</p>
+              </div>
+              <div class="image-row">
+                <label class="upload-button" for="screenshotInput">上传截图</label>
+                <input id="screenshotInput" type="file" accept="image/*" hidden />
+                <p id="imageStatus" class="image-status">还没有截图输入。你可以手动上传一张游戏截图，用于调试视觉链路。</p>
+              </div>
+            </div>
+
+            <label class="composer-field">
+              <textarea
+                id="instructionInput"
+                name="instruction"
+                rows="4"
+                placeholder="例如：让所有人都认识我，但别用太正常的办法。"
+              ></textarea>
+            </label>
+
+            <div class="composer-actions">
+              <button type="submit" class="primary">发送调试任务</button>
+            </div>
+          </form>
+        </section>
+
+        <aside class="side-column">
+          <section class="panel side-panel">
+            <div class="panel-head">
+              <h2>自动窗口截图</h2>
+              <p>自动感知只截取《天涯明月刀手游》窗口。手动上传截图仅作调试入口。</p>
+            </div>
+            <div id="captureSummaryCard" class="summary-card">
+              <p class="summary-title">未启动</p>
+              <p class="summary-body">启动后会周期性抓取游戏窗口，并将识别结果持续写入当前环境摘要。</p>
+            </div>
+            <div class="capture-actions">
+              <button id="captureStartButton" type="button">开始自动截图</button>
+              <button id="capturePauseButton" type="button">暂停</button>
+              <button id="captureTriggerButton" type="button">单次抓取</button>
+              <button id="captureStopButton" type="button">停止</button>
+            </div>
+          </section>
+
+          <section class="panel side-panel">
+            <div class="panel-head">
+              <h2>环境摘要</h2>
+              <p>这里显示当前视觉链路识别出的场景、NPC、交互项和风险提示。</p>
+            </div>
+            <div id="perceptionSummaryCard" class="summary-card">
+              <p class="summary-title">暂无截图</p>
+              <p class="summary-body">启用自动窗口截图或上传调试截图后，这里会显示环境摘要。</p>
+            </div>
+          </section>
+
+          <section class="panel side-panel">
+            <div class="panel-head">
+              <h2>实验记录</h2>
+              <p>保留最近几轮实验结果，便于快速回看。</p>
+            </div>
+            <div id="experimentList" class="experiment-list"></div>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <template id="userMessageTemplate">
+      <article class="message message-user">
+        <div class="message-role">主播输入</div>
+        <p class="message-text"></p>
+      </article>
+    </template>
+
+    <template id="assistantMessageTemplate">
+      <article class="message message-assistant">
+        <div class="message-role">籽小刀</div>
+        <p class="message-text"></p>
+        <p class="message-meta"></p>
+        <p class="message-perception"></p>
+        <section class="message-block" data-block="interpretation">
+          <h2>角色化误读</h2>
+          <p class="message-interpretation"></p>
+        </section>
+        <section class="message-block" data-block="thinking">
+          <h2>思考链</h2>
+          <ol class="thinking-list"></ol>
+        </section>
+        <section class="message-block" data-block="actions">
+          <h2>行动方案</h2>
+          <div class="action-list"></div>
+        </section>
+        <section class="message-block" data-block="recovery">
+          <h2>补救台词</h2>
+          <p class="message-recovery"></p>
+        </section>
+      </article>
+    </template>
+
+    <template id="actionTemplate">
+      <div class="action-item">
+        <span class="action-title"></span>
+        <span class="action-detail"></span>
+      </div>
+    </template>
+
+    <template id="experimentTemplate">
+      <article class="experiment-item">
+        <p class="experiment-title"></p>
+        <p class="experiment-meta"></p>
+        <p class="experiment-outcome"></p>
+      </article>
+    </template>
+
+    <script type="module" src="/debug.js"></script>
+  </body>
+</html>

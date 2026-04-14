@@ -18,13 +18,15 @@
 
 已完成：
 
-- 本地 `Node` 服务、单页控制台、`.env` 加载、千问文本/视觉/OCR 调用链路
+- 本地 `Node` 服务、`.env` 加载、千问文本/视觉/OCR 调用链路
 - Windows 本地 Python 环境重建，`faster-whisper` CPU/GPU 双环境补齐
 - 自动截图采集链路接入主服务
 - 固定游戏窗口截图 `capture-game-window.ps1` 可直接运行
 - 真实 Windows 输入执行器接入主链路
 - `/api/chat` 已可触发 `规划 -> Windows 输入执行 -> 状态回写`
 - 自动截图已可更新 `latestPerception` 与 `capture` 状态
+- 前端已拆成主播首页 `/` 和调试页 `/debug`
+- 主播首页已加入明确的“开始执行任务 / 停止执行任务”主按钮
 
 仍未完成：
 
@@ -36,14 +38,13 @@
 
 ## 本轮新增结论
 
-- `MockExecutor` 已不再是主执行源，服务端已切到真实 `WindowsInputExecutor`
-- 后台服务直接 `SetForegroundWindow` 不稳定，因此执行器已降级支持“窗口内点击激活”
-- 自主回合不再在服务启动后自动乱跑，只有系统进入 `running` 后才会执行
+- 主播首页不再暴露截图上传入口
+- 调试信息、截图状态、实验记录都已移动到 `/debug`
+- 后端 `/api/control` 的 `start/resume/stop` 已同步控制自动截图状态
 - 新实例验证通过：
-  - `GET /api/state`
-  - `POST /api/chat`
-  - 自动窗口截图成功
-  - 游戏窗口输入成功
+  - `GET /`
+  - `GET /debug`
+  - `GET /api/health`
 
 ## 当前主要风险
 

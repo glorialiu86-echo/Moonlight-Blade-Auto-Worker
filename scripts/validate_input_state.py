@@ -6,6 +6,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import win32api
 from PIL import Image
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -201,15 +202,25 @@ def find_clickable_world_target(hwnd: int, full_image: np.ndarray) -> dict | Non
 
     roi_left = bounds["left"] + int(bounds["width"] * WORLD_NAME_SEARCH_ROI[0])
     roi_top = bounds["top"] + int(bounds["height"] * WORLD_NAME_SEARCH_ROI[1])
+    roi_left_client = int(bounds["width"] * WORLD_NAME_SEARCH_ROI[0])
+    roi_top_client = int(bounds["height"] * WORLD_NAME_SEARCH_ROI[1])
     item = best_match["item"]
     click_x = round(roi_left + item["centerX"])
     click_y = round(roi_top + item["maxY"] + bounds["height"] * SELECT_CLICK_Y_OFFSET_RATIO)
+    bbox_x = round(roi_left_client + item["minX"])
+    bbox_y = round(roi_top_client + item["minY"])
+    bbox_width = round(item["maxX"] - item["minX"])
+    bbox_height = round(item["maxY"] - item["minY"])
     return {
         "name": best_match["text"],
         "screenX": int(click_x),
         "screenY": int(click_y),
         "clientX": int(click_x - bounds["left"]),
         "clientY": int(click_y - bounds["top"]),
+        "bboxX": int(bbox_x),
+        "bboxY": int(bbox_y),
+        "bboxWidth": int(bbox_width),
+        "bboxHeight": int(bbox_height),
         "score": round(float(item["score"]), 4),
     }
 
@@ -227,12 +238,41 @@ def lock_fixed_world_target(hwnd: int) -> dict:
 
 def click_fixed_target(hwnd: int, fixed_target: dict) -> dict:
     target = fixed_target["target"]
+    bounds = input_worker.get_window_bounds(hwnd)
+    mouse_before_x, mouse_before_y = win32api.GetCursorPos()
     click_state = input_worker.click_screen_point(hwnd, target["screenX"], target["screenY"], "left")
+    mouse_after_x, mouse_after_y = win32api.GetCursorPos()
     return {
         "clicked": True,
         "targetName": fixed_target["targetName"],
         "target": target,
         "click": click_state,
+        "debug": {
+            "bounds": {
+                "left": int(bounds["left"]),
+                "top": int(bounds["top"]),
+                "width": int(bounds["width"]),
+                "height": int(bounds["height"]),
+            },
+            "targetBbox": {
+                "x": int(target["bboxX"]),
+                "y": int(target["bboxY"]),
+                "width": int(target["bboxWidth"]),
+                "height": int(target["bboxHeight"]),
+            },
+            "clickAbsolute": {
+                "x": int(target["screenX"]),
+                "y": int(target["screenY"]),
+            },
+            "mouseBefore": {
+                "x": int(mouse_before_x),
+                "y": int(mouse_before_y),
+            },
+            "mouseAfter": {
+                "x": int(mouse_after_x),
+                "y": int(mouse_after_y),
+            },
+        },
     }
 
 
@@ -264,6 +304,11 @@ def run_phase_one(hwnd: int, fixed_target: dict) -> dict:
             "targetName": click_result.get("targetName", ""),
             "targetClientX": click_result["target"]["clientX"],
             "targetClientY": click_result["target"]["clientY"],
+            "clientBounds": click_result["debug"]["bounds"],
+            "targetBbox": click_result["debug"]["targetBbox"],
+            "clickAbsolute": click_result["debug"]["clickAbsolute"],
+            "mouseBefore": click_result["debug"]["mouseBefore"],
+            "mouseAfter": click_result["debug"]["mouseAfter"],
             "screenshot": screenshot_path,
         }
         phase_results.append(row)
@@ -296,6 +341,11 @@ def run_phase_two(hwnd: int, fixed_target: dict) -> dict:
                 "targetName": click_result.get("targetName", ""),
                 "targetClientX": click_result["target"]["clientX"],
                 "targetClientY": click_result["target"]["clientY"],
+                "clientBounds": click_result["debug"]["bounds"],
+                "targetBbox": click_result["debug"]["targetBbox"],
+                "clickAbsolute": click_result["debug"]["clickAbsolute"],
+                "mouseBefore": click_result["debug"]["mouseBefore"],
+                "mouseAfter": click_result["debug"]["mouseAfter"],
             }
             phase_results.append(row)
             print(json.dumps(row, ensure_ascii=False))
@@ -315,6 +365,11 @@ def run_phase_two(hwnd: int, fixed_target: dict) -> dict:
                 "targetName": click_result.get("targetName", ""),
                 "targetClientX": click_result["target"]["clientX"],
                 "targetClientY": click_result["target"]["clientY"],
+                "clientBounds": click_result["debug"]["bounds"],
+                "targetBbox": click_result["debug"]["targetBbox"],
+                "clickAbsolute": click_result["debug"]["clickAbsolute"],
+                "mouseBefore": click_result["debug"]["mouseBefore"],
+                "mouseAfter": click_result["debug"]["mouseAfter"],
             }
             phase_results.append(row)
             print(json.dumps(row, ensure_ascii=False))
@@ -340,6 +395,11 @@ def run_phase_two(hwnd: int, fixed_target: dict) -> dict:
             "targetName": click_result.get("targetName", ""),
             "targetClientX": click_result["target"]["clientX"],
             "targetClientY": click_result["target"]["clientY"],
+            "clientBounds": click_result["debug"]["bounds"],
+            "targetBbox": click_result["debug"]["targetBbox"],
+            "clickAbsolute": click_result["debug"]["clickAbsolute"],
+            "mouseBefore": click_result["debug"]["mouseBefore"],
+            "mouseAfter": click_result["debug"]["mouseAfter"],
             "screenshot": screenshot_path,
         }
         phase_results.append(row)
@@ -371,6 +431,12 @@ def main() -> int:
                 "fixedTargetName": fixed_target["targetName"],
                 "fixedTargetClientX": fixed_target["target"]["clientX"],
                 "fixedTargetClientY": fixed_target["target"]["clientY"],
+                "fixedTargetBbox": {
+                    "x": fixed_target["target"]["bboxX"],
+                    "y": fixed_target["target"]["bboxY"],
+                    "width": fixed_target["target"]["bboxWidth"],
+                    "height": fixed_target["target"]["bboxHeight"],
+                },
             },
             ensure_ascii=False,
         )

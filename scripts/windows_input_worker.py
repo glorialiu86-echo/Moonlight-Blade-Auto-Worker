@@ -100,6 +100,21 @@ ACTION_POINTS = {
     "chat_send": (938 / 2537, 1289 / 1384),
 }
 
+# Source of truth for the currently configured in-game shortcuts from the
+# settings screen. Use these names instead of scattering raw key strings.
+SHORTCUT_KEYS = {
+    "stealth": "2",
+    "qianxing": "2",
+    "sense": "3",
+    "ganzhi": "3",
+    "hawking": "4",
+    "jiaomai": "4",
+    "roll": "shift",
+    "shift": "shift",
+    "jump": "space",
+    "space": "space",
+}
+
 CHAT_KEYWORDS = ["点击输入聊天", "发送", "第一次见面", "好感度"]
 GIFT_KEYWORDS = ["赠礼", "选择礼物", "赠送", "好感度"]
 TRADE_KEYWORDS = ["交易结果预览", "交易倒计时", "上架", "我的", "总价"]
@@ -510,6 +525,16 @@ def click_screen_point(hwnd: int, screen_x: int, screen_y: int, button: str = "l
         "screenX": screen_x,
         "screenY": screen_y,
     }
+
+
+def resolve_shortcut_key(name: str) -> str:
+    normalized = str(name or "").strip().lower()
+    if not normalized:
+        raise RuntimeError("shortcut name is required")
+    key = SHORTCUT_KEYS.get(normalized)
+    if not key:
+        raise RuntimeError(f"unknown shortcut: {name}")
+    return key
 
 
 def find_moving_view_button(hwnd: int) -> dict[str, Any] | None:
@@ -1718,6 +1743,23 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
             "status": "performed",
             "detail": f"Sent key {key}",
             "input": {"key": key},
+        }
+
+    if action_type == "press_shortcut":
+        shortcut = str(action.get("shortcut") or action.get("name") or "").strip()
+        key = resolve_shortcut_key(shortcut)
+        focus_window(hwnd)
+        pydirectinput.press(key)
+        time.sleep(post_delay_ms / 1000)
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": f"Sent shortcut {shortcut} -> {key}",
+            "input": {
+                "shortcut": shortcut,
+                "key": key,
+            },
         }
 
     if action_type == "click_relative":

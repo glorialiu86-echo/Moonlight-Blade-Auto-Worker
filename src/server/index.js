@@ -294,11 +294,6 @@ async function buildNpcReply({ instruction, dialogText }) {
 }
 
 async function maybeSendNpcReply({ instruction, plan, execution }) {
-  const hasTalkAction = Array.isArray(plan?.actions) && plan.actions.some((action) => action.type === "talk");
-  if (!hasTalkAction) {
-    return null;
-  }
-
   const talkStep = execution.rawSteps?.find((step) => step?.input?.mode === "click_npc_interact");
   const socialStep = execution.rawSteps?.find((step) => step?.input?.mode === "town_npc_social_loop");
   const finalTalkStep = socialStep || talkStep;
@@ -328,10 +323,10 @@ async function maybeSendNpcReply({ instruction, plan, execution }) {
       id: "reply-1",
       title: "发送闲聊回复",
       sourceType: "talk_reply",
-      type: "type_text",
+      type: "send_chat_message",
       text: replyText,
-      clickRatio: [0.18, 0.94],
-      pressEnter: true,
+      closeAfterSend: true,
+      closeSettleMs: 700,
       postDelayMs: 300
     }
   ]);

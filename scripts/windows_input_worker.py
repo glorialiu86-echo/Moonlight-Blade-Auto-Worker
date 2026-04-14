@@ -671,6 +671,36 @@ def resolve_shortcut_key(name: str) -> str:
     return key
 
 
+def send_chat_message(
+    hwnd: int,
+    text: str,
+    close_after_send: bool,
+    close_settle_ms: int,
+) -> dict[str, Any]:
+    focus_window(hwnd)
+    click_named_point(hwnd, "chat_input")
+    time.sleep(0.08)
+
+    pyperclip.copy(text)
+    pydirectinput.keyDown("ctrl")
+    pydirectinput.press("v")
+    pydirectinput.keyUp("ctrl")
+    time.sleep(0.08)
+
+    click_named_point(hwnd, "chat_send")
+    time.sleep(0.18)
+
+    if close_after_send:
+        exit_panel(hwnd)
+        time.sleep(max(0, close_settle_ms) / 1000)
+
+    return {
+        "textLength": len(text),
+        "closeAfterSend": close_after_send,
+        "closeSettleMs": close_settle_ms,
+    }
+
+
 def find_moving_view_button(hwnd: int) -> dict[str, Any] | None:
     roi = NPC_STAGE_ROIS["moving_view_search"]
     bounds = get_window_bounds(hwnd)
@@ -1861,6 +1891,25 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
                 "text": text,
                 "pressEnter": bool(action.get("pressEnter", False)),
                 "clickRatio": click_ratio,
+            },
+        }
+
+    if action_type == "send_chat_message":
+        text = str(action.get("text") or "").strip()
+        if not text:
+            raise RuntimeError("send_chat_message action requires text")
+        close_after_send = bool(action.get("closeAfterSend", True))
+        close_settle_ms = int(action.get("closeSettleMs") or 600)
+        input_state = send_chat_message(hwnd, text, close_after_send, close_settle_ms)
+        time.sleep(post_delay_ms / 1000)
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": f"Sent chat message with length {len(text)}",
+            "input": {
+                "text": text,
+                **input_state,
             },
         }
 

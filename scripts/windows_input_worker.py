@@ -83,7 +83,7 @@ ACTION_POINTS = {
     "confirm_small_talk": (1481 / 2537, 1018 / 1384),
     "trade": (2139 / 2537, 1139 / 1384),
     "gift": (0.95, 0.89),
-    "close_panel": (0.98, 0.05),
+    "close_panel": (1115 / 2537, 691 / 1384),
     "trade_left_slot": (0.27, 0.33),
     "trade_left_up_shelf": (0.38, 0.82),
     "trade_right_slot": (0.82, 0.20),
@@ -1241,6 +1241,8 @@ def find_selected_target_anchor(hwnd: int, target_text: str) -> dict[str, Any] |
 
 def exit_panel(hwnd: int) -> None:
     click_named_point(hwnd, "close_panel")
+    # Closing the chat page is not instantaneous. Wait for the UI transition to
+    # settle before assuming the clean town page is ready for the next action.
     time.sleep(0.25)
 
 

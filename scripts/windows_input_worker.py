@@ -80,7 +80,7 @@ ACTION_POINTS = {
     "view": (0.32, 0.57),
     "talk": (1870 / 2537, 1252 / 1384),
     "small_talk": (1677 / 2537, 1081 / 1384),
-    "confirm_small_talk": (0.59, 0.80),
+    "confirm_small_talk": (1481 / 2537, 1018 / 1384),
     "trade": (2139 / 2537, 1139 / 1384),
     "gift": (0.95, 0.89),
     "close_panel": (0.98, 0.05),

@@ -25,6 +25,8 @@ ITERATIONS = 20
 TARGET_TEMPLATE_THRESHOLD = 0.30
 TARGET_BODY_RATIO_X = 0.0
 TARGET_BODY_RATIO_Y = 4.8
+CONFIRM_SMALL_TALK_BUTTON_CLIENT_RATIO_X = 1481 / 2537
+CONFIRM_SMALL_TALK_BUTTON_CLIENT_RATIO_Y = 1018 / 1384
 SMALL_TALK_BUTTON_CLIENT_RATIO_X = 1677 / 2537
 SMALL_TALK_BUTTON_CLIENT_RATIO_Y = 1081 / 1384
 TALK_BUTTON_CLIENT_RATIO_X = 1870 / 2537
@@ -317,6 +319,16 @@ def locate_manual_small_talk_point(hwnd: int) -> dict:
     # Small talk is a fixed button inside the secondary talk UI. Treat it as
     # fixed UI truth and click it directly by relative coordinates.
     return build_screen_point_from_ratio(hwnd, SMALL_TALK_BUTTON_CLIENT_RATIO_X, SMALL_TALK_BUTTON_CLIENT_RATIO_Y)
+
+
+def locate_manual_confirm_small_talk_point(hwnd: int) -> dict:
+    # The confirm button after small talk is also fixed UI and should be clicked
+    # directly from its manually marked relative coordinates.
+    return build_screen_point_from_ratio(
+        hwnd,
+        CONFIRM_SMALL_TALK_BUTTON_CLIENT_RATIO_X,
+        CONFIRM_SMALL_TALK_BUTTON_CLIENT_RATIO_Y,
+    )
 
 
 def locate_cross_point(hwnd: int, _full_image: np.ndarray) -> dict:

@@ -20,6 +20,7 @@
 
 - 本地 `Node` 服务、`.env` 加载、千问文本链路
 - 截图感知主链路已切到本地 `RapidOCR` OCR worker
+- 文本规划链路已支持单独切到本地 `Ollama`，不再要求和视觉/OCR 共用同一 provider
 - Windows 本地 Python 环境重建，`faster-whisper` CPU/GPU 双环境补齐
 - 自动截图采集链路接入主服务
 - 固定游戏窗口截图 `capture-game-window.ps1` 可直接运行
@@ -28,6 +29,7 @@
 - 自动截图已可更新 `latestPerception` 与 `capture` 状态
 - 自动截图调度已改为按目标频率补齐剩余时间，不再在每轮分析结束后额外空等一个完整间隔
 - 路人 NPC 对话链路已明确切到点击 owner，`F` 只保留给功能型 NPC 作为候选交互键
+- 本机已拉起 `qwen2.5:3b`，文本规划可走本地 `Ollama`
 - 前端已拆成主播首页 `/` 和调试页 `/debug`
 - 主播首页已加入明确的“开始执行任务 / 停止执行任务”主按钮
 

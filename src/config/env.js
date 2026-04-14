@@ -13,12 +13,18 @@ function optionalEnv(name, fallback) {
   return value || fallback;
 }
 
-export function getLlmConfig() {
-  const provider = requireEnv("LLM_PROVIDER");
+function parseProvider(name, fallback) {
+  const provider = optionalEnv(name, fallback);
 
   if (!["qwen", "openai_compatible"].includes(provider)) {
-    throw new Error(`Unsupported LLM_PROVIDER: ${provider}`);
+    throw new Error(`Unsupported ${name}: ${provider}`);
   }
+
+  return provider;
+}
+
+export function getLlmConfig() {
+  const provider = parseProvider("LLM_PROVIDER", requireEnv("LLM_PROVIDER"));
 
   const baseUrl = requireEnv("LLM_BASE_URL").replace(/\/+$/, "");
   const apiKey = process.env.LLM_API_KEY?.trim() || "";
@@ -31,6 +37,19 @@ export function getLlmConfig() {
     visionModel: requireEnv("LLM_VISION_MODEL"),
     ocrModel: requireEnv("LLM_OCR_MODEL"),
     apiKey
+  };
+}
+
+export function getTextLlmConfig() {
+  const fallback = getLlmConfig();
+  const provider = parseProvider("TEXT_LLM_PROVIDER", fallback.provider);
+
+  return {
+    provider,
+    baseUrl: optionalEnv("TEXT_LLM_BASE_URL", fallback.baseUrl).replace(/\/+$/, ""),
+    model: optionalEnv("TEXT_LLM_MODEL", fallback.model),
+    reasoningModel: optionalEnv("TEXT_LLM_REASONING_MODEL", fallback.reasoningModel),
+    apiKey: optionalEnv("TEXT_LLM_API_KEY", fallback.apiKey)
   };
 }
 

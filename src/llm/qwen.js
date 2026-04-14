@@ -1,6 +1,6 @@
 import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
-import { getLlmConfig } from "../config/env.js";
+import { getLlmConfig, getTextLlmConfig } from "../config/env.js";
 
 function normalizeMessages(messages) {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -89,7 +89,7 @@ function providerLabel(provider) {
 }
 
 async function requestChatCompletion({ messages, model, maxTokens = 512, temperature = 0.7 }) {
-  const config = getLlmConfig();
+  const config = getTextLlmConfig();
   const body = {
     model,
     messages: normalizeMessages(messages),
@@ -135,7 +135,7 @@ function completionToResult(completion) {
 }
 
 export async function createChatCompletion({ messages, model, maxTokens, temperature }) {
-  const config = getLlmConfig();
+  const config = getTextLlmConfig();
   return requestChatCompletion({
     messages,
     model: model || config.model,
@@ -152,7 +152,7 @@ export async function generateText({
   maxTokens,
   temperature
 }) {
-  const config = getLlmConfig();
+  const config = getTextLlmConfig();
   const messages = [];
 
   if (systemPrompt) {

@@ -16,18 +16,21 @@ function optionalEnv(name, fallback) {
 export function getLlmConfig() {
   const provider = requireEnv("LLM_PROVIDER");
 
-  if (provider !== "qwen") {
+  if (!["qwen", "openai_compatible"].includes(provider)) {
     throw new Error(`Unsupported LLM_PROVIDER: ${provider}`);
   }
 
+  const baseUrl = requireEnv("LLM_BASE_URL").replace(/\/+$/, "");
+  const apiKey = process.env.LLM_API_KEY?.trim() || "";
+
   return {
     provider,
-    baseUrl: requireEnv("LLM_BASE_URL").replace(/\/+$/, ""),
+    baseUrl,
     model: requireEnv("LLM_MODEL"),
     reasoningModel: requireEnv("LLM_REASONING_MODEL"),
     visionModel: requireEnv("LLM_VISION_MODEL"),
     ocrModel: requireEnv("LLM_OCR_MODEL"),
-    apiKey: requireEnv("LLM_API_KEY")
+    apiKey
   };
 }
 

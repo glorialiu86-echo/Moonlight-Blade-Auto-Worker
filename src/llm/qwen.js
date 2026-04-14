@@ -84,7 +84,11 @@ function toImageUrl(imageInput) {
   return `data:${contentType};base64,${buffer.toString("base64")}`;
 }
 
-async function requestQwen({ messages, model, maxTokens = 512, temperature = 0.7 }) {
+function providerLabel(provider) {
+  return provider === "qwen" ? "Qwen" : "OpenAI-compatible provider";
+}
+
+async function requestChatCompletion({ messages, model, maxTokens = 512, temperature = 0.7 }) {
   const config = getLlmConfig();
   const body = {
     model,
@@ -94,21 +98,26 @@ async function requestQwen({ messages, model, maxTokens = 512, temperature = 0.7
     stream: false
   };
 
+  const headers = {
+    "Content-Type": "application/json"
+  };
+
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
   const response = await fetch(`${config.baseUrl}/chat/completions`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.apiKey}`
-    },
+    headers,
     body: JSON.stringify(body)
   });
 
   const raw = await response.text();
-  const payload = parseJsonResponse(raw, "Qwen");
+  const payload = parseJsonResponse(raw, providerLabel(config.provider));
 
   if (!response.ok) {
     const message = payload?.error?.message || `HTTP ${response.status}`;
-    throw new Error(`Qwen API error: ${message}`);
+    throw new Error(`${providerLabel(config.provider)} API error: ${message}`);
   }
 
   return payload;
@@ -127,7 +136,7 @@ function completionToResult(completion) {
 
 export async function createChatCompletion({ messages, model, maxTokens, temperature }) {
   const config = getLlmConfig();
-  return requestQwen({
+  return requestChatCompletion({
     messages,
     model: model || config.model,
     maxTokens,

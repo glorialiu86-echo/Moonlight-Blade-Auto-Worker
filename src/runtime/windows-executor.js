@@ -28,15 +28,23 @@ function createWorkerActions(plan) {
     switch (action.type) {
       case "talk":
       case "gift":
-      case "trade":
       case "threaten":
       case "steal":
       case "strike":
         return {
           ...baseAction,
-          type: "press_key",
-          key: "f",
-          postDelayMs: 600
+          type: "click_npc_interact",
+          timeoutMs: 4500,
+          movePulseMs: 160,
+          scanIntervalMs: 180
+        };
+      case "trade":
+        return {
+          ...baseAction,
+          type: "click_npc_interact",
+          timeoutMs: 5000,
+          movePulseMs: 180,
+          scanIntervalMs: 180
         };
       case "escape":
         return {

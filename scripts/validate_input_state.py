@@ -208,35 +208,40 @@ def find_clickable_world_target(hwnd: int, full_image: np.ndarray) -> dict | Non
         "name": best_match["text"],
         "screenX": int(click_x),
         "screenY": int(click_y),
+        "clientX": int(click_x - bounds["left"]),
+        "clientY": int(click_y - bounds["top"]),
         "score": round(float(item["score"]), 4),
     }
 
 
-def click_current_npc_logic(hwnd: int) -> dict:
+def lock_fixed_world_target(hwnd: int) -> dict:
     full_image = capture_full_client(hwnd)
     target = find_clickable_world_target(hwnd, full_image)
     if target is None:
-        return {
-            "clicked": False,
-            "targetName": "",
-            "reason": "NO_WORLD_TARGET_FOUND",
-        }
+        return None
+    return {
+        "targetName": target["name"],
+        "target": target,
+    }
 
+
+def click_fixed_target(hwnd: int, fixed_target: dict) -> dict:
+    target = fixed_target["target"]
     click_state = input_worker.click_screen_point(hwnd, target["screenX"], target["screenY"], "left")
     return {
         "clicked": True,
-        "targetName": target["name"],
+        "targetName": fixed_target["targetName"],
         "target": target,
         "click": click_state,
     }
 
 
-def run_phase_one(hwnd: int) -> dict:
+def run_phase_one(hwnd: int, fixed_target: dict) -> dict:
     phase_results = []
     success_count = 0
 
     for index in range(1, ITERATIONS + 1):
-        click_result = click_current_npc_logic(hwnd)
+        click_result = click_fixed_target(hwnd, fixed_target)
         time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
         full_image = capture_full_client(hwnd)
         selected_state = detect_selected_state(full_image)
@@ -257,6 +262,8 @@ def run_phase_one(hwnd: int) -> dict:
             "hasCross": selected_state["hasCross"],
             "hasHpBar": selected_state["hasHpBar"],
             "targetName": click_result.get("targetName", ""),
+            "targetClientX": click_result["target"]["clientX"],
+            "targetClientY": click_result["target"]["clientY"],
             "screenshot": screenshot_path,
         }
         phase_results.append(row)
@@ -269,13 +276,13 @@ def run_phase_one(hwnd: int) -> dict:
     }
 
 
-def run_phase_two(hwnd: int) -> dict:
+def run_phase_two(hwnd: int, fixed_target: dict) -> dict:
     template = None
     phase_results = []
     success_count = 0
 
     for index in range(1, ITERATIONS + 1):
-        click_result = click_current_npc_logic(hwnd)
+        click_result = click_fixed_target(hwnd, fixed_target)
         time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
         selected_image = capture_full_client(hwnd)
         selected_state = detect_selected_state(selected_image)
@@ -287,6 +294,8 @@ def run_phase_two(hwnd: int) -> dict:
                 "reason": "RESELECT_FAILED",
                 "ocrName": selected_state["name"],
                 "targetName": click_result.get("targetName", ""),
+                "targetClientX": click_result["target"]["clientX"],
+                "targetClientY": click_result["target"]["clientY"],
             }
             phase_results.append(row)
             print(json.dumps(row, ensure_ascii=False))
@@ -304,6 +313,8 @@ def run_phase_two(hwnd: int) -> dict:
                 "reason": "CROSS_NOT_FOUND",
                 "ocrName": selected_state["name"],
                 "targetName": click_result.get("targetName", ""),
+                "targetClientX": click_result["target"]["clientX"],
+                "targetClientY": click_result["target"]["clientY"],
             }
             phase_results.append(row)
             print(json.dumps(row, ensure_ascii=False))
@@ -327,6 +338,8 @@ def run_phase_two(hwnd: int) -> dict:
             "detectedSelectedAfterClose": after_state["selected"],
             "crossScore": cross_match["score"],
             "targetName": click_result.get("targetName", ""),
+            "targetClientX": click_result["target"]["clientX"],
+            "targetClientY": click_result["target"]["clientY"],
             "screenshot": screenshot_path,
         }
         phase_results.append(row)
@@ -345,24 +358,30 @@ def main() -> int:
         raise RuntimeError("GAME_WINDOW_NOT_FOUND")
 
     input_worker.focus_window(hwnd)
+    fixed_target = lock_fixed_world_target(hwnd)
+    if fixed_target is None:
+        raise RuntimeError("NO_WORLD_TARGET_FOUND")
     print(
         json.dumps(
             {
                 "phase": "setup",
-                "logic": "ocr_world_name_then_single_click",
+                "logic": "lock_once_then_fixed_coordinate_closed_loop",
                 "selectedStateOwner": "single_fullscreen_frame",
                 "closeOwner": "template_match_cross_only",
+                "fixedTargetName": fixed_target["targetName"],
+                "fixedTargetClientX": fixed_target["target"]["clientX"],
+                "fixedTargetClientY": fixed_target["target"]["clientY"],
             },
             ensure_ascii=False,
         )
     )
-    phase_one = run_phase_one(hwnd)
+    phase_one = run_phase_one(hwnd, fixed_target)
     print(json.dumps({"phase": "phase1_summary", **phase_one}, ensure_ascii=False))
 
     if not phase_one["passed"]:
         return 2
 
-    phase_two = run_phase_two(hwnd)
+    phase_two = run_phase_two(hwnd, fixed_target)
     print(json.dumps({"phase": "phase2_summary", **phase_two}, ensure_ascii=False))
     return 0 if phase_two["passed"] else 3
 

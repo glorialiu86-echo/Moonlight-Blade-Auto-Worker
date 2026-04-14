@@ -1,5 +1,6 @@
 const state = {
   submitting: false,
+  uploadingImage: false,
   voiceSupported: false,
   voice: {
     recording: false,
@@ -22,13 +23,23 @@ const elements = {
   agentObjectiveValue: document.querySelector("#agentObjectiveValue"),
   agentSourceValue: document.querySelector("#agentSourceValue"),
   agentQueueValue: document.querySelector("#agentQueueValue"),
+  captureSummaryCard: document.querySelector("#captureSummaryCard"),
+  captureStartButton: document.querySelector("#captureStartButton"),
+  capturePauseButton: document.querySelector("#capturePauseButton"),
+  captureTriggerButton: document.querySelector("#captureTriggerButton"),
+  captureStopButton: document.querySelector("#captureStopButton"),
   messageList: document.querySelector("#messageList"),
+  experimentList: document.querySelector("#experimentList"),
+  perceptionSummaryCard: document.querySelector("#perceptionSummaryCard"),
+  screenshotInput: document.querySelector("#screenshotInput"),
+  imageStatus: document.querySelector("#imageStatus"),
   voiceStartButton: document.querySelector("#voiceStartButton"),
   voiceStopButton: document.querySelector("#voiceStopButton"),
   voiceStatus: document.querySelector("#voiceStatus"),
   userMessageTemplate: document.querySelector("#userMessageTemplate"),
   assistantMessageTemplate: document.querySelector("#assistantMessageTemplate"),
-  actionTemplate: document.querySelector("#actionTemplate")
+  actionTemplate: document.querySelector("#actionTemplate"),
+  experimentTemplate: document.querySelector("#experimentTemplate")
 };
 
 async function request(path, options = {}) {
@@ -51,13 +62,22 @@ function updateVoiceStatus(message) {
   elements.voiceStatus.textContent = message;
 }
 
+function updateImageStatus(message) {
+  elements.imageStatus.textContent = message;
+}
+
 function syncUiState() {
   const { recording, transcribing } = state.voice;
-  const busy = state.submitting || transcribing;
+  const busy = state.submitting || transcribing || state.uploadingImage;
+
   elements.instructionInput.disabled = busy;
   elements.composerForm.querySelector('button[type="submit"]').disabled = busy || recording;
   elements.voiceStartButton.disabled = !state.voiceSupported || busy || recording;
   elements.voiceStopButton.disabled = !recording;
+  elements.captureStartButton.disabled = busy;
+  elements.capturePauseButton.disabled = busy;
+  elements.captureTriggerButton.disabled = busy;
+  elements.captureStopButton.disabled = busy;
 }
 
 function scrollMessagesToBottom() {
@@ -67,50 +87,62 @@ function scrollMessagesToBottom() {
 function renderEmptyState() {
   elements.messageList.innerHTML = `
     <article class="message message-assistant empty-state">
-      <div class="message-role">AI 助手</div>
-      <p class="message-text">可以直接开始对话。当前只验证文字 / 语音输入、AI 回复、思考链条和动作规划。</p>
-      <p class="message-meta">当前只保留对话框，不暴露手动截图、场景切换或控制按钮；截图识别会在后续 Windows 链路里再接入。</p>
+      <div class="message-role">籽小刀</div>
+      <p class="message-text">可以开始做第一轮视频实验了。你给任务，我负责误读、规划、解释和尽量留后果。</p>
+      <p class="message-meta">建议先启用自动窗口截图，或者手动上传一张游戏截图，再给我一条模糊任务。</p>
     </article>
   `;
 }
 
 function formatAgentMode(mode, phase) {
   if (mode === "user_priority") {
-    if (phase === "queued") {
-      return "等待抢占";
-    }
-
-    return "用户优先";
+    return phase === "queued" ? "等待用户插队生效" : "用户优先";
   }
 
   if (phase === "cooldown") {
-    return "优先冷却";
+    return "刚处理完用户命令";
   }
 
   if (phase === "waiting") {
     return "待机";
   }
 
-  return "自主运行";
+  return "自主实验";
 }
 
 function formatTurnSource(source) {
   if (source === "user") {
-    return "用户输入";
+    return "主播发起";
   }
 
   if (source === "agent") {
-    return "AI 自主";
+    return "籽小刀自主";
   }
 
   return "-";
+}
+
+function formatCaptureStatus(status) {
+  if (status === "running") {
+    return "运行中";
+  }
+
+  if (status === "paused") {
+    return "已暂停";
+  }
+
+  if (status === "error") {
+    return "错误";
+  }
+
+  return "未启动";
 }
 
 function renderAgentPanel(runtimeState) {
   const agent = runtimeState.agent || {};
   elements.agentStatusValue.textContent = runtimeState.status || "idle";
   elements.agentModeValue.textContent = formatAgentMode(agent.mode, agent.phase);
-  elements.agentObjectiveValue.textContent = agent.currentObjective || "等待自主目标";
+  elements.agentObjectiveValue.textContent = agent.currentObjective || "等待目标";
   elements.agentSourceValue.textContent = formatTurnSource(agent.lastTurnSource);
   elements.agentQueueValue.textContent = agent.queuedUserObjective || "暂无";
   elements.headerPill.textContent = `当前模式：${formatAgentMode(agent.mode, agent.phase)}`;
@@ -119,13 +151,23 @@ function renderAgentPanel(runtimeState) {
 function renderAssistantMessage(message) {
   const node = elements.assistantMessageTemplate.content.firstElementChild.cloneNode(true);
   node.querySelector(".message-text").textContent = message.text || "本轮暂无回复。";
-  node.querySelector(".message-meta").textContent = `环境：${message.sceneLabel || "未判定"} | 风险：${message.riskLevel || "-"}`;
-  node.querySelector(".message-perception").textContent = message.perceptionSummary || "未挂上截图识别结果。";
+  node.querySelector(".message-meta").textContent = `环境：${message.sceneLabel || "未判断"} | 风险：${message.riskLevel || "-"}`;
+  node.querySelector(".message-perception").textContent = message.perceptionSummary || "本轮还没有环境输入。";
 
+  const interpretationBlock = node.querySelector('[data-block="interpretation"]');
   const thinkingBlock = node.querySelector('[data-block="thinking"]');
   const actionBlock = node.querySelector('[data-block="actions"]');
+  const recoveryBlock = node.querySelector('[data-block="recovery"]');
+  const interpretationText = node.querySelector(".message-interpretation");
+  const recoveryText = node.querySelector(".message-recovery");
   const thinkingList = node.querySelector(".thinking-list");
   const actionList = node.querySelector(".action-list");
+
+  if (message.personaInterpretation) {
+    interpretationText.textContent = message.personaInterpretation;
+  } else {
+    interpretationBlock.hidden = true;
+  }
 
   if (Array.isArray(message.thinkingChain) && message.thinkingChain.length > 0) {
     message.thinkingChain.forEach((item) => {
@@ -141,11 +183,17 @@ function renderAssistantMessage(message) {
     message.actions.forEach((action) => {
       const actionNode = elements.actionTemplate.content.firstElementChild.cloneNode(true);
       actionNode.querySelector(".action-title").textContent = action.title || "未命名动作";
-      actionNode.querySelector(".action-detail").textContent = action.detail || "";
+      actionNode.querySelector(".action-detail").textContent = action.detail || action.reason || "";
       actionList.appendChild(actionNode);
     });
   } else {
     actionBlock.hidden = true;
+  }
+
+  if (message.recoveryLine) {
+    recoveryText.textContent = message.recoveryLine;
+  } else {
+    recoveryBlock.hidden = true;
   }
 
   return node;
@@ -154,7 +202,7 @@ function renderAssistantMessage(message) {
 function renderUserMessage(message) {
   const node = elements.userMessageTemplate.content.firstElementChild.cloneNode(true);
   node.dataset.origin = message.origin || "user";
-  node.querySelector(".message-role").textContent = message.origin === "agent" ? "AI 自主目标" : "籽岷";
+  node.querySelector(".message-role").textContent = message.origin === "agent" ? "自主实验目标" : "主播输入";
   node.querySelector(".message-text").textContent = message.text || "";
   return node;
 }
@@ -178,10 +226,104 @@ function renderMessages(messages) {
   scrollMessagesToBottom();
 }
 
+function renderPerception(perception) {
+  if (!perception) {
+    elements.perceptionSummaryCard.innerHTML = `
+      <p class="summary-title">暂无截图</p>
+      <p class="summary-body">启用自动窗口截图或上传一张调试截图后，这里会显示场景、NPC、可交互项和风险提示。</p>
+    `;
+    return;
+  }
+
+  const npcText = perception.npcNames?.join("、") || "无";
+  const optionText = perception.interactiveOptions?.join("、") || "无";
+  const alertText = perception.alerts?.join("、") || "无";
+  const sourceText = perception.source === "auto_window" ? "自动窗口截图" : "手动上传截图";
+
+  elements.perceptionSummaryCard.innerHTML = `
+    <p class="summary-title">${perception.sceneLabel || "未判断"}</p>
+    <p class="summary-body">${perception.summary || "暂无总结"}</p>
+    <p class="summary-line"><strong>来源：</strong>${sourceText}</p>
+    <p class="summary-line"><strong>NPC：</strong>${npcText}</p>
+    <p class="summary-line"><strong>交互项：</strong>${optionText}</p>
+    <p class="summary-line"><strong>风险：</strong>${alertText}</p>
+  `;
+}
+
+function renderCapturePanel(capture) {
+  if (!capture) {
+    elements.captureSummaryCard.innerHTML = `
+      <p class="summary-title">未启动</p>
+      <p class="summary-body">自动截图状态暂不可用。</p>
+    `;
+    return;
+  }
+
+  const boundsText = capture.lastBounds
+    ? `${capture.lastBounds.width} x ${capture.lastBounds.height} @ (${capture.lastBounds.left}, ${capture.lastBounds.top})`
+    : "暂无";
+  const errorText = capture.lastErrorMessage || "无";
+  const sourceText = capture.lastImageSource === "auto_window"
+    ? "自动窗口截图"
+    : capture.lastImageSource === "manual_upload"
+      ? "手动上传截图"
+      : "暂无";
+
+  elements.captureSummaryCard.innerHTML = `
+    <p class="summary-title">${formatCaptureStatus(capture.status)}</p>
+    <p class="summary-body">当前感知 owner：自动窗口截图。手动上传仍可调试，但不会改变自动截图状态机。</p>
+    <p class="summary-line"><strong>窗口：</strong>${capture.lastWindowTitle || "暂无"}</p>
+    <p class="summary-line"><strong>最近截图：</strong>${capture.lastCaptureAt || "暂无"}</p>
+    <p class="summary-line"><strong>最近分析：</strong>${capture.lastAnalyzeAt || "暂无"}</p>
+    <p class="summary-line"><strong>窗口尺寸：</strong>${boundsText}</p>
+    <p class="summary-line"><strong>最近来源：</strong>${sourceText}</p>
+    <p class="summary-line"><strong>错误：</strong>${errorText}</p>
+  `;
+}
+
+function renderExperiments(experiments) {
+  elements.experimentList.innerHTML = "";
+
+  if (!Array.isArray(experiments) || experiments.length === 0) {
+    elements.experimentList.innerHTML = `
+      <article class="experiment-item experiment-empty">
+        <p class="experiment-title">还没有实验记录</p>
+        <p class="experiment-meta">先准备环境感知，再给籽小刀一条模糊任务。</p>
+      </article>
+    `;
+    return;
+  }
+
+  experiments.forEach((experiment) => {
+    const node = elements.experimentTemplate.content.firstElementChild.cloneNode(true);
+    node.querySelector(".experiment-title").textContent = experiment.title || "未命名实验";
+    node.querySelector(".experiment-meta").textContent =
+      `${experiment.scene || "unknown"} | 风险 ${experiment.riskLevel || "-"} | ${experiment.selectedStrategy || "未记录策略"}`;
+    node.querySelector(".experiment-outcome").textContent =
+      experiment.outcome || experiment.perceptionSummary || "暂无结果总结";
+    elements.experimentList.appendChild(node);
+  });
+}
+
+function renderRuntimeState(runtimeState) {
+  renderAgentPanel(runtimeState);
+  renderMessages(runtimeState.messages);
+  renderCapturePanel(runtimeState.capture);
+  renderPerception(runtimeState.latestPerception);
+  renderExperiments(runtimeState.experiments);
+}
+
 async function refresh() {
   const payload = await request("/api/state");
-  renderAgentPanel(payload.state);
-  renderMessages(payload.state.messages);
+  renderRuntimeState(payload.state);
+}
+
+async function sendCaptureControl(action) {
+  const payload = await request("/api/capture/control", {
+    method: "POST",
+    body: JSON.stringify({ action })
+  });
+  renderRuntimeState(payload.state);
 }
 
 function appendTranscriptToComposer(text) {
@@ -201,7 +343,7 @@ function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("录音文件读取失败"));
+    reader.onerror = () => reject(new Error("文件读取失败"));
     reader.readAsDataURL(blob);
   });
 }
@@ -328,7 +470,7 @@ async function stopVoiceRecording() {
   state.voice.recording = false;
   state.voice.transcribing = true;
   syncUiState();
-  updateVoiceStatus("录音结束，正在上传到本地 Faster-Whisper 做转写。");
+  updateVoiceStatus("录音结束，正在交给本地 Faster-Whisper 转写。");
 
   try {
     const pcmChunks = [...state.voice.pcmChunks];
@@ -337,7 +479,7 @@ async function stopVoiceRecording() {
     state.voice.pcmChunks = [];
 
     if (pcmChunks.length === 0) {
-      throw new Error("未采集到有效语音，请重试。");
+      throw new Error("没有采集到有效语音，请重试。");
     }
 
     const merged = mergeFloat32Chunks(pcmChunks);
@@ -399,7 +541,7 @@ async function startVoiceRecording() {
     sourceNode.connect(processorNode);
     processorNode.connect(audioContext.destination);
 
-    updateVoiceStatus("录音中。再次点击“停止语音”后，会把录音交给本地 Faster-Whisper 转写。");
+    updateVoiceStatus("录音中。点击“停止语音”后会自动转写到同一个输入框。");
     syncUiState();
   } catch (error) {
     await releaseVoiceCapture();
@@ -415,14 +557,44 @@ function initVoiceInput() {
   const mediaDevices = navigator.mediaDevices;
 
   if (!AudioContextClass || !mediaDevices?.getUserMedia) {
-    updateVoiceStatus("当前浏览器不支持正式语音输入。需要麦克风权限、MediaDevices 和 Web Audio API。");
+    updateVoiceStatus("当前浏览器不支持正式语音输入，需要麦克风权限、MediaDevices 和 Web Audio API。");
     syncUiState();
     return;
   }
 
   state.voiceSupported = true;
-  updateVoiceStatus("语音输入已正式接入。点击“开始语音”录音，停止后会调用本地 Faster-Whisper 转写。");
+  updateVoiceStatus("语音输入已接入。录音完成后会写入同一个输入框。");
   syncUiState();
+}
+
+async function uploadScreenshot(file) {
+  if (!file || state.uploadingImage) {
+    return;
+  }
+
+  state.uploadingImage = true;
+  syncUiState();
+  updateImageStatus(`正在分析调试截图：${file.name}`);
+
+  try {
+    const imageDataUrl = await blobToDataUrl(file);
+    const payload = await request("/api/analyze-image", {
+      method: "POST",
+      body: JSON.stringify({
+        imageDataUrl,
+        imageName: file.name
+      })
+    });
+
+    renderRuntimeState(payload.state);
+    updateImageStatus(`调试截图已接入：${file.name}。它会更新当前环境摘要，但不会接管自动截图状态机。`);
+  } catch (error) {
+    updateImageStatus(`调试截图分析失败：${error.message}`);
+  } finally {
+    state.uploadingImage = false;
+    elements.screenshotInput.value = "";
+    syncUiState();
+  }
 }
 
 elements.composerForm.addEventListener("submit", async (event) => {
@@ -430,13 +602,13 @@ elements.composerForm.addEventListener("submit", async (event) => {
 
   const instruction = elements.instructionInput.value.trim();
 
-  if (!instruction || state.submitting || state.voice.recording || state.voice.transcribing) {
+  if (!instruction || state.submitting || state.voice.recording || state.voice.transcribing || state.uploadingImage) {
     return;
   }
 
   state.submitting = true;
   syncUiState();
-  updateVoiceStatus("正在处理本轮对话。");
+  updateVoiceStatus("正在生成这一轮实验。");
 
   try {
     const payload = await request("/api/chat", {
@@ -445,9 +617,8 @@ elements.composerForm.addEventListener("submit", async (event) => {
     });
 
     elements.instructionInput.value = "";
-    renderAgentPanel(payload.state);
-    renderMessages(payload.state.messages);
-    updateVoiceStatus("本轮处理完成，可以继续输入文字或语音。");
+    renderRuntimeState(payload.state);
+    updateVoiceStatus("本轮实验完成，可以继续追加任务或观察自动截图结果。");
   } catch (error) {
     updateVoiceStatus(`本轮处理失败：${error.message}`);
     await refresh().catch(() => {});
@@ -463,6 +634,27 @@ elements.voiceStartButton.addEventListener("click", async () => {
 
 elements.voiceStopButton.addEventListener("click", async () => {
   await stopVoiceRecording();
+});
+
+elements.screenshotInput.addEventListener("change", async (event) => {
+  const [file] = event.target.files || [];
+  await uploadScreenshot(file);
+});
+
+elements.captureStartButton.addEventListener("click", async () => {
+  await sendCaptureControl("start");
+});
+
+elements.capturePauseButton.addEventListener("click", async () => {
+  await sendCaptureControl("pause");
+});
+
+elements.captureTriggerButton.addEventListener("click", async () => {
+  await sendCaptureControl("trigger_once");
+});
+
+elements.captureStopButton.addEventListener("click", async () => {
+  await sendCaptureControl("stop");
 });
 
 initVoiceInput();

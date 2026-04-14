@@ -13,13 +13,14 @@ def emit(payload):
 
 def build_model():
     model_name = os.getenv("LOCAL_ASR_MODEL", "small")
+    device = os.getenv("LOCAL_ASR_DEVICE", "cpu")
     compute_type = os.getenv("LOCAL_ASR_COMPUTE_TYPE", "int8")
     cpu_threads = int(os.getenv("LOCAL_ASR_CPU_THREADS", "4"))
     download_root = os.getenv("LOCAL_ASR_MODEL_CACHE_DIR") or None
 
     model = WhisperModel(
         model_name,
-        device="cpu",
+        device=device,
         compute_type=compute_type,
         cpu_threads=cpu_threads,
         download_root=download_root,
@@ -29,6 +30,7 @@ def build_model():
         {
             "type": "ready",
             "model": model_name,
+            "device": device,
             "compute_type": compute_type,
             "cpu_threads": cpu_threads,
         }

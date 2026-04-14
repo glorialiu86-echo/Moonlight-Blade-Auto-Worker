@@ -4,16 +4,16 @@ import { extractJsonObject } from "../lib/json.js";
 const sceneAliases = {
   town_dialogue: "城镇对话",
   bag_management: "背包管理",
-  market_trade: "交易市场",
-  jail_warning: "牢房或高风险",
-  field_patrol: "野外巡逻"
+  market_trade: "交易/商店",
+  jail_warning: "高风险/通缉",
+  field_patrol: "野外巡游"
 };
 
 function fallbackPerception(ocrText, visionText) {
   return {
     sceneType: "unknown",
     sceneLabel: "未判定",
-    summary: "模型返回了描述，但未能稳定结构化，已保留 OCR 与视觉原文供后续规划使用。",
+    summary: "模型返回了描述，但没能稳定结构化，当前保留 OCR 和视觉原文供后续决策使用。",
     npcNames: [],
     interactiveOptions: [],
     alerts: [],
@@ -54,9 +54,8 @@ function sanitizePerception(raw, ocrText, visionText) {
 
 function buildVisionPrompt() {
   return `
-你在分析一张游戏截图，用于《天涯明月刀》AI玩家控制系统的第二阶段视觉感知。
-
-请严格只输出一个 JSON 对象，不要输出额外解释。
+你在分析一张《天涯明月刀》手游《灵枢绘世》的截图。
+请只输出一个 JSON 对象，不要输出额外解释。
 
 sceneType 只能是以下值之一：
 - town_dialogue
@@ -66,14 +65,14 @@ sceneType 只能是以下值之一：
 - field_patrol
 - unknown
 
-请结合图片内容判断：
-1. 当前界面属于哪种场景
+请结合图片判断：
+1. 当前界面属于什么场景
 2. 是否出现 NPC 名称
 3. 是否出现可交互选项
-4. 是否出现高风险警告、通缉、牢房、失败提示等异常信息
-5. 用一句中文总结当前画面
+4. 是否出现秩序值变化、通缉、抓捕、失败提示或其他异常提醒
+5. 用一句中文总结当前画面，优先服务“视频实验”和“后果展示”
 
-返回 JSON 格式：
+返回格式：
 {
   "sceneType": "town_dialogue|bag_management|market_trade|jail_warning|field_patrol|unknown",
   "sceneLabel": "string",

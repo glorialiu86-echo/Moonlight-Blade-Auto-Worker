@@ -35,6 +35,7 @@ export function getLocalAsrConfig() {
   return {
     model: optionalEnv("LOCAL_ASR_MODEL", "medium"),
     language: optionalEnv("LOCAL_ASR_LANGUAGE", "zh"),
+    device: optionalEnv("LOCAL_ASR_DEVICE", "cpu"),
     computeType: optionalEnv("LOCAL_ASR_COMPUTE_TYPE", "int8"),
     cpuThreads: Number(optionalEnv("LOCAL_ASR_CPU_THREADS", "4")),
     initialPrompt: optionalEnv(

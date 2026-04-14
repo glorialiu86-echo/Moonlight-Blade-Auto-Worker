@@ -130,6 +130,7 @@ function ensureWorker() {
       ...process.env,
       LOCAL_ASR_MODEL: config.model,
       LOCAL_ASR_LANGUAGE: config.language,
+      LOCAL_ASR_DEVICE: config.device,
       LOCAL_ASR_COMPUTE_TYPE: config.computeType,
       LOCAL_ASR_CPU_THREADS: String(config.cpuThreads),
       LOCAL_ASR_INITIAL_PROMPT: config.initialPrompt,

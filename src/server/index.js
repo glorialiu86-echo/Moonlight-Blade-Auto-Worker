@@ -2,17 +2,21 @@ import "../config/load-env.js";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { readFile, writeFile, rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { transcribeWithLocalWhisper } from "../asr/local-whisper-client.js";
+import { createAutoCaptureService } from "../capture/auto-capture-service.js";
+import { captureGameWindow } from "../capture/windows-game-window.js";
 import { createTurnPlan } from "../llm/planner.js";
 import { analyzeScreenshot } from "../perception/analyzer.js";
-import { runMockExecution } from "../runtime/mock-executor.js";
+import { runWindowsExecution } from "../runtime/windows-executor.js";
 import {
+  appendExperiment,
   appendLog,
   appendMessage,
   getState,
   resetRuntime,
+  setCaptureState,
   setCurrentTurn,
   setLastError,
   setLatestPerception,
@@ -29,14 +33,33 @@ const AUTONOMOUS_START_DELAY_MS = 6000;
 const USER_PRIORITY_COOLDOWN_MS = 60000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
+const CAPTURE_INTERVAL_MS = 3000;
 const AUTONOMOUS_OBJECTIVE_POOL = [
-  "先去主城里找一个看起来最有故事的 NPC，试着套近乎并观察他会不会给出任务线索。",
-  "去看看有没有适合顺手接下来的轻量任务，优先选能稳定推进等级或声望的路线。",
-  "先用不太高调的方式赚一点快钱，观察有没有交易、跑腿或低风险社交机会。",
-  "在附近转一圈，找找值得主动互动的 NPC、任务点或资源点，别原地发呆。"
+  "去找一个看起来最容易闹出后果的 NPC，先试探对方底线。",
+  "找一个能把‘一技之长’理解歪掉的切入口，先观察再出手。",
+  "看看附近有没有能快速制造秩序变化、关系变化或利益变化的机会。",
+  "别原地发呆，去找一个能拍出反差感的互动场景。"
 ];
 
 let turnInFlight = false;
+
+const autoCaptureService = createAutoCaptureService({
+  captureWindow: () => captureGameWindow(),
+  analyzeScreenshot,
+  intervalMs: CAPTURE_INTERVAL_MS,
+  onPerception: (perception, meta) => {
+    setLatestPerception(perception, meta);
+    setCaptureState({
+      lastImageSource: "auto_window"
+    });
+  },
+  onStateChange: (captureState) => {
+    setCaptureState(captureState);
+  },
+  onLog: (level, message, meta = null) => {
+    appendLog(level, message, meta);
+  }
+});
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -92,14 +115,14 @@ function parseAudioDataUrl(audioDataUrl) {
 
   const mimeSubtype = match[1].toLowerCase();
   const extensionMap = {
-    "mpeg": "mp3",
-    "mpga": "mp3",
-    "wav": "wav",
+    mpeg: "mp3",
+    mpga: "mp3",
+    wav: "wav",
     "x-wav": "wav",
-    "webm": "webm",
-    "ogg": "ogg",
-    "mp4": "m4a",
-    "aac": "aac"
+    webm: "webm",
+    ogg: "ogg",
+    mp4: "m4a",
+    aac: "aac"
   };
 
   return {
@@ -110,7 +133,10 @@ function parseAudioDataUrl(audioDataUrl) {
 
 async function writeTempAudioFile(audioDataUrl) {
   const { extension, buffer } = parseAudioDataUrl(audioDataUrl);
-  const filePath = path.join(os.tmpdir(), `moonlight-blade-voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`);
+  const filePath = path.join(
+    os.tmpdir(),
+    `moonlight-blade-voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`
+  );
   await writeFile(filePath, buffer);
   return filePath;
 }
@@ -137,11 +163,33 @@ async function serveStatic(response, pathname) {
   response.end(content);
 }
 
+function perceptionSummaryBySource(perception, source) {
+  if (!perception) {
+    return source === "agent"
+      ? "当前自主实验还没有截图输入，先按文字目标和既有上下文推进。"
+      : "当前还没有截图输入，本轮只基于文字/语音指令生成实验方案。";
+  }
+
+  return `已结合最新截图：${perception.sceneLabel || "未判定场景"}。${perception.summary || "暂无视觉总结。"}`
+    .trim();
+}
+
+function ensureAutoCaptureRunning() {
+  const captureState = getState().capture;
+
+  if (!captureState.enabled || captureState.status === "idle" || captureState.status === "paused") {
+    autoCaptureService.start();
+  }
+}
+
 function buildAssistantMessage({ plan, execution, perceptionSummary }) {
   return {
     role: "assistant",
-    text: `我会先按“${plan.selectedStrategy}”推进。${execution.outcome}`,
+    text: `籽小刀判断：${plan.personaInterpretation}。我先按“${plan.selectedStrategy}”推进。${execution.outcome}`,
+    intentSummary: plan.intent,
+    personaInterpretation: plan.personaInterpretation,
     thinkingChain: plan.thinkingChain,
+    recoveryLine: plan.recoveryLine,
     perceptionSummary,
     sceneLabel: plan.environment,
     riskLevel: plan.riskLevel,
@@ -162,11 +210,13 @@ function buildUserMessage({ instruction, scene, perception, origin = "user" }) {
 function buildPlannerContext(plan) {
   return {
     intent: plan.intent,
+    personaInterpretation: plan.personaInterpretation,
     environment: plan.environment,
     candidateStrategies: plan.candidateStrategies,
     selectedStrategy: plan.selectedStrategy,
     riskLevel: plan.riskLevel,
     thinkingChain: plan.thinkingChain,
+    recoveryLine: plan.recoveryLine,
     actions: plan.actions
   };
 }
@@ -182,6 +232,34 @@ function appendAssistantPlanMessage({ plan, execution, perceptionSummary }) {
   });
 }
 
+function buildExperimentRecord({
+  instruction,
+  source,
+  scene,
+  plan,
+  execution,
+  perception,
+  perceptionSummary
+}) {
+  return {
+    title: `${source === "agent" ? "自主实验" : "主播实验"}：${instruction}`,
+    source,
+    scene,
+    instruction,
+    intent: plan.intent,
+    personaInterpretation: plan.personaInterpretation,
+    selectedStrategy: plan.selectedStrategy,
+    candidateStrategies: plan.candidateStrategies,
+    riskLevel: plan.riskLevel,
+    thinkingChain: plan.thinkingChain,
+    recoveryLine: plan.recoveryLine,
+    actions: execution.steps,
+    perception: perception || null,
+    perceptionSummary,
+    outcome: execution.outcome
+  };
+}
+
 function pickAutonomousObjective(runtimeState) {
   const nextIndex = runtimeState.agent.autonomousTurnCount % AUTONOMOUS_OBJECTIVE_POOL.length;
   return AUTONOMOUS_OBJECTIVE_POOL[nextIndex];
@@ -192,12 +270,12 @@ function shouldRunAutonomousTurn(runtimeState) {
     return false;
   }
 
-  if (runtimeState.status === "paused" || runtimeState.status === "stopped") {
+  if (runtimeState.status !== "running") {
     return false;
   }
 
-  if (!runtimeState.agent.lastTurnAt) {
-    return true;
+  if (runtimeState.status === "paused" || runtimeState.status === "stopped") {
+    return false;
   }
 
   if (runtimeState.agent.lastTurnSource === "user") {
@@ -212,7 +290,7 @@ async function runPlannedTurn({
   scene,
   perception,
   source,
-  perceptionSummary
+  perceptionSummary = perceptionSummaryBySource(perception, source)
 }) {
   const runtimeBefore = getState();
 
@@ -244,7 +322,7 @@ async function runPlannedTurn({
     conversationMessages: nextState.messages.slice(0, -1),
     perception
   });
-  const execution = runMockExecution(plan);
+  const execution = await runWindowsExecution(plan);
   const turn = {
     id: `turn-${Date.now()}`,
     instruction,
@@ -268,7 +346,7 @@ async function runPlannedTurn({
     riskLevel: plan.riskLevel,
     source
   });
-  appendLog("info", "模拟执行器返回结果", {
+  appendLog("info", "执行器返回结果", {
     executor: execution.executor,
     outcome: execution.outcome,
     source
@@ -286,6 +364,16 @@ async function runPlannedTurn({
     execution,
     perceptionSummary
   });
+
+  appendExperiment(buildExperimentRecord({
+    instruction,
+    source,
+    scene,
+    plan,
+    execution,
+    perception,
+    perceptionSummary
+  }));
 
   const agentBeforeUpdate = getState().agent;
   updateAgent({
@@ -319,6 +407,7 @@ async function maybeRunAutonomousTurn() {
   try {
     if (runtimeState.status === "idle") {
       setStatus("running");
+      ensureAutoCaptureRunning();
       appendLog("info", "系统进入自主运行模式");
     }
 
@@ -334,10 +423,7 @@ async function maybeRunAutonomousTurn() {
       instruction,
       scene,
       perception: runtimeState.latestPerception,
-      source: "agent",
-      perceptionSummary: runtimeState.latestPerception
-        ? "本轮自主目标结合了最新截图识别结果。"
-        : "当前处于自主运行骨架阶段，尚未接入近实时截图识别。"
+      source: "agent"
     });
   } catch (error) {
     setLastError(error.message);
@@ -357,7 +443,7 @@ async function waitForTurnSlot() {
 
   while (turnInFlight) {
     if (Date.now() - startedAt >= TURN_SLOT_TIMEOUT_MS) {
-      throw new Error("当前已有回合在执行，等待超时。");
+      throw new Error("当前已有一轮执行在进行中，等待超时。");
     }
 
     await sleep(TURN_SLOT_POLL_MS);
@@ -380,6 +466,7 @@ async function handleControl(request, response) {
     resume: () => setStatus("running"),
     stop: () => setStatus("stopped"),
     reset: () => {
+      autoCaptureService.stop();
       resetRuntime();
       appendLog("info", "运行上下文已清空");
     }
@@ -392,10 +479,37 @@ async function handleControl(request, response) {
   transitions[action]();
 
   if (action !== "reset") {
-    appendLog("info", `控制动作执行：${action}`);
+    appendLog("info", `控制动作已执行：${action}`);
   }
 
   return sendJson(response, 200, statePayload());
+}
+
+async function handleCaptureControl(request, response) {
+  const { action } = await readRequestBody(request);
+
+  const transitions = {
+    start: () => autoCaptureService.start(),
+    pause: () => autoCaptureService.pause(),
+    resume: () => autoCaptureService.resume(),
+    stop: () => autoCaptureService.stop(),
+    trigger_once: () => autoCaptureService.triggerOnce()
+  };
+
+  if (!transitions[action]) {
+    return sendJson(response, 400, { ok: false, error: "Unsupported capture action" });
+  }
+
+  await transitions[action]();
+
+  return sendJson(response, 200, statePayload());
+}
+
+async function handleCaptureStatus(request, response) {
+  return sendJson(response, 200, {
+    ok: true,
+    capture: getState().capture
+  });
 }
 
 async function handleTurn(request, response) {
@@ -413,11 +527,12 @@ async function handleTurn(request, response) {
   }
 
   if (state.status === "stopped") {
-    return sendJson(response, 409, { ok: false, error: "当前系统已急停，请先重新开始。" });
+    return sendJson(response, 409, { ok: false, error: "当前系统已停止，请先重新启动。" });
   }
 
   if (state.status === "idle") {
     setStatus("running");
+    ensureAutoCaptureRunning();
     appendLog("info", "系统从空闲状态自动进入运行状态");
   }
 
@@ -436,10 +551,7 @@ async function handleTurn(request, response) {
       instruction,
       scene,
       perception: state.latestPerception,
-      source: "user",
-      perceptionSummary: state.latestPerception
-        ? "本轮结合最新截图识别结果生成。"
-        : "截图识别暂未接入当前对话主链，当前回复基于文本指令和既有上下文生成。"
+      source: "user"
     });
 
     return sendJson(response, 200, {
@@ -454,9 +566,10 @@ async function handleTurn(request, response) {
     appendLog("error", "本轮执行失败", { error: error.message });
     appendMessage({
       role: "assistant",
-      text: `这轮处理失败了：${error.message}`,
+      text: `这轮实验失败了：${error.message}`,
       thinkingChain: [],
-      perceptionSummary: "截图识别暂未接入当前对话主链。",
+      recoveryLine: "我先承认这轮没控住，接下来会先保住上下文再补救。",
+      perceptionSummary: "这一轮没有稳定产出可用结果。",
       sceneLabel: "执行失败",
       riskLevel: "high",
       actions: []
@@ -483,10 +596,13 @@ async function handleAnalyzeImage(request, response) {
       imageInput: imageDataUrl
     });
 
-    setLatestPerception({
-      ...perception,
+    setLatestPerception(perception, {
+      source: "manual_upload",
       imageName,
       analyzedAt: new Date().toISOString()
+    });
+    setCaptureState({
+      lastImageSource: "manual_upload"
     });
 
     appendLog("info", "截图 OCR 完成", {
@@ -562,6 +678,7 @@ async function handleChat(request, response) {
   }
 
   setStatus("running");
+  ensureAutoCaptureRunning();
   setLastError(null);
   updateAgent({
     mode: "user_priority",
@@ -579,9 +696,8 @@ async function handleChat(request, response) {
     const nextState = await runPlannedTurn({
       instruction,
       scene,
-      perception: null,
-      source: "user",
-      perceptionSummary: "截图识别暂未接入当前对话主链，当前回复基于文本指令和既有上下文生成。"
+      perception: state.latestPerception,
+      source: "user"
     });
 
     return sendJson(response, 200, {
@@ -598,7 +714,8 @@ async function handleChat(request, response) {
       role: "assistant",
       text: `这轮处理失败了：${error.message}`,
       thinkingChain: [],
-      perceptionSummary: "截图识别暂未接入当前对话主链。",
+      recoveryLine: "我先把现场稳住，等你给我下一条更明确的指令。",
+      perceptionSummary: "这一轮没有稳定产出可用结果。",
       sceneLabel: "执行失败",
       riskLevel: "high",
       actions: []
@@ -625,8 +742,16 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, statePayload());
     }
 
+    if (request.method === "GET" && url.pathname === "/api/capture/status") {
+      return handleCaptureStatus(request, response);
+    }
+
     if (request.method === "POST" && url.pathname === "/api/control") {
       return handleControl(request, response);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/capture/control") {
+      return handleCaptureControl(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/turn") {
@@ -661,7 +786,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(port, () => {
-  appendLog("info", "第一阶段对话框服务已启动", { port });
+  appendLog("info", "视频实验控制台已启动", { port });
   console.log(`Moonlight Blade Auto Worker listening on http://localhost:${port}`);
   setTimeout(() => {
     maybeRunAutonomousTurn().catch((error) => {

@@ -13,12 +13,30 @@ function createInitialAgentState() {
   };
 }
 
+function createInitialCaptureState() {
+  return {
+    enabled: false,
+    status: "idle",
+    intervalMs: 3000,
+    lastCaptureAt: null,
+    lastAnalyzeAt: null,
+    lastWindowTitle: null,
+    lastBounds: null,
+    lastImageSource: null,
+    consecutiveFailures: 0,
+    lastErrorCode: null,
+    lastErrorMessage: null
+  };
+}
+
 function createInitialState() {
   return {
     status: "idle",
     scene: "town_dialogue",
     currentTurn: null,
     latestPerception: null,
+    capture: createInitialCaptureState(),
+    experiments: [],
     agent: createInitialAgentState(),
     messages: [],
     logs: [],
@@ -63,8 +81,32 @@ export function setCurrentTurn(turn) {
   state.currentTurn = turn;
 }
 
-export function setLatestPerception(perception) {
-  state.latestPerception = perception;
+export function setLatestPerception(perception, meta = null) {
+  state.latestPerception = meta
+    ? {
+      ...perception,
+      ...meta
+    }
+    : perception;
+}
+
+export function setCaptureState(patch) {
+  state.capture = {
+    ...state.capture,
+    ...patch
+  };
+
+  return state.capture;
+}
+
+export function appendExperiment(experiment) {
+  state.experiments.unshift({
+    id: experiment.id || `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: experiment.createdAt || new Date().toISOString(),
+    ...experiment
+  });
+  state.experiments = state.experiments.slice(0, 20);
+  return state.experiments[0];
 }
 
 export function updateAgent(patch) {
@@ -96,6 +138,8 @@ export function resetRuntime() {
   state.scene = next.scene;
   state.currentTurn = next.currentTurn;
   state.latestPerception = next.latestPerception;
+  state.capture = next.capture;
+  state.experiments = [];
   state.agent = next.agent;
   state.messages = [];
   state.logs = [];

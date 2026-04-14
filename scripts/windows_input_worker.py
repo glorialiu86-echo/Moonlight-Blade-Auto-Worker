@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+from pathlib import Path
 import re
 import sys
 import time
@@ -12,6 +13,7 @@ import pydirectinput
 import pyperclip
 import win32con
 import win32gui
+from PIL import Image, ImageDraw
 from rapidocr_onnxruntime import RapidOCR
 
 
@@ -23,6 +25,7 @@ DEFAULT_SCAN_INTERVAL_MS = 180
 DEFAULT_CAMERA_DRAG_MS = 220
 DEFAULT_VERIFY_SETTLE_MS = 180
 OCR_ENGINE = None
+TMP_DIR = Path(__file__).resolve().parents[1] / "tmp"
 WORLD_HUD_KEYWORDS = ["感知", "潜行", "微风拂柳", "[Shift]", "[Space]", "叫卖"]
 
 
@@ -39,6 +42,7 @@ class ActionExecutionError(RuntimeError):
 
 NPC_STAGE_ROIS = {
     "look_button": (0.26, 0.48, 0.40, 0.62),
+    "moving_view_search": (0.68, 0.24, 0.92, 0.60),
     "bottom_right_actions": (0.64, 0.70, 0.98, 0.98),
     "confirm_dialog": (0.16, 0.10, 0.84, 0.84),
     "chat_panel": (0.00, 0.00, 0.46, 0.98),
@@ -164,6 +168,43 @@ def capture_window_region(hwnd: int, roi: tuple[float, float, float, float]) -> 
     return frame[:, :, :3]
 
 
+def capture_screen_rect(left: int, top: int, width: int, height: int) -> np.ndarray:
+    with mss.mss() as screen_capture:
+        frame = np.array(
+            screen_capture.grab(
+                {
+                    "left": left,
+                    "top": top,
+                    "width": max(8, width),
+                    "height": max(8, height),
+                }
+            )
+        )
+
+    return frame[:, :, :3]
+
+
+def save_debug_image(
+    image: np.ndarray,
+    name: str,
+    click_point: tuple[int, int] | None = None,
+) -> str:
+    TMP_DIR.mkdir(parents=True, exist_ok=True)
+    rgb = image[:, :, ::-1]
+    debug_image = Image.fromarray(rgb.astype(np.uint8), mode="RGB")
+
+    if click_point is not None:
+        x, y = click_point
+        draw = ImageDraw.Draw(debug_image)
+        draw.ellipse((x - 7, y - 7, x + 7, y + 7), outline=(255, 80, 80), width=2)
+        draw.line((x - 14, y, x + 14, y), fill=(255, 80, 80), width=2)
+        draw.line((x, y - 14, x, y + 14), fill=(255, 80, 80), width=2)
+
+    file_path = TMP_DIR / name
+    debug_image.save(file_path)
+    return str(file_path)
+
+
 def ocr_text(image: np.ndarray) -> str:
     result = get_ocr_engine()(image)[0]
 
@@ -179,6 +220,43 @@ def ocr_text(image: np.ndarray) -> str:
             parts.append(text)
 
     return " ".join(parts)
+
+
+def ocr_items(image: np.ndarray) -> list[dict[str, Any]]:
+    result = get_ocr_engine()(image)[0]
+    if not result:
+        return []
+
+    items: list[dict[str, Any]] = []
+    for item in result:
+        if len(item) < 3:
+            continue
+
+        box = item[0]
+        text = str(item[1] or "").strip().replace("\n", " ")
+        score = float(item[2] or 0)
+        if not text or not box:
+            continue
+
+        points = [(float(point[0]), float(point[1])) for point in box]
+        min_x = min(point[0] for point in points)
+        max_x = max(point[0] for point in points)
+        min_y = min(point[1] for point in points)
+        max_y = max(point[1] for point in points)
+        items.append(
+            {
+                "text": text,
+                "score": round(score, 4),
+                "minX": min_x,
+                "maxX": max_x,
+                "minY": min_y,
+                "maxY": max_y,
+                "centerX": (min_x + max_x) / 2,
+                "centerY": (min_y + max_y) / 2,
+            }
+        )
+
+    return items
 
 
 def capture_verify_frame(hwnd: int) -> np.ndarray:
@@ -351,6 +429,22 @@ def detect_npc_interaction_stage(hwnd: int) -> dict[str, Any]:
     }
 
 
+def detect_bottom_right_menu_stage(hwnd: int) -> dict[str, Any]:
+    bottom_right_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["bottom_right_actions"]))
+
+    if contains_any_keyword(bottom_right_text, ["闂茶亰", "浜よ皥"]):
+        stage = "small_talk_menu"
+    elif contains_any_keyword(bottom_right_text, ["浜よ皥", "璧犵ぜ", "浜ゆ槗"]):
+        stage = "npc_action_menu"
+    else:
+        stage = "none"
+
+    return {
+        "stage": stage,
+        "text": bottom_right_text,
+    }
+
+
 def click_npc_candidate(hwnd: int, x_ratio: float, y_ratio: float, button: str = "left") -> dict[str, Any]:
     bounds = focus_window(hwnd)
     click_x = round(bounds["left"] + bounds["width"] * x_ratio)
@@ -368,6 +462,474 @@ def click_npc_candidate(hwnd: int, x_ratio: float, y_ratio: float, button: str =
 def click_named_point(hwnd: int, point_name: str) -> dict[str, Any]:
     x_ratio, y_ratio = ACTION_POINTS[point_name]
     return click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
+
+
+def click_screen_point(hwnd: int, screen_x: int, screen_y: int, button: str = "left") -> dict[str, Any]:
+    focus_window(hwnd)
+    pydirectinput.click(x=screen_x, y=screen_y, button=button)
+    return {
+        "button": button,
+        "screenX": screen_x,
+        "screenY": screen_y,
+    }
+
+
+def find_moving_view_button(hwnd: int) -> dict[str, Any] | None:
+    roi = NPC_STAGE_ROIS["moving_view_search"]
+    bounds = get_window_bounds(hwnd)
+    image = capture_window_region(hwnd, roi)
+    items = ocr_items(image)
+
+    for item in items:
+        normalized = item["text"].replace(" ", "")
+        if "查看" not in normalized:
+            continue
+
+        # The actual hit target is the magnifier icon above the "查看" label.
+        screen_x = round(bounds["left"] + bounds["width"] * roi[0] + item["centerX"])
+        screen_y = round(bounds["top"] + bounds["height"] * roi[1] + max(18, item["minY"] - 42))
+        return {
+            "text": item["text"],
+            "score": item["score"],
+            "screenX": screen_x,
+            "screenY": screen_y,
+        }
+
+    return None
+
+
+def find_view_button_near_target(hwnd: int, target_text: str) -> dict[str, Any] | None:
+    roi = NPC_STAGE_ROIS["moving_view_search"]
+    bounds = get_window_bounds(hwnd)
+    image = capture_window_region(hwnd, roi)
+    items = ocr_items(image)
+    keywords = [part for part in re.split(r"\s+", str(target_text or "").strip()) if len(part) >= 2]
+
+    if not keywords:
+        return None
+
+    target_candidates = []
+    view_candidates = []
+
+    for item in items:
+        normalized = item["text"].replace(" ", "")
+        if "查看" in normalized:
+            view_candidates.append(item)
+            continue
+
+        if any(keyword in normalized for keyword in keywords):
+            target_candidates.append(item)
+
+    if not target_candidates or not view_candidates:
+        return None
+
+    best_match = None
+    best_distance = None
+
+    for target_item in target_candidates:
+        for view_item in view_candidates:
+            dx = view_item["centerX"] - target_item["centerX"]
+            dy = view_item["centerY"] - target_item["centerY"]
+            distance = dx * dx + dy * dy
+            if best_distance is None or distance < best_distance:
+                best_distance = distance
+                best_match = view_item
+
+    if best_match is None:
+        return None
+
+    screen_x = round(bounds["left"] + bounds["width"] * roi[0] + best_match["centerX"])
+    screen_y = round(bounds["top"] + bounds["height"] * roi[1] + max(18, best_match["minY"] - 42))
+    return {
+        "text": best_match["text"],
+        "score": best_match["score"],
+        "screenX": screen_x,
+        "screenY": screen_y,
+    }
+def find_bright_icon_candidates(image: np.ndarray) -> list[dict[str, Any]]:
+    rgb = image[:, :, ::-1].astype(np.int16)
+    grayscale = np.mean(rgb, axis=2)
+    channel_spread = np.max(rgb, axis=2) - np.min(rgb, axis=2)
+    mask = (grayscale >= 218) & (channel_spread <= 42)
+
+    height, width = mask.shape
+    visited = np.zeros_like(mask, dtype=bool)
+    candidates: list[dict[str, Any]] = []
+
+    for y in range(height):
+        for x in range(width):
+            if not mask[y, x] or visited[y, x]:
+                continue
+
+            stack = [(x, y)]
+            visited[y, x] = True
+            pixels: list[tuple[int, int]] = []
+
+            while stack:
+                current_x, current_y = stack.pop()
+                pixels.append((current_x, current_y))
+
+                for next_x, next_y in (
+                    (current_x - 1, current_y),
+                    (current_x + 1, current_y),
+                    (current_x, current_y - 1),
+                    (current_x, current_y + 1),
+                ):
+                    if next_x < 0 or next_y < 0 or next_x >= width or next_y >= height:
+                        continue
+                    if visited[next_y, next_x] or not mask[next_y, next_x]:
+                        continue
+                    visited[next_y, next_x] = True
+                    stack.append((next_x, next_y))
+
+            area = len(pixels)
+            if area < 140:
+                continue
+
+            xs = [point[0] for point in pixels]
+            ys = [point[1] for point in pixels]
+            min_x = min(xs)
+            max_x = max(xs)
+            min_y = min(ys)
+            max_y = max(ys)
+            box_width = max_x - min_x + 1
+            box_height = max_y - min_y + 1
+            fill_ratio = area / float(box_width * box_height)
+            aspect_ratio = box_width / float(max(1, box_height))
+
+            if box_width < 26 or box_height < 26 or box_width > 150 or box_height > 150:
+                continue
+            if not 0.65 <= aspect_ratio <= 1.35:
+                continue
+            if not 0.24 <= fill_ratio <= 0.88:
+                continue
+
+            candidates.append(
+                {
+                    "centerX": (min_x + max_x) / 2,
+                    "centerY": (min_y + max_y) / 2,
+                    "minX": min_x,
+                    "minY": min_y,
+                    "maxX": max_x,
+                    "maxY": max_y,
+                    "area": area,
+                    "fillRatio": round(fill_ratio, 4),
+                }
+            )
+
+    return candidates
+
+
+def choose_local_view_candidate(
+    image: np.ndarray,
+    left: int,
+    top: int,
+    anchor_x: int,
+    anchor_y: int,
+) -> dict[str, Any] | None:
+    text_candidates = []
+    for item in ocr_items(image):
+        normalized = item["text"].replace(" ", "")
+        if "鏌ョ湅" in normalized:
+            text_candidates.append(item)
+
+    icon_candidates = find_bright_icon_candidates(image)
+    best_match = None
+    best_score = None
+
+    for icon in icon_candidates:
+        screen_x = round(left + icon["centerX"])
+        screen_y = round(top + icon["centerY"])
+        dx_anchor = screen_x - anchor_x
+        dy_anchor = screen_y - anchor_y
+        anchor_distance = float(dx_anchor * dx_anchor + dy_anchor * dy_anchor)
+        score = anchor_distance / 12.0
+        matched_text = None
+
+        for text_item in text_candidates:
+            dx_text = icon["centerX"] - text_item["centerX"]
+            dy_text = icon["centerY"] - max(0.0, text_item["minY"] - 38.0)
+            text_distance = float(dx_text * dx_text + dy_text * dy_text)
+            if text_distance > 3600:
+                continue
+            if matched_text is None or text_distance < matched_text["distance"]:
+                matched_text = {
+                    "text": text_item["text"],
+                    "score": text_item["score"],
+                    "distance": text_distance,
+                }
+
+        if matched_text:
+            score -= 220.0
+            score -= matched_text["score"] * 120.0
+            score += matched_text["distance"] / 18.0
+
+        score -= min(icon["area"], 2600) / 20.0
+
+        candidate = {
+            "text": matched_text["text"] if matched_text else "",
+            "score": round(max(0.01, 1000.0 - score), 3),
+            "screenX": screen_x,
+            "screenY": screen_y,
+            "source": "icon+text" if matched_text else "icon_only",
+            "anchorDistance": round(anchor_distance ** 0.5, 2),
+            "iconBox": {
+                "minX": icon["minX"],
+                "minY": icon["minY"],
+                "maxX": icon["maxX"],
+                "maxY": icon["maxY"],
+            },
+        }
+
+        if best_score is None or score < best_score:
+            best_score = score
+            best_match = candidate
+
+    if best_match:
+        return best_match
+
+    if text_candidates:
+        best_text = max(text_candidates, key=lambda item: item["score"])
+        fallback_y = top + max(18, best_text["minY"] - 42)
+        return {
+            "text": best_text["text"],
+            "score": round(best_text["score"], 3),
+            "screenX": round(left + best_text["centerX"]),
+            "screenY": round(fallback_y),
+            "source": "text_only",
+            "anchorDistance": round(
+                ((left + best_text["centerX"] - anchor_x) ** 2 + (fallback_y - anchor_y) ** 2) ** 0.5,
+                2,
+            ),
+        }
+
+    return None
+
+
+def find_view_button_near_click(
+    hwnd: int,
+    anchor_x: int,
+    anchor_y: int,
+    search_width: int = 260,
+    search_height: int = 280,
+) -> dict[str, Any] | None:
+    bounds = get_window_bounds(hwnd)
+    left = max(bounds["left"], anchor_x - search_width // 2)
+    top = max(bounds["top"], anchor_y - search_height // 2)
+    right = min(bounds["left"] + bounds["width"], left + search_width)
+    bottom = min(bounds["top"] + bounds["height"], top + search_height)
+    image = capture_screen_rect(left, top, right - left, bottom - top)
+
+    best_match = None
+
+    for item in items:
+        normalized = item["text"].replace(" ", "")
+        if "查看" not in normalized:
+            continue
+
+        screen_x = round(left + item["centerX"])
+        screen_y = round(top + max(18, item["minY"] - 42))
+        candidate = {
+            "text": item["text"],
+            "score": item["score"],
+            "screenX": screen_x,
+            "screenY": screen_y,
+        }
+
+        if best_match is None or candidate["score"] > best_match["score"]:
+            best_match = candidate
+
+    return best_match
+
+
+def find_bright_icon_candidates(image: np.ndarray) -> list[dict[str, Any]]:
+    rgb = image[:, :, ::-1].astype(np.int16)
+    grayscale = np.mean(rgb, axis=2)
+    channel_spread = np.max(rgb, axis=2) - np.min(rgb, axis=2)
+    mask = (grayscale >= 218) & (channel_spread <= 42)
+
+    height, width = mask.shape
+    visited = np.zeros_like(mask, dtype=bool)
+    candidates: list[dict[str, Any]] = []
+
+    for y in range(height):
+        for x in range(width):
+            if not mask[y, x] or visited[y, x]:
+                continue
+
+            stack = [(x, y)]
+            visited[y, x] = True
+            pixels: list[tuple[int, int]] = []
+
+            while stack:
+                current_x, current_y = stack.pop()
+                pixels.append((current_x, current_y))
+
+                for next_x, next_y in (
+                    (current_x - 1, current_y),
+                    (current_x + 1, current_y),
+                    (current_x, current_y - 1),
+                    (current_x, current_y + 1),
+                ):
+                    if next_x < 0 or next_y < 0 or next_x >= width or next_y >= height:
+                        continue
+                    if visited[next_y, next_x] or not mask[next_y, next_x]:
+                        continue
+                    visited[next_y, next_x] = True
+                    stack.append((next_x, next_y))
+
+            area = len(pixels)
+            if area < 140:
+                continue
+
+            xs = [point[0] for point in pixels]
+            ys = [point[1] for point in pixels]
+            min_x = min(xs)
+            max_x = max(xs)
+            min_y = min(ys)
+            max_y = max(ys)
+            box_width = max_x - min_x + 1
+            box_height = max_y - min_y + 1
+            fill_ratio = area / float(box_width * box_height)
+            aspect_ratio = box_width / float(max(1, box_height))
+
+            if box_width < 26 or box_height < 26 or box_width > 150 or box_height > 150:
+                continue
+            if not 0.65 <= aspect_ratio <= 1.35:
+                continue
+            if not 0.24 <= fill_ratio <= 0.88:
+                continue
+
+            candidates.append(
+                {
+                    "centerX": (min_x + max_x) / 2,
+                    "centerY": (min_y + max_y) / 2,
+                    "minX": min_x,
+                    "minY": min_y,
+                    "maxX": max_x,
+                    "maxY": max_y,
+                    "area": area,
+                    "fillRatio": round(fill_ratio, 4),
+                }
+            )
+
+    return candidates
+
+
+def choose_local_view_candidate(
+    image: np.ndarray,
+    left: int,
+    top: int,
+    anchor_x: int,
+    anchor_y: int,
+) -> dict[str, Any] | None:
+    text_candidates = []
+    for item in ocr_items(image):
+        normalized = item["text"].replace(" ", "")
+        if "鏌ョ湅" in normalized:
+            text_candidates.append(item)
+
+    icon_candidates = find_bright_icon_candidates(image)
+    best_match = None
+    best_score = None
+
+    for icon in icon_candidates:
+        screen_x = round(left + icon["centerX"])
+        screen_y = round(top + icon["centerY"])
+        dx_anchor = screen_x - anchor_x
+        dy_anchor = screen_y - anchor_y
+        anchor_distance = float(dx_anchor * dx_anchor + dy_anchor * dy_anchor)
+        score = anchor_distance / 12.0
+        matched_text = None
+
+        for text_item in text_candidates:
+            dx_text = icon["centerX"] - text_item["centerX"]
+            dy_text = icon["centerY"] - max(0.0, text_item["minY"] - 38.0)
+            text_distance = float(dx_text * dx_text + dy_text * dy_text)
+            if text_distance > 3600:
+                continue
+            if matched_text is None or text_distance < matched_text["distance"]:
+                matched_text = {
+                    "text": text_item["text"],
+                    "score": text_item["score"],
+                    "distance": text_distance,
+                }
+
+        if matched_text:
+            score -= 220.0
+            score -= matched_text["score"] * 120.0
+            score += matched_text["distance"] / 18.0
+
+        score -= min(icon["area"], 2600) / 20.0
+
+        candidate = {
+            "text": matched_text["text"] if matched_text else "",
+            "score": round(max(0.01, 1000.0 - score), 3),
+            "screenX": screen_x,
+            "screenY": screen_y,
+            "source": "icon+text" if matched_text else "icon_only",
+            "anchorDistance": round(anchor_distance ** 0.5, 2),
+            "iconBox": {
+                "minX": icon["minX"],
+                "minY": icon["minY"],
+                "maxX": icon["maxX"],
+                "maxY": icon["maxY"],
+            },
+        }
+
+        if best_score is None or score < best_score:
+            best_score = score
+            best_match = candidate
+
+    if best_match:
+        return best_match
+
+    if text_candidates:
+        best_text = max(text_candidates, key=lambda item: item["score"])
+        fallback_y = top + max(18, best_text["minY"] - 42)
+        return {
+            "text": best_text["text"],
+            "score": round(best_text["score"], 3),
+            "screenX": round(left + best_text["centerX"]),
+            "screenY": round(fallback_y),
+            "source": "text_only",
+            "anchorDistance": round(
+                ((left + best_text["centerX"] - anchor_x) ** 2 + (fallback_y - anchor_y) ** 2) ** 0.5,
+                2,
+            ),
+        }
+
+    return None
+
+
+def find_view_button_near_click(
+    hwnd: int,
+    anchor_x: int,
+    anchor_y: int,
+    search_width: int = 260,
+    search_height: int = 280,
+) -> dict[str, Any] | None:
+    bounds = get_window_bounds(hwnd)
+    left = max(bounds["left"], anchor_x - search_width // 2)
+    top = max(bounds["top"], anchor_y - search_height // 2)
+    right = min(bounds["left"] + bounds["width"], left + search_width)
+    bottom = min(bounds["top"] + bounds["height"], top + search_height)
+    image = capture_screen_rect(left, top, right - left, bottom - top)
+    best_match = choose_local_view_candidate(image, left, top, anchor_x, anchor_y)
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    click_point = None
+    if best_match:
+        click_point = (best_match["screenX"] - left, best_match["screenY"] - top)
+    debug_path = save_debug_image(image, f"view-search-{timestamp}-{anchor_x}-{anchor_y}.png", click_point)
+    if best_match:
+        best_match["debugImage"] = debug_path
+        best_match["searchRect"] = {
+            "left": left,
+            "top": top,
+            "width": right - left,
+            "height": bottom - top,
+        }
+    return best_match
 
 
 def pulse_forward(hwnd: int, move_pulse_ms: int) -> dict[str, Any]:
@@ -512,6 +1074,133 @@ def has_selected_target(target_info: dict[str, Any]) -> bool:
     return len(text) >= 2 and text != "1"
 
 
+def normalize_npc_name(text: str) -> str:
+    normalized = re.sub(r"\s+", "", str(text or ""))
+    normalized = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9<>]", "", normalized)
+    return normalized
+
+
+def names_match(expected_name: str, actual_name: str) -> bool:
+    expected = normalize_npc_name(expected_name)
+    actual = normalize_npc_name(actual_name)
+    if not expected or not actual:
+        return False
+    return expected == actual or expected in actual or actual in expected
+
+
+def find_click_target_name(
+    hwnd: int,
+    screen_x: int,
+    screen_y: int,
+    search_width: int = 240,
+    search_height: int = 220,
+) -> dict[str, Any] | None:
+    bounds = get_window_bounds(hwnd)
+    left = max(bounds["left"], screen_x - search_width // 2)
+    top = max(bounds["top"], screen_y - search_height // 2)
+    right = min(bounds["left"] + bounds["width"], left + search_width)
+    bottom = min(bounds["top"] + bounds["height"], top + search_height)
+    image = capture_screen_rect(left, top, right - left, bottom - top)
+    items = ocr_items(image)
+
+    best_match = None
+    best_distance = None
+    for item in items:
+        normalized = normalize_npc_name(item["text"])
+        if not re.fullmatch(r"[\u4e00-\u9fff]{2,4}", normalized):
+            continue
+        item_screen_x = left + item["centerX"]
+        item_screen_y = top + item["centerY"]
+        dx = item_screen_x - screen_x
+        dy = item_screen_y - screen_y
+        distance = dx * dx + dy * dy
+        if best_distance is None or distance < best_distance:
+            best_distance = distance
+            best_match = {
+                "text": normalized,
+                "score": round(item["score"], 3),
+                "screenX": round(item_screen_x),
+                "screenY": round(item_screen_y),
+            }
+
+    return best_match
+
+
+def verify_npc_selection(
+    hwnd: int,
+    click_state: dict[str, Any],
+    expected_name: str,
+    verify_within_ms: int = 200,
+) -> dict[str, Any]:
+    deadline = time.time() + verify_within_ms / 1000.0
+    attempts: list[dict[str, Any]] = []
+
+    while time.time() <= deadline:
+        target_info = detect_target_threshold(hwnd)
+        actual_name = normalize_npc_name(target_info["text"])
+        matched = names_match(expected_name, actual_name)
+        attempt = {
+            "expectedName": normalize_npc_name(expected_name),
+            "actualName": actual_name,
+            "matched": matched,
+        }
+        attempts.append(attempt)
+        if matched:
+            return {
+                "selected": True,
+                "expectedName": attempt["expectedName"],
+                "actualName": actual_name,
+                "attempts": attempts,
+                "click": click_state,
+            }
+        time.sleep(0.04)
+
+    last_actual = attempts[-1]["actualName"] if attempts else ""
+    return {
+        "selected": False,
+        "expectedName": normalize_npc_name(expected_name),
+        "actualName": last_actual,
+        "attempts": attempts,
+        "click": click_state,
+    }
+
+
+def find_selected_target_anchor(hwnd: int, target_text: str) -> dict[str, Any] | None:
+    roi = NPC_STAGE_ROIS["selected_target"]
+    bounds = get_window_bounds(hwnd)
+    image = capture_window_region(hwnd, roi)
+    items = ocr_items(image)
+    keywords = [part for part in re.split(r"\s+", str(target_text or "").strip()) if len(part) >= 1]
+
+    if not keywords:
+        return None
+
+    best_match = None
+    best_score = None
+    for item in items:
+        normalized = item["text"].replace(" ", "")
+        if not any(keyword in normalized or normalized in keyword for keyword in keywords):
+            continue
+
+        score = item["score"]
+        if best_score is None or score > best_score:
+            best_score = score
+            best_match = item
+
+    if best_match is None:
+        return None
+
+    screen_x = round(bounds["left"] + bounds["width"] * roi[0] + best_match["centerX"])
+    screen_y = round(bounds["top"] + bounds["height"] * roi[1] + min(best_match["centerY"] + 86, image.shape[0] - 12))
+    return {
+        "screenX": screen_x,
+        "screenY": screen_y,
+        "text": best_match["text"],
+        "score": round(best_match["score"], 3),
+        "source": "selected_target_roi",
+    }
+
+
 def exit_panel(hwnd: int) -> None:
     click_named_point(hwnd, "close_panel")
     time.sleep(0.25)
@@ -519,21 +1208,25 @@ def exit_panel(hwnd: int) -> None:
 
 def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval_ms: int) -> dict[str, Any]:
     click_points = [
-        (0.80, 0.70),
-        (0.84, 0.69),
-        (0.88, 0.68),
-        (0.78, 0.66),
-        (0.50, 0.44),
-        (0.47, 0.46),
-        (0.53, 0.46),
+        (0.80, 0.44),
+        (0.84, 0.45),
+        (0.88, 0.46),
+        (0.78, 0.50),
+        (0.82, 0.51),
+        (0.86, 0.52),
+        (0.80, 0.56),
+        (0.84, 0.56),
     ]
     click_attempts = 0
     move_attempts = 0
     camera_drags = 0
     click_point_attempts: list[dict[str, float]] = []
+    selectionAttempts: list[dict[str, Any]] = []
+    viewAttempts: list[dict[str, Any]] = []
     stage_history: list[str] = []
     start_time = time.time()
     last_stage = "none"
+    last_npc_click: dict[str, Any] | None = None
 
     focus_window(hwnd)
 
@@ -553,11 +1246,41 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
                 "moveAttempts": move_attempts,
                 "cameraDrags": camera_drags,
                 "clickPointAttempts": click_point_attempts,
+                "selectionAttempts": selectionAttempts,
+                "viewAttempts": viewAttempts,
                 "targetText": target_info["text"],
             }
 
         if last_stage == "npc_selected" or has_selected_target(target_info):
-            click_named_point(hwnd, "view")
+            moving_view = None
+            if last_npc_click and names_match(last_npc_click.get("targetName", ""), target_info["text"]):
+                moving_view = find_view_button_near_click(
+                    hwnd,
+                    int(last_npc_click["screenX"]),
+                    int(last_npc_click["screenY"]),
+                )
+            if moving_view:
+                click_screen_point(hwnd, moving_view["screenX"], moving_view["screenY"], "left")
+                viewAttempts.append(moving_view)
+                time.sleep(0.08)
+                quick_menu_state = detect_bottom_right_menu_stage(hwnd)
+                stage_history.append(quick_menu_state["stage"])
+                if quick_menu_state["stage"] in ["npc_action_menu", "small_talk_menu"]:
+                    return {
+                        "stage": quick_menu_state["stage"],
+                        "stageTexts": {
+                            **stage_state["texts"],
+                            "bottom_right_actions": quick_menu_state["text"],
+                        },
+                        "stageHistory": stage_history,
+                        "clickAttempts": click_attempts + 1,
+                        "moveAttempts": move_attempts,
+                        "cameraDrags": camera_drags,
+                        "clickPointAttempts": click_point_attempts,
+                        "selectionAttempts": selectionAttempts,
+                        "viewAttempts": viewAttempts,
+                        "targetText": target_info["text"],
+                    }
             click_attempts += 1
             time.sleep(0.12)
             stage_state = detect_npc_interaction_stage(hwnd)
@@ -572,21 +1295,49 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
                     "moveAttempts": move_attempts,
                     "cameraDrags": camera_drags,
                     "clickPointAttempts": click_point_attempts,
+                    "selectionAttempts": selectionAttempts,
+                    "viewAttempts": viewAttempts,
                     "targetText": target_info["text"],
                 }
             continue
 
         x_ratio, y_ratio = click_points[click_attempts % len(click_points)]
-        click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
+        last_npc_click = click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
         click_point_attempts.append({"xRatio": x_ratio, "yRatio": y_ratio})
+        click_target = find_click_target_name(
+            hwnd,
+            int(last_npc_click["screenX"]),
+            int(last_npc_click["screenY"]),
+        )
+        if click_target:
+            selection_result = verify_npc_selection(hwnd, last_npc_click, click_target["text"])
+            selection_result["targetProbe"] = click_target
+            selectionAttempts.append(selection_result)
+            if selection_result["selected"]:
+                last_npc_click = {
+                    **last_npc_click,
+                    "targetName": selection_result["actualName"],
+                }
+            else:
+                last_npc_click = None
+        else:
+            selectionAttempts.append(
+                {
+                    "selected": False,
+                    "expectedName": "",
+                    "actualName": "",
+                    "click": last_npc_click,
+                    "targetProbe": None,
+                }
+            )
+            last_npc_click = None
         click_attempts += 1
         time.sleep(0.1)
 
-        if click_attempts % len(click_points) == 0 and elapsed_ms > timeout_ms * 0.65:
+        if click_attempts % len(click_points) == 0:
             move_attempts += 1
             pulse_forward(hwnd, move_pulse_ms)
-            camera_drags += 1
-            drag_camera(hwnd, (0.52, 0.48), (0.66, 0.48), DEFAULT_CAMERA_DRAG_MS)
+            time.sleep(0.08)
 
         time.sleep(min(scan_interval_ms, 90) / 1000)
 

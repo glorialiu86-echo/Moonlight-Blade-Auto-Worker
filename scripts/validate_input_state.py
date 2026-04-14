@@ -41,6 +41,8 @@ CROSS_MANUAL_CLIENT_RATIO_X = 924 / 2445
 CROSS_MANUAL_CLIENT_RATIO_Y = 298 / 1332
 VIEW_ICON_CLIENT_RATIO_X = 1295 / 2537
 VIEW_ICON_CLIENT_RATIO_Y = 916 / 1384
+EXIT_BUTTON_CLIENT_RATIO_X = 2233 / 2537
+EXIT_BUTTON_CLIENT_RATIO_Y = 1022 / 1384
 
 
 def normalize_name(text: str) -> str:
@@ -649,6 +651,8 @@ def main() -> int:
                 "selectedScreenY": probe_target["screenY"],
                 "viewIconClientRatioX": VIEW_ICON_CLIENT_RATIO_X,
                 "viewIconClientRatioY": VIEW_ICON_CLIENT_RATIO_Y,
+                "exitButtonClientRatioX": EXIT_BUTTON_CLIENT_RATIO_X,
+                "exitButtonClientRatioY": EXIT_BUTTON_CLIENT_RATIO_Y,
                 "crossManualClientRatioX": CROSS_MANUAL_CLIENT_RATIO_X,
                 "crossManualClientRatioY": CROSS_MANUAL_CLIENT_RATIO_Y,
             },

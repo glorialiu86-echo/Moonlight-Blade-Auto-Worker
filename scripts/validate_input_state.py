@@ -24,9 +24,8 @@ WAIT_AFTER_CLICK_MS = 300
 GAME_WINDOW_TITLE = "\u5929\u6daf\u660e\u6708\u5200\u624b\u6e38"
 TARGET_NAME = "\u535c\u7389\u4eba"
 TARGET_TEMPLATE_PATH = DATA_DIR / "buyuren-name-template.png"
-TARGET_BODY_OFFSET_PX = 28
-TARGET_BODY_X_PROBE_OFFSETS = [0, -18, 18, -36, 36]
-TARGET_BODY_Y_PROBE_OFFSETS = [28, 44, 60, 76, 92]
+TARGET_BODY_X_PROBE_RATIOS = [0.0, -0.18, 0.18, -0.36, 0.36]
+TARGET_BODY_Y_PROBE_RATIOS = [1.2, 1.8, 2.4, 3.0, 3.6]
 TARGET_TEMPLATE_THRESHOLD = 0.30
 
 SELECTED_PANEL_ROI = (0.20, 0.10, 0.42, 0.26)
@@ -202,9 +201,11 @@ def lock_fixed_world_target(hwnd: int) -> dict | None:
     }
 
 
-def build_click_target(hwnd: int, fixed_target: dict, probe_offset_x: int, probe_offset_y: int) -> dict:
+def build_click_target(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_ratio_y: float) -> dict:
     bounds = input_worker.get_window_bounds(hwnd)
     target = fixed_target["target"]
+    probe_offset_x = round(target["bboxWidth"] * probe_ratio_x)
+    probe_offset_y = round(target["bboxHeight"] * probe_ratio_y)
     client_x = max(0, min(bounds["width"] - 1, target["centerX"] + probe_offset_x))
     client_y = max(0, min(bounds["height"] - 1, target["nameBottomY"] + probe_offset_y))
     return {
@@ -213,6 +214,8 @@ def build_click_target(hwnd: int, fixed_target: dict, probe_offset_x: int, probe
         "clientY": int(client_y),
         "screenX": int(bounds["left"] + client_x),
         "screenY": int(bounds["top"] + client_y),
+        "probeRatioX": float(probe_ratio_x),
+        "probeRatioY": float(probe_ratio_y),
         "probeOffsetX": int(probe_offset_x),
         "probeOffsetY": int(probe_offset_y),
     }
@@ -272,17 +275,19 @@ def try_close_current_selection(hwnd: int) -> None:
 
 def calibrate_body_probe(hwnd: int, fixed_target: dict) -> dict:
     calibration_results = []
-    for probe_offset_y in TARGET_BODY_Y_PROBE_OFFSETS:
-        for probe_offset_x in TARGET_BODY_X_PROBE_OFFSETS:
+    for probe_ratio_y in TARGET_BODY_Y_PROBE_RATIOS:
+        for probe_ratio_x in TARGET_BODY_X_PROBE_RATIOS:
             try_close_current_selection(hwnd)
-            click_target_state = build_click_target(hwnd, fixed_target, probe_offset_x, probe_offset_y)
+            click_target_state = build_click_target(hwnd, fixed_target, probe_ratio_x, probe_ratio_y)
             click_result = click_target(hwnd, click_target_state, fixed_target["targetName"])
             time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
             image = capture_full_client(hwnd)
             selected_state = detect_selected_state(image)
             result = {
-                "probeOffsetX": probe_offset_x,
-                "probeOffsetY": probe_offset_y,
+                "probeRatioX": probe_ratio_x,
+                "probeRatioY": probe_ratio_y,
+                "probeOffsetX": click_target_state["probeOffsetX"],
+                "probeOffsetY": click_target_state["probeOffsetY"],
                 "selected": bool(selected_state["selected"]),
                 "ocrName": selected_state["name"],
                 "clickClientX": click_target_state["clientX"],
@@ -293,23 +298,27 @@ def calibrate_body_probe(hwnd: int, fixed_target: dict) -> dict:
             if selected_state["selected"]:
                 try_close_current_selection(hwnd)
                 return {
-                    "probeOffsetX": probe_offset_x,
-                    "probeOffsetY": probe_offset_y,
+                    "probeRatioX": probe_ratio_x,
+                    "probeRatioY": probe_ratio_y,
+                    "probeOffsetX": click_target_state["probeOffsetX"],
+                    "probeOffsetY": click_target_state["probeOffsetY"],
                     "results": calibration_results,
                 }
     return {
+        "probeRatioX": None,
+        "probeRatioY": None,
         "probeOffsetX": None,
         "probeOffsetY": None,
         "results": calibration_results,
     }
 
 
-def run_phase_one(hwnd: int, fixed_target: dict, probe_offset_x: int, probe_offset_y: int) -> dict:
+def run_phase_one(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_ratio_y: float) -> dict:
     phase_results = []
     success_count = 0
 
     for index in range(1, ITERATIONS + 1):
-        click_target_state = build_click_target(hwnd, fixed_target, probe_offset_x, probe_offset_y)
+        click_target_state = build_click_target(hwnd, fixed_target, probe_ratio_x, probe_ratio_y)
         click_result = click_target(hwnd, click_target_state, fixed_target["targetName"])
         time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
         full_image = capture_full_client(hwnd)
@@ -329,8 +338,10 @@ def run_phase_one(hwnd: int, fixed_target: dict, probe_offset_x: int, probe_offs
             "hasAvatar": selected_state["hasAvatar"],
             "hasCross": selected_state["hasCross"],
             "targetName": click_result["targetName"],
-            "probeOffsetX": probe_offset_x,
-            "probeOffsetY": probe_offset_y,
+            "probeRatioX": probe_ratio_x,
+            "probeRatioY": probe_ratio_y,
+            "probeOffsetX": click_target_state["probeOffsetX"],
+            "probeOffsetY": click_target_state["probeOffsetY"],
             "targetClientX": click_result["target"]["clientX"],
             "targetClientY": click_result["target"]["clientY"],
             "clientBounds": click_result["debug"]["bounds"],
@@ -350,13 +361,13 @@ def run_phase_one(hwnd: int, fixed_target: dict, probe_offset_x: int, probe_offs
     }
 
 
-def run_phase_two(hwnd: int, fixed_target: dict, probe_offset_x: int, probe_offset_y: int) -> dict:
+def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_ratio_y: float) -> dict:
     template = None
     phase_results = []
     success_count = 0
 
     for index in range(1, ITERATIONS + 1):
-        click_target_state = build_click_target(hwnd, fixed_target, probe_offset_x, probe_offset_y)
+        click_target_state = build_click_target(hwnd, fixed_target, probe_ratio_x, probe_ratio_y)
         click_result = click_target(hwnd, click_target_state, fixed_target["targetName"])
         time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
         selected_image = capture_full_client(hwnd)
@@ -369,8 +380,10 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_offset_x: int, probe_offs
                 "reason": "SELECT_NOT_REACHED",
                 "ocrName": selected_state["name"],
                 "targetName": click_result["targetName"],
-                "probeOffsetX": probe_offset_x,
-                "probeOffsetY": probe_offset_y,
+                "probeRatioX": probe_ratio_x,
+                "probeRatioY": probe_ratio_y,
+                "probeOffsetX": click_target_state["probeOffsetX"],
+                "probeOffsetY": click_target_state["probeOffsetY"],
                 "targetClientX": click_result["target"]["clientX"],
                 "targetClientY": click_result["target"]["clientY"],
             }
@@ -390,8 +403,10 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_offset_x: int, probe_offs
                 "reason": "CROSS_NOT_FOUND",
                 "ocrName": selected_state["name"],
                 "targetName": click_result["targetName"],
-                "probeOffsetX": probe_offset_x,
-                "probeOffsetY": probe_offset_y,
+                "probeRatioX": probe_ratio_x,
+                "probeRatioY": probe_ratio_y,
+                "probeOffsetX": click_target_state["probeOffsetX"],
+                "probeOffsetY": click_target_state["probeOffsetY"],
                 "targetClientX": click_result["target"]["clientX"],
                 "targetClientY": click_result["target"]["clientY"],
             }
@@ -417,8 +432,10 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_offset_x: int, probe_offs
             "detectedSelectedAfterClose": after_state["selected"],
             "crossScore": cross_match["score"],
             "targetName": click_result["targetName"],
-            "probeOffsetX": probe_offset_x,
-            "probeOffsetY": probe_offset_y,
+            "probeRatioX": probe_ratio_x,
+            "probeRatioY": probe_ratio_y,
+            "probeOffsetX": click_target_state["probeOffsetX"],
+            "probeOffsetY": click_target_state["probeOffsetY"],
             "targetClientX": click_result["target"]["clientX"],
             "targetClientY": click_result["target"]["clientY"],
             "screenshot": screenshot_path,
@@ -461,6 +478,8 @@ def main() -> int:
                     "height": fixed_target["target"]["bboxHeight"],
                 },
                 "targetMatchScore": fixed_target["target"]["score"],
+                "selectedProbeRatioX": calibration["probeRatioX"],
+                "selectedProbeRatioY": calibration["probeRatioY"],
                 "selectedProbeOffsetX": calibration["probeOffsetX"],
                 "selectedProbeOffsetY": calibration["probeOffsetY"],
             },
@@ -473,13 +492,13 @@ def main() -> int:
         return 2
 
     print(json.dumps({"phase": "calibration_summary", **calibration}, ensure_ascii=False))
-    phase_one = run_phase_one(hwnd, fixed_target, calibration["probeOffsetX"], calibration["probeOffsetY"])
+    phase_one = run_phase_one(hwnd, fixed_target, calibration["probeRatioX"], calibration["probeRatioY"])
     print(json.dumps({"phase": "phase1_summary", **phase_one}, ensure_ascii=False))
 
     if not phase_one["passed"]:
         return 2
 
-    phase_two = run_phase_two(hwnd, fixed_target, calibration["probeOffsetX"], calibration["probeOffsetY"])
+    phase_two = run_phase_two(hwnd, fixed_target, calibration["probeRatioX"], calibration["probeRatioY"])
     print(json.dumps({"phase": "phase2_summary", **phase_two}, ensure_ascii=False))
     return 0 if phase_two["passed"] else 3
 

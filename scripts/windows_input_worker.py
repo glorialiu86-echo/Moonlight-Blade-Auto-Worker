@@ -81,7 +81,7 @@ ACTION_POINTS = {
     "talk": (0.74, 0.89),
     "small_talk": (0.69, 0.77),
     "confirm_small_talk": (0.59, 0.80),
-    "trade": (0.84, 0.89),
+    "trade": (2139 / 2537, 1139 / 1384),
     "gift": (0.95, 0.89),
     "close_panel": (0.98, 0.05),
     "trade_left_slot": (0.27, 0.33),

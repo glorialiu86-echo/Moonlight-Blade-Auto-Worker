@@ -25,6 +25,8 @@ ITERATIONS = 20
 TARGET_TEMPLATE_THRESHOLD = 0.30
 TARGET_BODY_RATIO_X = 0.0
 TARGET_BODY_RATIO_Y = 4.8
+TRADE_BUTTON_CLIENT_RATIO_X = 2139 / 2537
+TRADE_BUTTON_CLIENT_RATIO_Y = 1139 / 1384
 EXIT_BUTTON_CLIENT_RATIO_X = 2233 / 2537
 EXIT_BUTTON_CLIENT_RATIO_Y = 1022 / 1384
 CROSS_CLIENT_RATIO_X = 959 / 2537
@@ -292,6 +294,13 @@ def locate_manual_exit_point(hwnd: int) -> dict:
     # we should click it directly by relative coordinates instead of waiting for
     # another screenshot-driven confirmation step.
     return build_screen_point_from_ratio(hwnd, EXIT_BUTTON_CLIENT_RATIO_X, EXIT_BUTTON_CLIENT_RATIO_Y)
+
+
+def locate_manual_trade_point(hwnd: int) -> dict:
+    # Trade is a fixed button inside the opened NPC detail UI. After the user
+    # manually marks a stable truth point, restore it from relative coordinates
+    # and click directly instead of adding a second vision-based locator.
+    return build_screen_point_from_ratio(hwnd, TRADE_BUTTON_CLIENT_RATIO_X, TRADE_BUTTON_CLIENT_RATIO_Y)
 
 
 def locate_cross_point(hwnd: int, _full_image: np.ndarray) -> dict:

@@ -18,7 +18,7 @@ import windows_input_worker as input_worker
 TMP_DIR = Path(__file__).resolve().parents[1] / "tmp"
 ITERATIONS = 20
 WAIT_AFTER_CLICK_MS = 300
-GAME_WINDOW_TITLE = "澶╂动鏄庢湀鍒€鎵嬫父"
+GAME_WINDOW_TITLE = "天涯明月刀手游"
 
 SELECTED_PANEL_ROI = (0.17, 0.16, 0.43, 0.32)
 SELECTED_NAME_ROI = (0.20, 0.18, 0.42, 0.36)
@@ -27,6 +27,18 @@ CROSS_TEMPLATE_ROI = (0.295, 0.195, 0.34, 0.275)
 CROSS_SEARCH_ROI = (0.23, 0.16, 0.38, 0.30)
 WORLD_NAME_SEARCH_ROI = (0.36, 0.14, 0.88, 0.72)
 SELECT_CLICK_Y_OFFSET_RATIO = 0.055
+WORLD_TARGET_BLOCKLIST = {
+    "籽小刀",
+    "查看",
+    "生机",
+    "体力",
+    "功力",
+    "任务",
+    "菜单",
+    "背包",
+    "感知",
+    "潜行",
+}
 
 
 def normalize_name(text: str) -> str:
@@ -171,7 +183,9 @@ def find_clickable_world_target(hwnd: int, full_image: np.ndarray) -> dict | Non
         text = normalize_name(item["text"])
         if not re.fullmatch(r"[\u4e00-\u9fff]{2,4}", text):
             continue
-        if text in {"绫藉皬鍒€", "浣撳姏", "姝﹀姏", "浠诲姟", "鑿滃崟", "鑳屽寘", "鎰熺煡", "娼滆"}:
+        if text in WORLD_TARGET_BLOCKLIST:
+            continue
+        if item["centerY"] < 12:
             continue
 
         score = float(item["score"])

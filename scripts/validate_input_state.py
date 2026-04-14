@@ -41,10 +41,24 @@ def normalize_name(text: str) -> str:
     return normalized
 
 
-def save_debug_image(image: np.ndarray, name: str) -> str:
+def draw_click_marker(image: np.ndarray, client_x: int, client_y: int) -> np.ndarray:
+    marked = image.copy()
+    center = (int(client_x), int(client_y))
+    radius = 7
+    color = (0, 0, 255)
+    cv2.circle(marked, center, radius, color, thickness=2)
+    cv2.line(marked, (center[0] - 10, center[1]), (center[0] + 10, center[1]), color, thickness=2)
+    cv2.line(marked, (center[0], center[1] - 10), (center[0], center[1] + 10), color, thickness=2)
+    return marked
+
+
+def save_debug_image(image: np.ndarray, name: str, client_x: int | None = None, client_y: int | None = None) -> str:
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     output_path = TMP_DIR / name
-    rgb = image[:, :, ::-1]
+    output_image = image
+    if client_x is not None and client_y is not None:
+        output_image = draw_click_marker(image, client_x, client_y)
+    rgb = output_image[:, :, ::-1]
     Image.fromarray(rgb.astype(np.uint8), mode="RGB").save(output_path)
     return str(output_path)
 
@@ -375,7 +389,12 @@ def run_phase_one(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
         time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
         full_image = capture_full_client(hwnd)
         selected_state = detect_selected_state(full_image, fixed_target)
-        screenshot_path = save_debug_image(full_image, f"phase1-{index:02d}.png")
+        screenshot_path = save_debug_image(
+            full_image,
+            f"phase1-{index:02d}.png",
+            click_result["target"]["clientX"],
+            click_result["target"]["clientY"],
+        )
 
         success = bool(selected_state["selected"])
         if success:
@@ -400,6 +419,10 @@ def run_phase_one(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
             "clientBounds": click_result["debug"]["bounds"],
             "targetBbox": click_result["debug"]["targetBbox"],
             "clickAbsolute": click_result["debug"]["clickAbsolute"],
+            "markerScreenX": click_result["target"]["screenX"],
+            "markerScreenY": click_result["target"]["screenY"],
+            "markerClientX": click_result["target"]["clientX"],
+            "markerClientY": click_result["target"]["clientY"],
             "mouseBefore": click_result["debug"]["mouseBefore"],
             "mouseAfter": click_result["debug"]["mouseAfter"],
             "screenshot": screenshot_path,
@@ -473,7 +496,12 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
         time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
         after_image = capture_full_client(hwnd)
         after_state = detect_selected_state(after_image, fixed_target)
-        screenshot_path = save_debug_image(after_image, f"phase2-{index:02d}.png")
+        screenshot_path = save_debug_image(
+            after_image,
+            f"phase2-{index:02d}.png",
+            click_result["target"]["clientX"],
+            click_result["target"]["clientY"],
+        )
 
         success = not after_state["selected"]
         if success:
@@ -494,6 +522,10 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
             "probeOffsetY": click_target_state["probeOffsetY"],
             "targetClientX": click_result["target"]["clientX"],
             "targetClientY": click_result["target"]["clientY"],
+            "markerScreenX": click_result["target"]["screenX"],
+            "markerScreenY": click_result["target"]["screenY"],
+            "markerClientX": click_result["target"]["clientX"],
+            "markerClientY": click_result["target"]["clientY"],
             "screenshot": screenshot_path,
         }
         phase_results.append(row)

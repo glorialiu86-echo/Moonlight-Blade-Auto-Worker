@@ -93,7 +93,7 @@ ACTION_POINTS = {
     "gift_first_slot": (0.78, 0.46),
     "gift_plus": (0.82, 0.92),
     "gift_submit": (0.91, 0.92),
-    "chat_input": (0.18, 0.94),
+    "chat_input": (652 / 2537, 1294 / 1384),
 }
 
 CHAT_KEYWORDS = ["点击输入聊天", "发送", "第一次见面", "好感度"]
@@ -1414,6 +1414,10 @@ def try_enter_chat(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval
         stage_history.append(post_talk_state["stage"])
 
     if post_talk_state["stage"] == "chat_ready":
+        # After confirming small talk, do not immediately click the chat input.
+        # The NPC may still need time to walk into position and fully open the
+        # chat screen. Only use the fixed chat_input point once chat_ready is
+        # actually reached.
         dialog_state = detect_dialog(hwnd)
         return {
             "success": True,

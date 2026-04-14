@@ -6,7 +6,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import win32api
 from PIL import Image
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -19,28 +18,53 @@ import windows_input_worker as input_worker
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TMP_DIR = PROJECT_ROOT / "tmp"
 DATA_DIR = PROJECT_ROOT / "data"
-ITERATIONS = 20
-WAIT_AFTER_CLICK_MS = 300
-GAME_WINDOW_TITLE = "\u5929\u6daf\u660e\u6708\u5200\u624b\u6e38"
-TARGET_NAME = "\u535c\u7389\u4eba"
+GAME_WINDOW_TITLE = "天涯明月刀手游"
+TARGET_NAME = "卜玉人"
 TARGET_TEMPLATE_PATH = DATA_DIR / "buyuren-name-template.png"
-TARGET_BODY_RATIO_X = -0.18269230769230768
-TARGET_BODY_RATIO_Y = 4.435897435897436
+ITERATIONS = 20
 TARGET_TEMPLATE_THRESHOLD = 0.30
-
+TARGET_BODY_RATIO_X = 0.0
+TARGET_BODY_RATIO_Y = 4.8
+EXIT_BUTTON_CLIENT_RATIO_X = 2233 / 2537
+EXIT_BUTTON_CLIENT_RATIO_Y = 1022 / 1384
+WAIT_AFTER_TARGET_CLICK_MS = 150
+WAIT_AFTER_UI_CLICK_MS = 300
+FIXED_FAILURE_DIR = TMP_DIR / "fixed_npc_failures"
+RANDOM_FAILURE_DIR = TMP_DIR / "random_npc_failures"
 SELECTED_PANEL_ROI = (0.20, 0.10, 0.42, 0.26)
 SELECTED_NAME_ROI = (0.26, 0.12, 0.36, 0.20)
 SELECTED_HP_ROI = (0.26, 0.19, 0.39, 0.23)
-CROSS_TEMPLATE_ROI = (0.35, 0.11, 0.39, 0.18)
-CROSS_SEARCH_ROI = (0.31, 0.08, 0.42, 0.22)
-FAILURE_DIR = TMP_DIR / "phase1_failures"
-RUN_PROBE_ONLY = True
-CROSS_MANUAL_CLIENT_RATIO_X = 924 / 2445
-CROSS_MANUAL_CLIENT_RATIO_Y = 298 / 1332
-VIEW_ICON_CLIENT_RATIO_X = 1295 / 2537
-VIEW_ICON_CLIENT_RATIO_Y = 916 / 1384
-EXIT_BUTTON_CLIENT_RATIO_X = 2233 / 2537
-EXIT_BUTTON_CLIENT_RATIO_Y = 1022 / 1384
+DETAIL_EXIT_ROI = (0.82, 0.66, 0.99, 0.80)
+CROSS_SEARCH_ROI = (0.32, 0.10, 0.42, 0.20)
+RANDOM_NAME_SEARCH_ROI = (0.15, 0.18, 0.84, 0.74)
+IGNORED_WORLD_TEXTS = {
+    "查看",
+    "退出",
+    "详情",
+    "交易",
+    "赠礼",
+    "交谈",
+    "战斗",
+    "邀请",
+    "潜行",
+    "感知",
+    "叫卖",
+    "动作",
+    "社交",
+    "拍照",
+    "快捷",
+    "菜单",
+    "背包",
+    "任务",
+    "体力",
+    "武力",
+    "已时",
+    "申时",
+    "酉时",
+    "西时",
+    "我",
+    "籽小刀",
+}
 
 
 def normalize_name(text: str) -> str:
@@ -52,9 +76,8 @@ def normalize_name(text: str) -> str:
 def draw_click_marker(image: np.ndarray, client_x: int, client_y: int) -> np.ndarray:
     marked = image.copy()
     center = (int(client_x), int(client_y))
-    radius = 7
     color = (0, 0, 255)
-    cv2.circle(marked, center, radius, color, thickness=2)
+    cv2.circle(marked, center, 7, color, thickness=2)
     cv2.line(marked, (center[0] - 10, center[1]), (center[0] + 10, center[1]), color, thickness=2)
     cv2.line(marked, (center[0], center[1] - 10), (center[0], center[1] + 10), color, thickness=2)
     return marked
@@ -73,8 +96,7 @@ def save_debug_image(
     output_image = image
     if client_x is not None and client_y is not None:
         output_image = draw_click_marker(image, client_x, client_y)
-    rgb = output_image[:, :, ::-1]
-    Image.fromarray(rgb.astype(np.uint8), mode="RGB").save(output_path)
+    Image.fromarray(output_image[:, :, ::-1].astype(np.uint8), mode="RGB").save(output_path)
     return str(output_path)
 
 
@@ -96,19 +118,12 @@ def crop_rect(image: np.ndarray, left: int, top: int, right: int, bottom: int) -
     return image[bounded_top:bounded_bottom, bounded_left:bounded_right].copy()
 
 
-def roi_to_screen_point(hwnd: int, roi: tuple[float, float, float, float], local_x: int, local_y: int) -> tuple[int, int]:
-    bounds = input_worker.get_window_bounds(hwnd)
-    roi_left = bounds["left"] + int(bounds["width"] * roi[0])
-    roi_top = bounds["top"] + int(bounds["height"] * roi[1])
-    return roi_left + int(local_x), roi_top + int(local_y)
-
-
 def capture_full_client(hwnd: int) -> np.ndarray:
     return input_worker.capture_window_region(hwnd, (0.0, 0.0, 1.0, 1.0))
 
 
 def extract_best_name(image: np.ndarray) -> str:
-    candidates = []
+    candidates: list[tuple[float, str]] = []
     for item in input_worker.ocr_items(image):
         text = normalize_name(item["text"])
         if not re.fullmatch(r"[\u4e00-\u9fff]{2,4}", text):
@@ -118,7 +133,7 @@ def extract_best_name(image: np.ndarray) -> str:
     if not candidates:
         return ""
 
-    candidates.sort(key=lambda item: item[0], reverse=True)
+    candidates.sort(key=lambda value: value[0], reverse=True)
     return candidates[0][1]
 
 
@@ -169,71 +184,11 @@ def detect_hp_bar(panel_hp_image: np.ndarray) -> bool:
     return False
 
 
-def detect_world_hp_bar(full_image: np.ndarray, fixed_target: dict | None) -> bool:
-    if fixed_target is None:
-        return False
-
-    target = fixed_target["target"]
-    bbox_x = int(target["bboxX"])
-    bbox_y = int(target["bboxY"])
-    bbox_width = int(target["bboxWidth"])
-    bbox_height = int(target["bboxHeight"])
-    roi = crop_rect(
-        full_image,
-        bbox_x - round(bbox_width * 1.4),
-        bbox_y - round(bbox_height * 2.2),
-        bbox_x + round(bbox_width * 2.4),
-        bbox_y + round(bbox_height * 0.8),
-    )
-
-    blue_mask = (
-        (roi[:, :, 0] >= 150)
-        & (roi[:, :, 1] >= 145)
-        & (roi[:, :, 2] <= 150)
-    ).astype(np.uint8) * 255
-    blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_OPEN, np.ones((3, 3), dtype=np.uint8))
-    contours, _hierarchy = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    min_width = max(24, round(bbox_width * 0.45))
-    max_height = max(12, round(bbox_height * 0.5))
-
-    for contour in contours:
-        x, y, width, height = cv2.boundingRect(contour)
-        if width < min_width:
-            continue
-        if height < 3 or height > max_height:
-            continue
-        if (width / max(height, 1)) < 3.0:
-            continue
-        return True
-
-    return False
-
-
-def detect_selected_state(full_image: np.ndarray, fixed_target: dict | None = None) -> dict:
-    panel_image = crop_roi(full_image, SELECTED_PANEL_ROI)
-    name_image = crop_roi(full_image, SELECTED_NAME_ROI)
-    cross_image = crop_roi(full_image, CROSS_TEMPLATE_ROI)
-
-    name_text = extract_best_name(name_image)
-    has_avatar = detect_avatar_block(panel_image)
-    has_cross = detect_cross_symbol(cross_image)
-    has_world_hp_bar = detect_world_hp_bar(full_image, fixed_target)
-    selected = (has_cross and (has_avatar or bool(name_text))) or has_world_hp_bar
-    return {
-        "selected": selected,
-        "name": name_text,
-        "hasAvatar": has_avatar,
-        "hasCross": has_cross,
-        "hasWorldHpBar": has_world_hp_bar,
-    }
-
-
 def detect_left_top_selected_state(full_image: np.ndarray) -> dict:
     panel_image = crop_roi(full_image, SELECTED_PANEL_ROI)
     name_image = crop_roi(full_image, SELECTED_NAME_ROI)
-    cross_image = crop_roi(full_image, CROSS_TEMPLATE_ROI)
     hp_image = crop_roi(full_image, SELECTED_HP_ROI)
-
+    cross_image = crop_roi(full_image, (0.35, 0.11, 0.39, 0.18))
     name_text = extract_best_name(name_image)
     has_avatar = detect_avatar_block(panel_image)
     has_cross = detect_cross_symbol(cross_image)
@@ -248,33 +203,129 @@ def detect_left_top_selected_state(full_image: np.ndarray) -> dict:
     }
 
 
-def build_cross_template(full_image: np.ndarray) -> np.ndarray:
-    return crop_roi(full_image, CROSS_TEMPLATE_ROI)
+def detect_world_hp_bar(full_image: np.ndarray, target: dict | None) -> bool:
+    if target is None:
+        return False
+
+    bbox_x = int(target["bboxX"])
+    bbox_y = int(target["bboxY"])
+    bbox_width = int(target["bboxWidth"])
+    bbox_height = int(target["bboxHeight"])
+    roi = crop_rect(
+        full_image,
+        bbox_x - round(bbox_width * 1.2),
+        bbox_y - round(bbox_height * 2.2),
+        bbox_x + round(bbox_width * 2.2),
+        bbox_y + round(bbox_height * 0.4),
+    )
+    blue_mask = (
+        (roi[:, :, 0] >= 145)
+        & (roi[:, :, 1] >= 145)
+        & (roi[:, :, 2] <= 155)
+    ).astype(np.uint8) * 255
+    blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_OPEN, np.ones((3, 3), dtype=np.uint8))
+    contours, _hierarchy = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    min_width = max(22, round(bbox_width * 0.40))
+    max_height = max(12, round(bbox_height * 0.55))
+
+    for contour in contours:
+        _x, _y, width, height = cv2.boundingRect(contour)
+        if width < min_width:
+            continue
+        if height < 3 or height > max_height:
+            continue
+        if (width / max(height, 1)) < 3.0:
+            continue
+        return True
+
+    return False
 
 
-def get_cross_anchor(template: np.ndarray) -> tuple[int, int]:
-    gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-    _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
-    contours, _hierarchy = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        height, width = template.shape[:2]
-        return width // 2, height // 2
-
-    contour = max(contours, key=cv2.contourArea)
-    x, y, width, height = cv2.boundingRect(contour)
-    return x + width // 2, y + height // 2
-
-
-def locate_cross_in_roi(hwnd: int, full_image: np.ndarray) -> dict | None:
-    bounds = input_worker.get_window_bounds(hwnd)
-    client_x = int(round(bounds["width"] * CROSS_MANUAL_CLIENT_RATIO_X))
-    client_y = int(round(bounds["height"] * CROSS_MANUAL_CLIENT_RATIO_Y))
-    screen_x = int(bounds["left"] + client_x)
-    screen_y = int(bounds["top"] + client_y)
+def detect_selection_state(full_image: np.ndarray, target: dict | None) -> dict:
+    panel_state = detect_left_top_selected_state(full_image)
+    has_world_hp_bar = detect_world_hp_bar(full_image, target)
     return {
-        "screenX": int(screen_x),
-        "screenY": int(screen_y),
-        "score": 1.0,
+        **panel_state,
+        "hasWorldHpBar": has_world_hp_bar,
+        "selected": bool(panel_state["selected"] or has_world_hp_bar),
+    }
+
+
+def detect_exit_button_state(full_image: np.ndarray) -> dict:
+    roi_image = crop_roi(full_image, DETAIL_EXIT_ROI)
+    texts = [normalize_name(item["text"]) for item in input_worker.ocr_items(roi_image)]
+    joined = "".join(texts)
+    visible = "退出" in joined
+    return {
+        "visible": visible,
+        "texts": texts,
+    }
+
+
+def get_window_bounds(hwnd: int) -> dict:
+    return input_worker.get_window_bounds(hwnd)
+
+
+def build_screen_point_from_ratio(hwnd: int, x_ratio: float, y_ratio: float) -> dict:
+    bounds = get_window_bounds(hwnd)
+    client_x = int(round(bounds["width"] * x_ratio))
+    client_y = int(round(bounds["height"] * y_ratio))
+    return {
+        "clientX": client_x,
+        "clientY": client_y,
+        "screenX": int(bounds["left"] + client_x),
+        "screenY": int(bounds["top"] + client_y),
+    }
+
+
+def click_screen_point(hwnd: int, screen_x: int, screen_y: int) -> dict:
+    bounds = get_window_bounds(hwnd)
+    result = input_worker.click_screen_point(hwnd, int(screen_x), int(screen_y), "left")
+    result["clientX"] = int(screen_x - bounds["left"])
+    result["clientY"] = int(screen_y - bounds["top"])
+    return result
+
+
+def locate_manual_exit_point(hwnd: int) -> dict:
+    return build_screen_point_from_ratio(hwnd, EXIT_BUTTON_CLIENT_RATIO_X, EXIT_BUTTON_CLIENT_RATIO_Y)
+
+
+def locate_cross_point(hwnd: int, full_image: np.ndarray) -> dict | None:
+    bounds = get_window_bounds(hwnd)
+    roi_image = crop_roi(full_image, CROSS_SEARCH_ROI)
+    gray = cv2.cvtColor(roi_image, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 170, 255, cv2.THRESH_BINARY)
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, np.ones((3, 3), dtype=np.uint8))
+    contours, _hierarchy = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    best_rect = None
+    best_score = None
+    for contour in contours:
+        x, y, width, height = cv2.boundingRect(contour)
+        if width < 10 or height < 10 or width > 70 or height > 70:
+            continue
+        aspect = width / max(height, 1)
+        if aspect < 0.6 or aspect > 1.6:
+            continue
+        center_x = x + width / 2
+        score = center_x
+        if best_score is None or score > best_score:
+            best_score = score
+            best_rect = (x, y, width, height)
+
+    if best_rect is None:
+        return None
+
+    roi_left = int(bounds["width"] * CROSS_SEARCH_ROI[0])
+    roi_top = int(bounds["height"] * CROSS_SEARCH_ROI[1])
+    x, y, width, height = best_rect
+    client_x = int(roi_left + x + width / 2)
+    client_y = int(roi_top + y + height / 2)
+    return {
+        "clientX": client_x,
+        "clientY": client_y,
+        "screenX": int(bounds["left"] + client_x),
+        "screenY": int(bounds["top"] + client_y),
     }
 
 
@@ -288,8 +339,7 @@ def load_target_template() -> np.ndarray:
     return template
 
 
-def find_target_by_template(hwnd: int, full_image: np.ndarray, template: np.ndarray) -> dict | None:
-    bounds = input_worker.get_window_bounds(hwnd)
+def find_target_by_template(full_image: np.ndarray, template: np.ndarray) -> dict | None:
     result = cv2.matchTemplate(full_image, template, cv2.TM_CCOEFF_NORMED)
     _min_val, max_val, _min_loc, max_loc = cv2.minMaxLoc(result)
     if float(max_val) < TARGET_TEMPLATE_THRESHOLD:
@@ -300,304 +350,501 @@ def find_target_by_template(hwnd: int, full_image: np.ndarray, template: np.ndar
     bbox_y = int(max_loc[1])
     bbox_width = int(template_width)
     bbox_height = int(template_height)
-    center_x = bbox_x + bbox_width // 2
     return {
         "name": TARGET_NAME,
-        "centerX": int(center_x),
+        "bboxX": bbox_x,
+        "bboxY": bbox_y,
+        "bboxWidth": bbox_width,
+        "bboxHeight": bbox_height,
+        "centerX": int(bbox_x + bbox_width / 2),
         "nameBottomY": int(bbox_y + bbox_height),
-        "bboxX": int(bbox_x),
-        "bboxY": int(bbox_y),
-        "bboxWidth": int(bbox_width),
-        "bboxHeight": int(bbox_height),
         "score": round(float(max_val), 4),
     }
 
 
-def lock_fixed_world_target(hwnd: int) -> dict | None:
+def lock_fixed_world_target(hwnd: int) -> dict:
     full_image = capture_full_client(hwnd)
     template = load_target_template()
-    target = find_target_by_template(hwnd, full_image, template)
+    target = find_target_by_template(full_image, template)
     if target is None:
-        return None
-    return {
-        "targetName": target["name"],
-        "target": target,
-    }
+        raise RuntimeError("TARGET_TEMPLATE_MATCH_NOT_FOUND")
+    return target
 
 
-def build_click_target(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_ratio_y: float) -> dict:
-    bounds = input_worker.get_window_bounds(hwnd)
-    target = fixed_target["target"]
-    probe_offset_x = round(target["bboxWidth"] * probe_ratio_x)
-    probe_offset_y = round(target["bboxHeight"] * probe_ratio_y)
+def build_target_click_from_bbox(hwnd: int, target: dict) -> dict:
+    bounds = get_window_bounds(hwnd)
+    probe_offset_x = round(target["bboxWidth"] * TARGET_BODY_RATIO_X)
+    probe_offset_y = round(target["bboxHeight"] * TARGET_BODY_RATIO_Y)
     client_x = max(0, min(bounds["width"] - 1, target["centerX"] + probe_offset_x))
     client_y = max(0, min(bounds["height"] - 1, target["nameBottomY"] + probe_offset_y))
     return {
         **target,
+        "probeOffsetX": int(probe_offset_x),
+        "probeOffsetY": int(probe_offset_y),
         "clientX": int(client_x),
         "clientY": int(client_y),
         "screenX": int(bounds["left"] + client_x),
         "screenY": int(bounds["top"] + client_y),
-        "probeRatioX": float(probe_ratio_x),
-        "probeRatioY": float(probe_ratio_y),
-        "probeOffsetX": int(probe_offset_x),
-        "probeOffsetY": int(probe_offset_y),
     }
 
 
-def click_target(hwnd: int, click_target: dict, target_name: str) -> dict:
-    bounds = input_worker.get_window_bounds(hwnd)
-    mouse_before_x, mouse_before_y = win32api.GetCursorPos()
-    click_state = input_worker.click_screen_point(hwnd, click_target["screenX"], click_target["screenY"], "left")
-    mouse_after_x, mouse_after_y = win32api.GetCursorPos()
-    return {
-        "clicked": True,
-        "targetName": target_name,
-        "target": click_target,
-        "click": click_state,
-        "debug": {
-            "bounds": {
-                "left": int(bounds["left"]),
-                "top": int(bounds["top"]),
-                "width": int(bounds["width"]),
-                "height": int(bounds["height"]),
-            },
-            "targetBbox": {
-                "x": int(click_target["bboxX"]),
-                "y": int(click_target["bboxY"]),
-                "width": int(click_target["bboxWidth"]),
-                "height": int(click_target["bboxHeight"]),
-            },
-            "clickAbsolute": {
-                "x": int(click_target["screenX"]),
-                "y": int(click_target["screenY"]),
-            },
-            "mouseBefore": {
-                "x": int(mouse_before_x),
-                "y": int(mouse_before_y),
-            },
-            "mouseAfter": {
-                "x": int(mouse_after_x),
-                "y": int(mouse_after_y),
-            },
-        },
-    }
+def find_random_npc_target(hwnd: int, iteration: int) -> dict | None:
+    bounds = get_window_bounds(hwnd)
+    full_image = capture_full_client(hwnd)
+    roi_left = int(bounds["width"] * RANDOM_NAME_SEARCH_ROI[0])
+    roi_top = int(bounds["height"] * RANDOM_NAME_SEARCH_ROI[1])
+    roi_image = crop_roi(full_image, RANDOM_NAME_SEARCH_ROI)
+    candidates = []
+
+    for item in input_worker.ocr_items(roi_image):
+        text = normalize_name(item["text"])
+        if not re.fullmatch(r"[\u4e00-\u9fff]{2,4}", text):
+            continue
+        if text in IGNORED_WORLD_TEXTS:
+            continue
+        width = int(item["maxX"] - item["minX"])
+        height = int(item["maxY"] - item["minY"])
+        if width < 18 or height < 12:
+            continue
+        center_x = roi_left + int(item["centerX"])
+        center_y = roi_top + int(item["centerY"])
+        distance_penalty = abs(center_x - bounds["width"] * 0.5) + abs(center_y - bounds["height"] * 0.5) * 0.5
+        candidates.append(
+            {
+                "name": text,
+                "bboxX": roi_left + int(item["minX"]),
+                "bboxY": roi_top + int(item["minY"]),
+                "bboxWidth": width,
+                "bboxHeight": height,
+                "centerX": center_x,
+                "nameBottomY": roi_top + int(item["maxY"]),
+                "score": float(item["score"]),
+                "rankScore": float(item["score"]) * 1000.0 - distance_penalty,
+            }
+        )
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda value: value["rankScore"], reverse=True)
+    top_candidates = candidates[: min(5, len(candidates))]
+    return top_candidates[(iteration - 1) % len(top_candidates)]
 
 
-def try_close_current_selection(hwnd: int, fixed_target: dict | None = None) -> None:
+def reset_to_world(hwnd: int) -> None:
     image = capture_full_client(hwnd)
-    state = detect_selected_state(image, fixed_target)
-    if not state["selected"]:
-        return
-    cross_match = locate_cross_in_roi(hwnd, image)
-    if cross_match is None:
-        return
-    input_worker.click_screen_point(hwnd, cross_match["screenX"], cross_match["screenY"], "left")
-    time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
+    exit_state = detect_exit_button_state(image)
+    if exit_state["visible"]:
+        exit_point = locate_manual_exit_point(hwnd)
+        click_screen_point(hwnd, exit_point["screenX"], exit_point["screenY"])
+        time.sleep(WAIT_AFTER_UI_CLICK_MS / 1000.0)
+
+    image = capture_full_client(hwnd)
+    selected_state = detect_selection_state(image, None)
+    if selected_state["selected"]:
+        cross_point = locate_cross_point(hwnd, image)
+        if cross_point is not None:
+            click_screen_point(hwnd, cross_point["screenX"], cross_point["screenY"])
+            time.sleep(WAIT_AFTER_UI_CLICK_MS / 1000.0)
 
 
-def run_fixed_npc_stability_test(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_ratio_y: float) -> dict:
-    phase_results = []
+def record_round_failure(
+    failure_dir: Path,
+    suite_name: str,
+    iteration: int,
+    step_name: str,
+    image: np.ndarray,
+    click_point: dict | None,
+) -> str:
+    client_x = None
+    client_y = None
+    if click_point is not None:
+        client_x = click_point.get("clientX")
+        client_y = click_point.get("clientY")
+    return save_debug_image(
+        image,
+        f"{suite_name}-round-{iteration:02d}-{step_name}.png",
+        client_x,
+        client_y,
+        failure_dir,
+    )
+
+
+def execute_round(
+    hwnd: int,
+    suite_name: str,
+    iteration: int,
+    target_click: dict,
+    view_click: dict,
+    failure_dir: Path,
+    target_name: str,
+) -> dict:
+    click_screen_point(hwnd, target_click["screenX"], target_click["screenY"])
+    time.sleep(WAIT_AFTER_TARGET_CLICK_MS / 1000.0)
+
+    selected_image = capture_full_client(hwnd)
+    selected_state = detect_selection_state(selected_image, target_click)
+    selected_shot = save_debug_image(
+        selected_image,
+        f"{suite_name}-round-{iteration:02d}-selected.png",
+        target_click["clientX"],
+        target_click["clientY"],
+    )
+    if not selected_state["selected"]:
+        failure_shot = record_round_failure(failure_dir, suite_name, iteration, "select-fail", selected_image, target_click)
+        return {
+            "iteration": iteration,
+            "targetName": target_name,
+            "status": "FAIL",
+            "selectedReached": False,
+            "viewOpened": False,
+            "exitClosed": False,
+            "crossCleared": False,
+            "reason": "SELECT_NOT_REACHED",
+            "selectedState": selected_state,
+            "targetClick": target_click,
+            "viewClick": view_click,
+            "selectedScreenshot": selected_shot,
+            "failureScreenshot": failure_shot,
+        }
+
+    return finish_round_after_selection(
+        hwnd,
+        suite_name,
+        iteration,
+        target_name,
+        target_click,
+        view_click,
+        selected_state,
+        selected_shot,
+        failure_dir,
+    )
+
+
+def finish_round_after_selection(
+    hwnd: int,
+    suite_name: str,
+    iteration: int,
+    target_name: str,
+    target_click: dict,
+    view_click: dict,
+    selected_state: dict,
+    selected_shot: str,
+    failure_dir: Path,
+) -> dict:
+    click_screen_point(hwnd, view_click["screenX"], view_click["screenY"])
+    time.sleep(WAIT_AFTER_UI_CLICK_MS / 1000.0)
+
+    detail_image = capture_full_client(hwnd)
+    detail_state = detect_exit_button_state(detail_image)
+    detail_shot = save_debug_image(
+        detail_image,
+        f"{suite_name}-round-{iteration:02d}-detail-open.png",
+        view_click["clientX"],
+        view_click["clientY"],
+    )
+    if not detail_state["visible"]:
+        failure_shot = record_round_failure(failure_dir, suite_name, iteration, "detail-open-fail", detail_image, view_click)
+        return {
+            "iteration": iteration,
+            "targetName": target_name,
+            "status": "FAIL",
+            "selectedReached": True,
+            "viewOpened": False,
+            "exitClosed": False,
+            "crossCleared": False,
+            "reason": "DETAIL_NOT_OPENED",
+            "selectedState": selected_state,
+            "detailState": detail_state,
+            "targetClick": target_click,
+            "viewClick": view_click,
+            "selectedScreenshot": selected_shot,
+            "detailScreenshot": detail_shot,
+            "failureScreenshot": failure_shot,
+        }
+
+    exit_click = locate_manual_exit_point(hwnd)
+    click_screen_point(hwnd, exit_click["screenX"], exit_click["screenY"])
+    time.sleep(WAIT_AFTER_UI_CLICK_MS / 1000.0)
+
+    after_exit_image = capture_full_client(hwnd)
+    after_exit_state = detect_exit_button_state(after_exit_image)
+    after_exit_shot = save_debug_image(
+        after_exit_image,
+        f"{suite_name}-round-{iteration:02d}-after-exit.png",
+        exit_click["clientX"],
+        exit_click["clientY"],
+    )
+    if after_exit_state["visible"]:
+        failure_shot = record_round_failure(failure_dir, suite_name, iteration, "exit-fail", after_exit_image, exit_click)
+        return {
+            "iteration": iteration,
+            "targetName": target_name,
+            "status": "FAIL",
+            "selectedReached": True,
+            "viewOpened": True,
+            "exitClosed": False,
+            "crossCleared": False,
+            "reason": "EXIT_NOT_CLOSED",
+            "selectedState": selected_state,
+            "detailState": detail_state,
+            "afterExitState": after_exit_state,
+            "targetClick": target_click,
+            "viewClick": view_click,
+            "exitClick": exit_click,
+            "selectedScreenshot": selected_shot,
+            "detailScreenshot": detail_shot,
+            "afterExitScreenshot": after_exit_shot,
+            "failureScreenshot": failure_shot,
+        }
+
+    cross_click = locate_cross_point(hwnd, after_exit_image)
+    if cross_click is None:
+        failure_shot = record_round_failure(failure_dir, suite_name, iteration, "cross-not-found", after_exit_image, None)
+        return {
+            "iteration": iteration,
+            "targetName": target_name,
+            "status": "FAIL",
+            "selectedReached": True,
+            "viewOpened": True,
+            "exitClosed": True,
+            "crossCleared": False,
+            "reason": "CROSS_NOT_FOUND",
+            "selectedState": selected_state,
+            "detailState": detail_state,
+            "afterExitState": after_exit_state,
+            "targetClick": target_click,
+            "viewClick": view_click,
+            "exitClick": exit_click,
+            "selectedScreenshot": selected_shot,
+            "detailScreenshot": detail_shot,
+            "afterExitScreenshot": after_exit_shot,
+            "failureScreenshot": failure_shot,
+        }
+    click_screen_point(hwnd, cross_click["screenX"], cross_click["screenY"])
+    time.sleep(WAIT_AFTER_UI_CLICK_MS / 1000.0)
+
+    after_cross_image = capture_full_client(hwnd)
+    after_cross_state = detect_selection_state(after_cross_image, target_click)
+    after_cross_shot = save_debug_image(
+        after_cross_image,
+        f"{suite_name}-round-{iteration:02d}-after-cross.png",
+        cross_click["clientX"],
+        cross_click["clientY"],
+    )
+    if after_cross_state["selected"]:
+        failure_shot = record_round_failure(failure_dir, suite_name, iteration, "cross-fail", after_cross_image, cross_click)
+        return {
+            "iteration": iteration,
+            "targetName": target_name,
+            "status": "FAIL",
+            "selectedReached": True,
+            "viewOpened": True,
+            "exitClosed": True,
+            "crossCleared": False,
+            "reason": "CROSS_NOT_CLEARED",
+            "selectedState": selected_state,
+            "detailState": detail_state,
+            "afterExitState": after_exit_state,
+            "afterCrossState": after_cross_state,
+            "targetClick": target_click,
+            "viewClick": view_click,
+            "exitClick": exit_click,
+            "crossClick": cross_click,
+            "selectedScreenshot": selected_shot,
+            "detailScreenshot": detail_shot,
+            "afterExitScreenshot": after_exit_shot,
+            "afterCrossScreenshot": after_cross_shot,
+            "failureScreenshot": failure_shot,
+        }
+
+    return {
+        "iteration": iteration,
+        "targetName": target_name,
+        "status": "SUCCESS",
+        "selectedReached": True,
+        "viewOpened": True,
+        "exitClosed": True,
+        "crossCleared": True,
+        "selectedState": selected_state,
+        "detailState": detail_state,
+        "afterExitState": after_exit_state,
+        "afterCrossState": after_cross_state,
+        "targetClick": target_click,
+        "viewClick": view_click,
+        "exitClick": exit_click,
+        "crossClick": cross_click,
+        "selectedScreenshot": selected_shot,
+        "detailScreenshot": detail_shot,
+        "afterExitScreenshot": after_exit_shot,
+        "afterCrossScreenshot": after_cross_shot,
+    }
+
+
+def execute_random_round(
+    hwnd: int,
+    iteration: int,
+    target_click: dict,
+    failure_dir: Path,
+    target_name: str,
+) -> dict:
+    click_screen_point(hwnd, target_click["screenX"], target_click["screenY"])
+    time.sleep(WAIT_AFTER_TARGET_CLICK_MS / 1000.0)
+
+    selected_image = capture_full_client(hwnd)
+    selected_state = detect_selection_state(selected_image, target_click)
+    selected_shot = save_debug_image(
+        selected_image,
+        f"random-round-{iteration:02d}-selected.png",
+        target_click["clientX"],
+        target_click["clientY"],
+    )
+    if not selected_state["selected"]:
+        failure_shot = record_round_failure(failure_dir, "random", iteration, "select-fail", selected_image, target_click)
+        return {
+            "iteration": iteration,
+            "targetName": target_name,
+            "status": "FAIL",
+            "selectedReached": False,
+            "viewOpened": False,
+            "exitClosed": False,
+            "crossCleared": False,
+            "reason": "SELECT_NOT_REACHED",
+            "selectedState": selected_state,
+            "targetClick": target_click,
+            "selectedScreenshot": selected_shot,
+            "failureScreenshot": failure_shot,
+        }
+
+    view_click = input_worker.find_view_button_near_click(hwnd, target_click["screenX"], target_click["screenY"])
+    if view_click is None:
+        failure_shot = record_round_failure(failure_dir, "random", iteration, "view-not-found", selected_image, target_click)
+        return {
+            "iteration": iteration,
+            "targetName": target_name,
+            "status": "FAIL",
+            "selectedReached": True,
+            "viewOpened": False,
+            "exitClosed": False,
+            "crossCleared": False,
+            "reason": "VIEW_BUTTON_NOT_FOUND",
+            "selectedState": selected_state,
+            "targetClick": target_click,
+            "selectedScreenshot": selected_shot,
+            "failureScreenshot": failure_shot,
+        }
+
+    bounds = get_window_bounds(hwnd)
+    view_click["clientX"] = int(view_click["screenX"] - bounds["left"])
+    view_click["clientY"] = int(view_click["screenY"] - bounds["top"])
+
+    row = finish_round_after_selection(
+        hwnd,
+        "random",
+        iteration,
+        target_name,
+        target_click,
+        view_click,
+        selected_state,
+        selected_shot,
+        failure_dir,
+    )
+    row["viewMatchSource"] = view_click.get("source")
+    row["viewMatchScore"] = view_click.get("score")
+    row["viewMatchDebugImage"] = view_click.get("debugImage")
+    row["viewSearchRect"] = view_click.get("searchRect")
+    return row
+
+
+def run_fixed_npc_suite(hwnd: int) -> dict:
+    failure_dir = FIXED_FAILURE_DIR
+    failure_dir.mkdir(parents=True, exist_ok=True)
+    fixed_target = lock_fixed_world_target(hwnd)
+    fixed_click = build_target_click_from_bbox(hwnd, fixed_target)
+    rows = []
     success_count = 0
 
-    for index in range(1, ITERATIONS + 1):
-        try_close_current_selection(hwnd, fixed_target)
-        click_target_state = build_click_target(hwnd, fixed_target, probe_ratio_x, probe_ratio_y)
-        click_result = click_target(hwnd, click_target_state, fixed_target["targetName"])
-        time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
-        selected_image = capture_full_client(hwnd)
-        selected_state = detect_left_top_selected_state(selected_image)
-        selected_screenshot = save_debug_image(
-            selected_image,
-            f"round-{index:02d}-select.png",
-            click_result["target"]["clientX"],
-            click_result["target"]["clientY"],
+    print(
+        json.dumps(
+            {
+                "phase": "fixed_setup",
+                "targetName": fixed_target["name"],
+                "targetBbox": {
+                    "x": fixed_target["bboxX"],
+                    "y": fixed_target["bboxY"],
+                    "width": fixed_target["bboxWidth"],
+                    "height": fixed_target["bboxHeight"],
+                },
+                "targetClick": fixed_click,
+                "exitClick": locate_manual_exit_point(hwnd),
+            },
+            ensure_ascii=False,
         )
+    )
 
-        if not selected_state["selected"]:
-            failure_screenshot = save_debug_image(
-                selected_image,
-                f"round-{index:02d}-select-fail.png",
-                click_result["target"]["clientX"],
-                click_result["target"]["clientY"],
-                FAILURE_DIR,
-            )
-            row = {
-                "phase": "stability",
-                "iteration": index,
-                "status": "FAIL",
-                "reason": "SELECT_NOT_REACHED",
-                "selectedReached": False,
-                "cancelCleared": False,
-                "panelName": selected_state["name"],
-                "hasAvatar": selected_state["hasAvatar"],
-                "hasCross": selected_state["hasCross"],
-                "hasHpBar": selected_state["hasHpBar"],
-                "targetName": click_result["targetName"],
-                "probeRatioX": probe_ratio_x,
-                "probeRatioY": probe_ratio_y,
-                "probeOffsetX": click_target_state["probeOffsetX"],
-                "probeOffsetY": click_target_state["probeOffsetY"],
-                "targetClientX": click_result["target"]["clientX"],
-                "targetClientY": click_result["target"]["clientY"],
-                "screenX": click_result["target"]["screenX"],
-                "screenY": click_result["target"]["screenY"],
-                "selectScreenshot": selected_screenshot,
-                "failureScreenshot": failure_screenshot,
-            }
-            phase_results.append(row)
-            print(json.dumps(row, ensure_ascii=False))
-            continue
-
-        cross_match = locate_cross_in_roi(hwnd, selected_image)
-        if cross_match is None:
-            failure_screenshot = save_debug_image(
-                selected_image,
-                f"round-{index:02d}-cross-not-found.png",
-                click_result["target"]["clientX"],
-                click_result["target"]["clientY"],
-                FAILURE_DIR,
-            )
-            row = {
-                "phase": "stability",
-                "iteration": index,
-                "status": "FAIL",
-                "reason": "CROSS_NOT_FOUND",
-                "selectedReached": True,
-                "cancelCleared": False,
-                "panelName": selected_state["name"],
-                "hasAvatar": selected_state["hasAvatar"],
-                "hasCross": selected_state["hasCross"],
-                "hasHpBar": selected_state["hasHpBar"],
-                "targetName": click_result["targetName"],
-                "probeRatioX": probe_ratio_x,
-                "probeRatioY": probe_ratio_y,
-                "probeOffsetX": click_target_state["probeOffsetX"],
-                "probeOffsetY": click_target_state["probeOffsetY"],
-                "targetClientX": click_result["target"]["clientX"],
-                "targetClientY": click_result["target"]["clientY"],
-                "screenX": click_result["target"]["screenX"],
-                "screenY": click_result["target"]["screenY"],
-                "selectScreenshot": selected_screenshot,
-                "failureScreenshot": failure_screenshot,
-            }
-            phase_results.append(row)
-            print(json.dumps(row, ensure_ascii=False))
-            continue
-
-        input_worker.click_screen_point(hwnd, cross_match["screenX"], cross_match["screenY"], "left")
-        time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
-        after_image = capture_full_client(hwnd)
-        after_state = detect_left_top_selected_state(after_image)
-        screenshot_path = save_debug_image(
-            after_image,
-            f"round-{index:02d}-after-close.png",
-            cross_match["screenX"] - click_result["debug"]["bounds"]["left"],
-            cross_match["screenY"] - click_result["debug"]["bounds"]["top"],
-        )
-
-        success = not after_state["selected"]
-        if success:
+    for iteration in range(1, ITERATIONS + 1):
+        reset_to_world(hwnd)
+        row = execute_random_round(hwnd, iteration, fixed_click, failure_dir, fixed_target["name"])
+        rows.append(row)
+        if row["status"] == "SUCCESS":
             success_count += 1
-        else:
-            save_debug_image(
-                after_image,
-                f"round-{index:02d}-cancel-fail.png",
-                cross_match["screenX"] - click_result["debug"]["bounds"]["left"],
-                cross_match["screenY"] - click_result["debug"]["bounds"]["top"],
-                FAILURE_DIR,
-            )
-
-        row = {
-            "phase": "stability",
-            "iteration": index,
-            "status": "SUCCESS" if success else "FAIL",
-            "selectedReached": True,
-            "cancelCleared": success,
-            "panelNameAfterClose": after_state["name"],
-            "detectedSelectedAfterClose": after_state["selected"],
-            "hasAvatarAfterClose": after_state["hasAvatar"],
-            "hasCrossAfterClose": after_state["hasCross"],
-            "hasHpBarAfterClose": after_state["hasHpBar"],
-            "crossScore": cross_match["score"],
-            "targetName": click_result["targetName"],
-            "probeRatioX": probe_ratio_x,
-            "probeRatioY": probe_ratio_y,
-            "probeOffsetX": click_target_state["probeOffsetX"],
-            "probeOffsetY": click_target_state["probeOffsetY"],
-            "targetClientX": click_result["target"]["clientX"],
-            "targetClientY": click_result["target"]["clientY"],
-            "screenX": click_result["target"]["screenX"],
-            "screenY": click_result["target"]["screenY"],
-            "crossScreenX": cross_match["screenX"],
-            "crossScreenY": cross_match["screenY"],
-            "crossClientX": cross_match["screenX"] - click_result["debug"]["bounds"]["left"],
-            "crossClientY": cross_match["screenY"] - click_result["debug"]["bounds"]["top"],
-            "selectScreenshot": selected_screenshot,
-            "afterCloseScreenshot": screenshot_path,
-        }
-        phase_results.append(row)
-        print(json.dumps(row, ensure_ascii=False))
+        print(json.dumps({"phase": "fixed_round", **row}, ensure_ascii=False))
 
     return {
+        "suite": "fixed_npc",
+        "targetName": fixed_target["name"],
         "totalRounds": ITERATIONS,
         "successCount": success_count,
         "failureCount": ITERATIONS - success_count,
-        "successRate": round((success_count / ITERATIONS) * 100.0, 2),
+        "successRate": round(success_count * 100.0 / ITERATIONS, 2),
         "passed": success_count >= 18,
-        "results": phase_results,
+        "failureDir": str(failure_dir),
+        "results": rows,
     }
 
 
-def run_single_round_probe(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_ratio_y: float) -> dict:
-    try_close_current_selection(hwnd, fixed_target)
-    click_target_state = build_click_target(hwnd, fixed_target, probe_ratio_x, probe_ratio_y)
-    click_result = click_target(hwnd, click_target_state, fixed_target["targetName"])
-    time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
+def run_random_npc_suite(hwnd: int) -> dict:
+    failure_dir = RANDOM_FAILURE_DIR
+    failure_dir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    success_count = 0
 
-    selected_image = capture_full_client(hwnd)
-    selected_state = detect_left_top_selected_state(selected_image)
-    selected_screenshot = save_debug_image(
-        selected_image,
-        "probe-select.png",
-        click_result["target"]["clientX"],
-        click_result["target"]["clientY"],
-    )
-
-    cross_result = None
-    hover_screenshot = None
-    if selected_state["selected"] or selected_state["hasAvatar"]:
-        cross_match = locate_cross_in_roi(hwnd, selected_image)
-        if cross_match is not None:
-            win32api.SetCursorPos((int(cross_match["screenX"]), int(cross_match["screenY"])))
-            time.sleep(0.2)
-            hover_image = capture_full_client(hwnd)
-            hover_screenshot = save_debug_image(
-                hover_image,
-                "probe-cross-hover.png",
-                cross_match["screenX"] - click_result["debug"]["bounds"]["left"],
-                cross_match["screenY"] - click_result["debug"]["bounds"]["top"],
-            )
-            cross_result = {
-                "screenX": cross_match["screenX"],
-                "screenY": cross_match["screenY"],
-                "clientX": cross_match["screenX"] - click_result["debug"]["bounds"]["left"],
-                "clientY": cross_match["screenY"] - click_result["debug"]["bounds"]["top"],
-                "score": cross_match["score"],
+    for iteration in range(1, ITERATIONS + 1):
+        reset_to_world(hwnd)
+        target = find_random_npc_target(hwnd, iteration)
+        if target is None:
+            image = capture_full_client(hwnd)
+            failure_shot = record_round_failure(failure_dir, "random", iteration, "target-not-found", image, None)
+            row = {
+                "iteration": iteration,
+                "status": "FAIL",
+                "selectedReached": False,
+                "viewOpened": False,
+                "exitClosed": False,
+                "crossCleared": False,
+                "reason": "RANDOM_TARGET_NOT_FOUND",
+                "failureScreenshot": failure_shot,
             }
+            rows.append(row)
+            print(json.dumps({"phase": "random_round", **row}, ensure_ascii=False))
+            continue
+
+        target_click = build_target_click_from_bbox(hwnd, target)
+        row = execute_random_round(hwnd, iteration, target_click, failure_dir, target["name"])
+        rows.append(row)
+        if row["status"] == "SUCCESS":
+            success_count += 1
+        print(json.dumps({"phase": "random_round", **row}, ensure_ascii=False))
 
     return {
-        "selectedDetected": selected_state["selected"],
-        "selectedState": selected_state,
-        "clickTarget": {
-            "screenX": click_result["target"]["screenX"],
-            "screenY": click_result["target"]["screenY"],
-            "clientX": click_result["target"]["clientX"],
-            "clientY": click_result["target"]["clientY"],
-        },
-        "crossResult": cross_result,
-        "selectScreenshot": selected_screenshot,
-        "crossHoverScreenshot": hover_screenshot,
+        "suite": "random_npc",
+        "totalRounds": ITERATIONS,
+        "successCount": success_count,
+        "failureCount": ITERATIONS - success_count,
+        "successRate": round(success_count * 100.0 / ITERATIONS, 2),
+        "passed": success_count >= 18,
+        "failureDir": str(failure_dir),
+        "results": rows,
     }
 
 
@@ -607,53 +854,31 @@ def main() -> int:
         raise RuntimeError("GAME_WINDOW_NOT_FOUND")
 
     input_worker.focus_window(hwnd)
-    fixed_target = lock_fixed_world_target(hwnd)
-    if fixed_target is None:
-        raise RuntimeError("TARGET_TEMPLATE_MATCH_NOT_FOUND")
+    reset_to_world(hwnd)
 
-    probe_target = build_click_target(hwnd, fixed_target, TARGET_BODY_RATIO_X, TARGET_BODY_RATIO_Y)
-    print(
-        json.dumps(
-            {
-                "phase": "setup",
-                "logic": "fixed_npc_closed_loop_stability_test",
-                "targetName": TARGET_NAME,
-                "selectedStateOwner": "left_top_selected_panel_only",
-                "closeOwner": "template_match_cross_only",
-                "fixedTargetCenterX": fixed_target["target"]["centerX"],
-                "fixedTargetNameBottomY": fixed_target["target"]["nameBottomY"],
-                "fixedTargetBbox": {
-                    "x": fixed_target["target"]["bboxX"],
-                    "y": fixed_target["target"]["bboxY"],
-                    "width": fixed_target["target"]["bboxWidth"],
-                    "height": fixed_target["target"]["bboxHeight"],
-                },
-                "targetMatchScore": fixed_target["target"]["score"],
-                "selectedProbeRatioX": TARGET_BODY_RATIO_X,
-                "selectedProbeRatioY": TARGET_BODY_RATIO_Y,
-                "selectedProbeOffsetX": probe_target["probeOffsetX"],
-                "selectedProbeOffsetY": probe_target["probeOffsetY"],
-                "selectedClientX": probe_target["clientX"],
-                "selectedClientY": probe_target["clientY"],
-                "selectedScreenX": probe_target["screenX"],
-                "selectedScreenY": probe_target["screenY"],
-                "viewIconClientRatioX": VIEW_ICON_CLIENT_RATIO_X,
-                "viewIconClientRatioY": VIEW_ICON_CLIENT_RATIO_Y,
-                "exitButtonClientRatioX": EXIT_BUTTON_CLIENT_RATIO_X,
-                "exitButtonClientRatioY": EXIT_BUTTON_CLIENT_RATIO_Y,
-                "crossManualClientRatioX": CROSS_MANUAL_CLIENT_RATIO_X,
-                "crossManualClientRatioY": CROSS_MANUAL_CLIENT_RATIO_Y,
-            },
-            ensure_ascii=False,
-        )
-    )
-    probe = run_single_round_probe(hwnd, fixed_target, TARGET_BODY_RATIO_X, TARGET_BODY_RATIO_Y)
-    print(json.dumps({"phase": "probe", **probe}, ensure_ascii=False))
-    if RUN_PROBE_ONLY:
-        return 0
-    summary = run_fixed_npc_stability_test(hwnd, fixed_target, TARGET_BODY_RATIO_X, TARGET_BODY_RATIO_Y)
-    print(json.dumps({"phase": "stability_summary", **summary}, ensure_ascii=False))
-    return 0 if summary["passed"] else 3
+    fixed_summary = run_fixed_npc_suite(hwnd)
+    random_summary = run_random_npc_suite(hwnd)
+    final_summary = {
+        "phase": "final_summary",
+        "fixed": {
+            "totalRounds": fixed_summary["totalRounds"],
+            "successCount": fixed_summary["successCount"],
+            "failureCount": fixed_summary["failureCount"],
+            "successRate": fixed_summary["successRate"],
+            "passed": fixed_summary["passed"],
+            "failureDir": fixed_summary["failureDir"],
+        },
+        "random": {
+            "totalRounds": random_summary["totalRounds"],
+            "successCount": random_summary["successCount"],
+            "failureCount": random_summary["failureCount"],
+            "successRate": random_summary["successRate"],
+            "passed": random_summary["passed"],
+            "failureDir": random_summary["failureDir"],
+        },
+    }
+    print(json.dumps(final_summary, ensure_ascii=False))
+    return 0 if fixed_summary["passed"] and random_summary["passed"] else 3
 
 
 if __name__ == "__main__":

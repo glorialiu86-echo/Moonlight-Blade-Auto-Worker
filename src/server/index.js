@@ -295,6 +295,12 @@ async function maybeSendNpcReply({ instruction, plan, execution }) {
   }
 
   const talkStep = execution.rawSteps?.find((step) => step?.input?.mode === "click_npc_interact");
+  const talkStage = String(talkStep?.input?.stage || "").trim();
+
+  if (talkStage !== "chat_ready") {
+    return null;
+  }
+
   const dialogText = String(talkStep?.input?.dialogText || "").trim();
 
   if (!dialogText) {
@@ -317,7 +323,7 @@ async function maybeSendNpcReply({ instruction, plan, execution }) {
       sourceType: "talk_reply",
       type: "type_text",
       text: replyText,
-      clickRatio: [0.62, 0.86],
+      clickRatio: [0.18, 0.94],
       pressEnter: true,
       postDelayMs: 300
     }

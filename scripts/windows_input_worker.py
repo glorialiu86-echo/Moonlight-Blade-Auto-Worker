@@ -19,6 +19,12 @@ DEFAULT_INTERACT_TIMEOUT_MS = 4500
 DEFAULT_SCAN_INTERVAL_MS = 180
 DEFAULT_CAMERA_DRAG_MS = 220
 OCR_ENGINE = None
+NPC_STAGE_ROIS = {
+    "look_button": (0.26, 0.48, 0.40, 0.62),
+    "bottom_right_actions": (0.64, 0.70, 0.98, 0.98),
+    "confirm_dialog": (0.16, 0.10, 0.84, 0.84),
+    "chat_panel": (0.00, 0.00, 0.46, 0.98),
+}
 
 
 def emit(payload: dict[str, Any]) -> None:
@@ -154,6 +160,44 @@ def detect_dialog(hwnd: int) -> dict[str, Any]:
     }
 
 
+def contains_any_keyword(text: str, keywords: list[str]) -> bool:
+    normalized = str(text or "").replace(" ", "")
+    return any(keyword in normalized for keyword in keywords)
+
+
+def read_stage_texts(hwnd: int) -> dict[str, str]:
+    return {
+        name: ocr_text(capture_window_region(hwnd, roi))
+        for name, roi in NPC_STAGE_ROIS.items()
+    }
+
+
+def detect_npc_interaction_stage(hwnd: int) -> dict[str, Any]:
+    stage_texts = read_stage_texts(hwnd)
+    look_text = stage_texts["look_button"]
+    bottom_right_text = stage_texts["bottom_right_actions"]
+    confirm_text = stage_texts["confirm_dialog"]
+    chat_panel_text = stage_texts["chat_panel"]
+
+    if contains_any_keyword(chat_panel_text, ["点击输入聊天", "发送", "第一次见面", "好感度"]):
+        stage = "chat_ready"
+    elif contains_any_keyword(confirm_text, ["确认", "闲聊", "取消"]):
+        stage = "small_talk_confirm"
+    elif contains_any_keyword(bottom_right_text, ["闲聊", "交谈"]):
+        stage = "small_talk_menu"
+    elif contains_any_keyword(bottom_right_text, ["交谈", "赠礼", "邀请", "战斗"]):
+        stage = "npc_action_menu"
+    elif contains_any_keyword(look_text, ["查看"]):
+        stage = "npc_selected"
+    else:
+        stage = "none"
+
+    return {
+        "stage": stage,
+        "texts": stage_texts,
+    }
+
+
 def click_npc_candidate(hwnd: int, x_ratio: float, y_ratio: float, button: str = "left") -> dict[str, Any]:
     bounds = focus_window(hwnd)
     click_x = round(bounds["left"] + bounds["width"] * x_ratio)
@@ -218,30 +262,81 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     click_attempts = 0
     move_attempts = 0
     start_time = time.time()
-    last_dialog_text = ""
+    last_stage = "none"
+    stage_history: list[str] = []
     click_point_attempts: list[dict[str, float]] = []
     camera_drags = 0
 
     focus_window(hwnd)
 
     while (time.time() - start_time) * 1000 < timeout_ms:
-        dialog_state = detect_dialog(hwnd)
-        last_dialog_text = dialog_state["text"]
+        stage_state = detect_npc_interaction_stage(hwnd)
+        last_stage = stage_state["stage"]
+        stage_history.append(last_stage)
 
-        if dialog_state["visible"]:
+        if last_stage == "chat_ready":
+            dialog_state = detect_dialog(hwnd)
             return {
                 "id": action_id,
                 "title": title,
                 "status": "performed",
-                "detail": "Dialog-like UI detected after local click interaction loop.",
+                "detail": "Reached road NPC chat screen.",
                 "input": {
                     "mode": "click_npc_interact",
                     "clickAttempts": click_attempts,
                     "moveAttempts": move_attempts,
                     "cameraDrags": camera_drags,
+                    "stage": "chat_ready",
+                    "stageHistory": stage_history,
+                    "stageTexts": stage_state["texts"],
                     "dialogText": dialog_state["text"],
                 },
             }
+
+        if last_stage == "small_talk_confirm":
+            confirm_click = click_npc_candidate(hwnd, 0.59, 0.80, "left")
+            time.sleep(0.25)
+            post_confirm_stage = detect_npc_interaction_stage(hwnd)
+            stage_history.append(post_confirm_stage["stage"])
+            if post_confirm_stage["stage"] == "chat_ready":
+                dialog_state = detect_dialog(hwnd)
+                return {
+                    "id": action_id,
+                    "title": title,
+                    "status": "performed",
+                    "detail": "Completed road NPC small-talk click chain.",
+                    "input": {
+                        "mode": "click_npc_interact",
+                        "clickAttempts": click_attempts,
+                        "moveAttempts": move_attempts,
+                        "cameraDrags": camera_drags,
+                        "stage": "chat_ready",
+                        "stageHistory": stage_history,
+                        "stageTexts": post_confirm_stage["texts"],
+                        "confirmClick": confirm_click,
+                        "dialogText": dialog_state["text"],
+                        "postConfirmStage": post_confirm_stage["stage"],
+                    },
+                }
+            continue
+
+        if last_stage == "small_talk_menu":
+            click_npc_candidate(hwnd, 0.69, 0.77, "left")
+            click_attempts += 1
+            time.sleep(0.22)
+            continue
+
+        if last_stage == "npc_action_menu":
+            click_npc_candidate(hwnd, 0.74, 0.89, "left")
+            click_attempts += 1
+            time.sleep(0.22)
+            continue
+
+        if last_stage == "npc_selected":
+            click_npc_candidate(hwnd, 0.32, 0.57, "left")
+            click_attempts += 1
+            time.sleep(0.22)
+            continue
 
         x_ratio, y_ratio = click_points[click_attempts % len(click_points)]
         click_state = click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
@@ -254,25 +349,6 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         click_attempts += 1
         time.sleep(0.12)
 
-        dialog_state = detect_dialog(hwnd)
-        last_dialog_text = dialog_state["text"]
-        if dialog_state["visible"]:
-            return {
-                "id": action_id,
-                "title": title,
-                "status": "performed",
-                "detail": "Dialog-like UI detected after NPC click.",
-                "input": {
-                    "mode": "click_npc_interact",
-                    "clickAttempts": click_attempts,
-                    "moveAttempts": move_attempts,
-                    "clickPointAttempts": click_point_attempts,
-                    "cameraDrags": camera_drags,
-                    "lastClick": click_state,
-                    "dialogText": dialog_state["text"],
-                },
-            }
-
         if click_attempts % len(click_points) == 0:
             move_attempts += 1
             pulse_forward(hwnd, move_pulse_ms)
@@ -282,8 +358,8 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         time.sleep(scan_interval_ms / 1000)
 
     raise RuntimeError(
-        "Local click NPC interaction loop timed out before dialog UI was detected. "
-        f"Last dialog text: {last_dialog_text or 'none'}"
+        "Local click NPC interaction loop timed out before the chat screen was reached. "
+        f"Last stage: {last_stage or 'none'}"
     )
 
 

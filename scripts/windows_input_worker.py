@@ -1,4 +1,5 @@
 import base64
+import ctypes
 import io
 import json
 from pathlib import Path
@@ -27,6 +28,30 @@ DEFAULT_VERIFY_SETTLE_MS = 180
 OCR_ENGINE = None
 TMP_DIR = Path(__file__).resolve().parents[1] / "tmp"
 WORLD_HUD_KEYWORDS = ["感知", "潜行", "微风拂柳", "[Shift]", "[Space]", "叫卖"]
+def set_process_dpi_aware() -> None:
+    windll = getattr(ctypes, "windll", None)
+    if windll is None:
+        return
+
+    try:
+        if windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            return
+    except Exception:
+        pass
+
+    try:
+        windll.shcore.SetProcessDpiAwareness(2)
+        return
+    except Exception:
+        pass
+
+    try:
+        windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
+set_process_dpi_aware()
 
 
 class ActionExecutionError(RuntimeError):
@@ -101,8 +126,15 @@ def find_window(window_title_keyword: str) -> int | None:
         if not title or keyword not in title.lower():
             return True
 
-        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-        area = max(0, right - left) * max(0, bottom - top)
+        try:
+            _client_left, _client_top = win32gui.ClientToScreen(hwnd, (0, 0))
+            _client_x, _client_y, client_right, client_bottom = win32gui.GetClientRect(hwnd)
+        except Exception:
+            return True
+
+        area = max(0, client_right) * max(0, client_bottom)
+        if area <= 0:
+            return True
         matches.append((hwnd, title, area))
         return True
 
@@ -116,32 +148,34 @@ def find_window(window_title_keyword: str) -> int | None:
 
 
 def get_window_bounds(hwnd: int) -> dict[str, Any]:
-    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    client_left, client_top = win32gui.ClientToScreen(hwnd, (0, 0))
+    _client_x, _client_y, client_right, client_bottom = win32gui.GetClientRect(hwnd)
     return {
-        "left": left,
-        "top": top,
-        "width": right - left,
-        "height": bottom - top,
+        "left": client_left,
+        "top": client_top,
+        "width": max(0, client_right),
+        "height": max(0, client_bottom),
         "title": win32gui.GetWindowText(hwnd).strip(),
     }
 
 
 def focus_window(hwnd: int) -> dict[str, Any]:
-    bounds = get_window_bounds(hwnd)
-
     if win32gui.IsIconic(hwnd):
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
         time.sleep(0.2)
 
     try:
         win32gui.SetForegroundWindow(hwnd)
+        bounds = get_window_bounds(hwnd)
         bounds["focusMethod"] = "set_foreground"
         return bounds
     except Exception:
+        bounds = get_window_bounds(hwnd)
         center_x = bounds["left"] + max(1, bounds["width"]) // 2
         center_y = bounds["top"] + max(1, bounds["height"]) // 2
         pydirectinput.click(x=center_x, y=center_y)
         time.sleep(0.2)
+        bounds = get_window_bounds(hwnd)
         bounds["focusMethod"] = "click_activate"
         return bounds
 

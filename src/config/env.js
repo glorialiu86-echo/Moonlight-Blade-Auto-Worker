@@ -46,3 +46,10 @@ export function getLocalAsrConfig() {
     modelCacheDir: optionalEnv("LOCAL_ASR_MODEL_CACHE_DIR", "")
   };
 }
+
+export function getLocalPerceptionConfig() {
+  return {
+    pythonPath: optionalEnv("LOCAL_OCR_PYTHON", ""),
+    maxImageSide: Number(optionalEnv("LOCAL_OCR_MAX_IMAGE_SIDE", "1600"))
+  };
+}

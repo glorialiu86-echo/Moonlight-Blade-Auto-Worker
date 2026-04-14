@@ -43,7 +43,7 @@ export function createAutoCaptureService({
     }
   }
 
-  function scheduleNextTick() {
+  function scheduleNextTickWithDelay(delayMs) {
     clearTimer();
 
     if (!captureState.enabled || captureState.status !== "running") {
@@ -56,7 +56,11 @@ export function createAutoCaptureService({
           error: error.message
         });
       });
-    }, captureState.intervalMs);
+    }, Math.max(0, delayMs));
+  }
+
+  function scheduleNextTick() {
+    scheduleNextTickWithDelay(captureState.intervalMs);
   }
 
   async function runCycle() {
@@ -64,6 +68,7 @@ export function createAutoCaptureService({
       return captureState;
     }
 
+    const startedAt = Date.now();
     cycleInFlight = true;
 
     try {
@@ -118,7 +123,8 @@ export function createAutoCaptureService({
       });
     } finally {
       cycleInFlight = false;
-      scheduleNextTick();
+      const elapsedMs = Date.now() - startedAt;
+      scheduleNextTickWithDelay(captureState.intervalMs - elapsedMs);
     }
 
     return captureState;

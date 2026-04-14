@@ -18,13 +18,15 @@
 
 已完成：
 
-- 本地 `Node` 服务、`.env` 加载、千问文本/视觉/OCR 调用链路
+- 本地 `Node` 服务、`.env` 加载、千问文本链路
+- 截图感知主链路已切到本地 `RapidOCR` OCR worker
 - Windows 本地 Python 环境重建，`faster-whisper` CPU/GPU 双环境补齐
 - 自动截图采集链路接入主服务
 - 固定游戏窗口截图 `capture-game-window.ps1` 可直接运行
 - 真实 Windows 输入执行器接入主链路
 - `/api/chat` 已可触发 `规划 -> Windows 输入执行 -> 状态回写`
 - 自动截图已可更新 `latestPerception` 与 `capture` 状态
+- 自动截图调度已改为按目标频率补齐剩余时间，不再在每轮分析结束后额外空等一个完整间隔
 - 前端已拆成主播首页 `/` 和调试页 `/debug`
 - 主播首页已加入明确的“开始执行任务 / 停止执行任务”主按钮
 

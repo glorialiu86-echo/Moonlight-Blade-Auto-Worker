@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { transcribeWithLocalWhisper } from "../asr/local-whisper-client.js";
 import { createAutoCaptureService } from "../capture/auto-capture-service.js";
 import { captureGameWindow } from "../capture/windows-game-window.js";
+import { generateText } from "../llm/qwen.js";
 import { createTurnPlan } from "../llm/planner.js";
 import { analyzeScreenshot } from "../perception/analyzer.js";
 import {
@@ -29,6 +30,7 @@ import {
   setStatus,
   updateAgent
 } from "../runtime/store.js";
+import { runWindowsActions } from "../runtime/windows-executor.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../../public");
@@ -269,6 +271,68 @@ function buildExperimentRecord({
   };
 }
 
+async function buildNpcReply({ instruction, dialogText }) {
+  const prompt = [
+    "你在为《天涯明月刀手游》里的主播实验生成一句 NPC 闲聊回复。",
+    "要求：只输出一句中文短句，8到24个字，自然、口语化，不要解释。",
+    `主播当前目标：${instruction}`,
+    `NPC 当前对话内容：${dialogText || "暂无可读文本"}`
+  ].join("\n");
+
+  const result = await generateText({
+    userPrompt: prompt,
+    maxTokens: 80,
+    temperature: 0.5
+  });
+
+  return String(result.text || "").replace(/\s+/g, " ").trim();
+}
+
+async function maybeSendNpcReply({ instruction, plan, execution }) {
+  const hasTalkAction = Array.isArray(plan?.actions) && plan.actions.some((action) => action.type === "talk");
+  if (!hasTalkAction) {
+    return null;
+  }
+
+  const talkStep = execution.rawSteps?.find((step) => step?.input?.mode === "click_npc_interact");
+  const dialogText = String(talkStep?.input?.dialogText || "").trim();
+
+  if (!dialogText) {
+    return null;
+  }
+
+  const replyText = await buildNpcReply({
+    instruction,
+    dialogText
+  });
+
+  if (!replyText) {
+    return null;
+  }
+
+  const replyExecution = await runWindowsActions([
+    {
+      id: "reply-1",
+      title: "发送闲聊回复",
+      sourceType: "talk_reply",
+      type: "type_text",
+      text: replyText,
+      clickRatio: [0.62, 0.86],
+      pressEnter: true,
+      postDelayMs: 300
+    }
+  ]);
+
+  appendLog("info", "NPC 闲聊回复已发送", {
+    replyText
+  });
+
+  return {
+    replyText,
+    execution: replyExecution
+  };
+}
+
 async function recordInteractionLearningSample({
   instruction,
   source,
@@ -394,6 +458,29 @@ async function runPlannedTurn({
     perception,
     execution
   });
+
+  const replyResult = await maybeSendNpcReply({
+    instruction,
+    plan,
+    execution
+  });
+
+  if (replyResult) {
+    execution = {
+      ...execution,
+      steps: [
+        ...execution.steps,
+        ...replyResult.execution.steps
+      ],
+      rawSteps: [
+        ...execution.rawSteps,
+        ...replyResult.execution.rawSteps
+      ],
+      durationMs: execution.durationMs + replyResult.execution.durationMs,
+      outcome: `${execution.outcome} 已自动发送一句闲聊回复。`,
+      replyText: replyResult.replyText
+    };
+  }
 
   const turn = {
     id: `turn-${Date.now()}`,

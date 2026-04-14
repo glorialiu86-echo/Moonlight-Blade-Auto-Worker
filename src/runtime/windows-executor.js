@@ -99,12 +99,8 @@ function parseWorkerResponse(rawStdout, rawStderr, exitCode) {
   return parsed;
 }
 
-export async function runWindowsExecution(plan) {
+async function runWorkerPayload(workerPayload) {
   const pythonPath = resolvePythonPath();
-  const workerPayload = {
-    windowTitleKeyword: process.env.GAME_WINDOW_TITLE?.trim() || "天涯明月刀手游",
-    actions: createWorkerActions(plan)
-  };
   const startedAt = Date.now();
 
   let workerResult;
@@ -144,13 +140,20 @@ export async function runWindowsExecution(plan) {
     throw error;
   }
 
+  return {
+    workerResult,
+    durationMs: Date.now() - startedAt
+  };
+}
+
+function normalizeExecution(workerResult, actions, durationMs) {
   const steps = workerResult.steps.map((step, index) => ({
     id: step.id || `input-${index + 1}`,
-    title: step.title || plan.actions[index]?.title || `步骤 ${index + 1}`,
+    title: step.title || actions[index]?.title || `步骤 ${index + 1}`,
     detail: step.detail || "已执行输入动作",
     status: step.status || "performed",
     meta: {
-      sourceType: step.sourceType || plan.actions[index]?.type || null,
+      sourceType: step.sourceType || actions[index]?.sourceType || null,
       input: step.input || null
     }
   }));
@@ -164,7 +167,22 @@ export async function runWindowsExecution(plan) {
     executor: workerResult.executor || "WindowsInputExecutor",
     steps,
     rawSteps: Array.isArray(workerResult.steps) ? workerResult.steps : [],
-    durationMs: Date.now() - startedAt,
+    durationMs,
     outcome
   };
+}
+
+export async function runWindowsActions(actions) {
+  const workerPayload = {
+    windowTitleKeyword: process.env.GAME_WINDOW_TITLE?.trim() || "天涯明月刀手游",
+    actions
+  };
+
+  const { workerResult, durationMs } = await runWorkerPayload(workerPayload);
+  return normalizeExecution(workerResult, actions, durationMs);
+}
+
+export async function runWindowsExecution(plan) {
+  const actions = createWorkerActions(plan);
+  return runWindowsActions(actions);
 }

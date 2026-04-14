@@ -6,6 +6,7 @@ from typing import Any
 import mss
 import numpy as np
 import pydirectinput
+import pyperclip
 import win32con
 import win32gui
 from rapidocr_onnxruntime import RapidOCR
@@ -16,6 +17,7 @@ DEFAULT_POST_DELAY_MS = 350
 DEFAULT_MOVE_PULSE_MS = 160
 DEFAULT_INTERACT_TIMEOUT_MS = 4500
 DEFAULT_SCAN_INTERVAL_MS = 180
+DEFAULT_CAMERA_DRAG_MS = 220
 OCR_ENGINE = None
 
 
@@ -178,6 +180,27 @@ def pulse_forward(hwnd: int, move_pulse_ms: int) -> dict[str, Any]:
     }
 
 
+def drag_camera(hwnd: int, start_ratio: tuple[float, float], end_ratio: tuple[float, float], duration_ms: int) -> dict[str, Any]:
+    bounds = focus_window(hwnd)
+    start_x = round(bounds["left"] + bounds["width"] * start_ratio[0])
+    start_y = round(bounds["top"] + bounds["height"] * start_ratio[1])
+    end_x = round(bounds["left"] + bounds["width"] * end_ratio[0])
+    end_y = round(bounds["top"] + bounds["height"] * end_ratio[1])
+
+    pydirectinput.moveTo(start_x, start_y)
+    pydirectinput.mouseDown(button="right")
+    pydirectinput.moveTo(end_x, end_y, duration=duration_ms / 1000)
+    pydirectinput.mouseUp(button="right")
+
+    return {
+        "startX": start_x,
+        "startY": start_y,
+        "endX": end_x,
+        "endY": end_y,
+        "durationMs": duration_ms,
+    }
+
+
 def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "click_npc_interact")
@@ -197,6 +220,7 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     start_time = time.time()
     last_dialog_text = ""
     click_point_attempts: list[dict[str, float]] = []
+    camera_drags = 0
 
     focus_window(hwnd)
 
@@ -214,6 +238,7 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
                     "mode": "click_npc_interact",
                     "clickAttempts": click_attempts,
                     "moveAttempts": move_attempts,
+                    "cameraDrags": camera_drags,
                     "dialogText": dialog_state["text"],
                 },
             }
@@ -242,6 +267,7 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
                     "clickAttempts": click_attempts,
                     "moveAttempts": move_attempts,
                     "clickPointAttempts": click_point_attempts,
+                    "cameraDrags": camera_drags,
                     "lastClick": click_state,
                     "dialogText": dialog_state["text"],
                 },
@@ -250,6 +276,8 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         if click_attempts % len(click_points) == 0:
             move_attempts += 1
             pulse_forward(hwnd, move_pulse_ms)
+            camera_drags += 1
+            drag_camera(hwnd, (0.52, 0.48), (0.66, 0.48), DEFAULT_CAMERA_DRAG_MS)
 
         time.sleep(scan_interval_ms / 1000)
 
@@ -277,6 +305,39 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "click_npc_interact":
         return run_click_npc_interact(hwnd, action)
+
+    if action_type == "type_text":
+        text = str(action.get("text") or "").strip()
+        if not text:
+            raise RuntimeError("type_text action requires text")
+        focus_window(hwnd)
+
+        click_ratio = action.get("clickRatio")
+        if isinstance(click_ratio, list) and len(click_ratio) == 2:
+            click_npc_candidate(hwnd, float(click_ratio[0]), float(click_ratio[1]), "left")
+            time.sleep(0.08)
+
+        pyperclip.copy(text)
+        pydirectinput.keyDown("ctrl")
+        pydirectinput.press("v")
+        pydirectinput.keyUp("ctrl")
+
+        if bool(action.get("pressEnter", False)):
+            time.sleep(0.08)
+            pydirectinput.press("enter")
+
+        time.sleep(post_delay_ms / 1000)
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": f"Typed text with length {len(text)}",
+            "input": {
+                "text": text,
+                "pressEnter": bool(action.get("pressEnter", False)),
+                "clickRatio": click_ratio,
+            },
+        }
 
     if action_type == "press_key":
         key = str(action.get("key") or "").strip().lower()

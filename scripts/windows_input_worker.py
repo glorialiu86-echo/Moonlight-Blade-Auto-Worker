@@ -185,6 +185,10 @@ def capture_verify_frame(hwnd: int) -> np.ndarray:
 
 
 def measure_frame_delta(before: np.ndarray, after: np.ndarray) -> dict[str, float]:
+    min_height = min(before.shape[0], after.shape[0])
+    min_width = min(before.shape[1], after.shape[1])
+    before = before[:min_height, :min_width, :]
+    after = after[:min_height, :min_width, :]
     diff = np.abs(after - before)
     mean_delta = float(np.mean(diff))
     gray_diff = np.mean(diff, axis=2)
@@ -195,15 +199,35 @@ def measure_frame_delta(before: np.ndarray, after: np.ndarray) -> dict[str, floa
     }
 
 
-def capture_idle_baseline(hwnd: int, sample_gap_ms: int = 140) -> dict[str, Any]:
-    first_frame = capture_verify_frame(hwnd)
-    time.sleep(sample_gap_ms / 1000)
-    second_frame = capture_verify_frame(hwnd)
+def capture_idle_baseline(
+    hwnd: int,
+    sample_gap_ms: int = 140,
+    settle_before_ms: int = 220,
+    sample_count: int = 4,
+) -> dict[str, Any]:
+    time.sleep(settle_before_ms / 1000)
+    frames = [capture_verify_frame(hwnd)]
+
+    for _ in range(max(1, sample_count) - 1):
+        time.sleep(sample_gap_ms / 1000)
+        frames.append(capture_verify_frame(hwnd))
+
+    deltas = [
+        measure_frame_delta(frames[index], frames[index + 1])
+        for index in range(len(frames) - 1)
+    ]
+    baseline_delta = min(
+        deltas,
+        key=lambda item: (item["changedRatio"], item["meanDelta"]),
+    )
+
     return {
-        "firstFrame": first_frame,
-        "frame": second_frame,
-        "delta": measure_frame_delta(first_frame, second_frame),
+        "firstFrame": frames[-2],
+        "frame": frames[-1],
+        "delta": baseline_delta,
         "sampleGapMs": sample_gap_ms,
+        "settleBeforeMs": settle_before_ms,
+        "sampleCount": sample_count,
     }
 
 
@@ -249,6 +273,8 @@ def verify_dynamic_change(
         "requiredChangedRatio": round(required_ratio, 4),
         "decision": decision,
         "sampleGapMs": baseline["sampleGapMs"],
+        "settleBeforeMs": baseline.get("settleBeforeMs"),
+        "sampleCount": baseline.get("sampleCount"),
         "settleMs": settle_ms,
     }
 

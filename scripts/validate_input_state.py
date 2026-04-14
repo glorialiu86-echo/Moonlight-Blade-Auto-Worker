@@ -35,8 +35,6 @@ CROSS_TEMPLATE_ROI = (0.35, 0.11, 0.39, 0.18)
 CROSS_SEARCH_ROI = (0.31, 0.08, 0.42, 0.22)
 FAILURE_DIR = TMP_DIR / "phase1_failures"
 RUN_PROBE_ONLY = True
-CROSS_CLICK_FINE_OFFSET_X = 12
-CROSS_CLICK_FINE_OFFSET_Y = 10
 CROSS_MANUAL_CLIENT_RATIO_X = 924 / 2445
 CROSS_MANUAL_CLIENT_RATIO_Y = 298 / 1332
 VIEW_ICON_CLIENT_RATIO_X = 1295 / 2537
@@ -268,21 +266,11 @@ def get_cross_anchor(template: np.ndarray) -> tuple[int, int]:
 
 
 def locate_cross_in_roi(hwnd: int, full_image: np.ndarray) -> dict | None:
-    cross_roi_image = crop_roi(full_image, CROSS_TEMPLATE_ROI)
-    gray = cv2.cvtColor(cross_roi_image, cv2.COLOR_BGR2GRAY)
-    _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
-    binary[: max(1, int(binary.shape[0] * 0.35)), :] = 0
-    contours, _hierarchy = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if contours:
-        contour = max(contours, key=lambda item: cv2.boundingRect(item)[0] + cv2.boundingRect(item)[2] * 0.5)
-        x, y, width, height = cv2.boundingRect(contour)
-        anchor_x = x + width // 2
-        anchor_y = y + height // 2
-    else:
-        anchor_x, anchor_y = get_cross_anchor(cross_roi_image)
-    local_center_x = anchor_x + CROSS_CLICK_FINE_OFFSET_X
-    local_center_y = anchor_y + CROSS_CLICK_FINE_OFFSET_Y
-    screen_x, screen_y = roi_to_screen_point(hwnd, CROSS_TEMPLATE_ROI, local_center_x, local_center_y)
+    bounds = input_worker.get_window_bounds(hwnd)
+    client_x = int(round(bounds["width"] * CROSS_MANUAL_CLIENT_RATIO_X))
+    client_y = int(round(bounds["height"] * CROSS_MANUAL_CLIENT_RATIO_Y))
+    screen_x = int(bounds["left"] + client_x)
+    screen_y = int(bounds["top"] + client_y)
     return {
         "screenX": int(screen_x),
         "screenY": int(screen_y),

@@ -70,3 +70,121 @@
 - 安装包快捷方式位置：Windows 桌面
 - 后续不再切换回 macOS，之后统一在这台 Windows 电脑上开发。
 - 最终软件使用环境也是这台电脑，不面向其他机器分发。
+
+## GUI 自动化 & AI Agent 注意事项 Checklist
+
+### 一、坐标体系与显示相关（基础核心）
+
+- 所有点击逻辑必须在 DPI-aware 模式下运行。
+- 避免默认 `GetWindowRect` 导致坐标偏移。
+- 使用 `ClientToScreen` 将 client area 映射到屏幕坐标。
+- 所有坐标应基于 client area，而非屏幕绝对坐标。
+- 所有 ROI、模板匹配结果、点击坐标应规范化为相对位置。
+- 禁止硬编码像素值。
+- 每次运行前重新获取窗口 bounds。
+- 窗口移动或缩放要自动更新坐标计算。
+
+### 二、视觉识别与定位相关（核心难点）
+
+- 截图中默认没有鼠标指针，调试时必须在截图上绘制鼠标位置标记。
+- 所有调试图必须包含鼠标标注。
+- 不要靠 OCR 做精确点击定位。
+- OCR 仅用于大致定位名字区域或文本。
+- 避免直接使用 OCR 结果作为唯一依据。
+- 选择高对比、特征明显的模板。
+- 支持多尺度、多阈值模板匹配。
+- 模板匹配在不同场景光照下要具备容错。
+
+### 三、3D 游戏场景交互相关（特有难点）
+
+- 不要假设“某个像素点永远对应某个对象”。
+- 点击结果基于射线检测（raycast）。
+- 相同屏幕坐标在不同深度会命中不同对象。
+- NPC 移动或旋转会改变点击命中范围。
+- 点击与目标识别之间尽量缩短延迟。
+- 点击失效时允许微调偏移并重试。
+
+### 四、状态检测与验证相关（逻辑判定）
+
+- 状态判定不要过于严格。
+- 单一特征不可靠，不要只看头像或名字。
+- 使用组合特征判定选中态，例如头像、叉号、文字联合判断。
+- ROI 应跨多个元素匹配。
+- 放宽容忍度，避免漏检。
+- 左上面板的 ROI 应动态更新而不是固定。
+- 使用相对比例坐标而不是绝对像素。
+
+### 五、输入事件与控制相关（执行动作）
+
+- 鼠标操作需要窗口激活，点击前确保窗口处于前台。
+- 使用 `SetForegroundWindow` 或 `SetActive`。
+- 鼠标动作之间加入合理延迟，默认控制在 `200-400ms`。
+- 避免点击过快造成游戏输入丢失。
+- 人动鼠标时 AI 暂停。
+- 重试与人工介入需要有明确状态切换机制。
+
+### 六、验证流程与调试机制
+
+- 不要把验证脚本当修复器用。
+- 验证脚本用于测试稳定性，不应同时修逻辑。
+- 验证顺序固定为：单次验证，再做 `3~5` 次稳定性确认，最后做 `20/50` 轮自动化验证。
+- 所有失败轮次必须保存截图。
+- 截图必须包含完整可视化标记：鼠标、ROI、匹配框。
+- 失败截图路径统一规范为 `tmp/phaseN_failures/`。
+- 自动化统计结果必须输出：总次数、成功次数、失败次数、成功率、平均响应时间、失败截图引用。
+
+### 七、可视化调试输出（强制标准）
+
+- 必须在截图上标注鼠标点击坐标（红色十字）。
+- 必须在截图上标注模板匹配结果框（绿色）。
+- 必须在截图上标注 ROI 区域范围（蓝色）。
+- 必须在截图上标注状态判定结果文字。
+- 鼠标坐标标注格式统一为 `screen: (x, y)`。
+- 鼠标坐标标注格式统一为 `client: (x', y')`。
+- 必须保留鼠标动作前后截图对比。
+
+### 八、自动调试与策略调整
+
+- 支持自动参数搜索。
+- 自动参数搜索应尝试不同偏移量。
+- 自动参数搜索过程中要保持成功率统计。
+- 自动记录最佳方案。
+- 命中失败后，按顺序执行：小范围偏移重试、替代匹配策略 fallback、保存日志与截图供分析。
+
+### 九、工程流程建议（长期维护）
+
+- 默认加入调试模式。
+- 非 UI 代码正常运行时不显示可视化。
+- 调试模式强制输出调试图。
+- 保存典型失败场景截图，做成测试集与场景库。
+- 样本库用于模板增强。
+- 每次逻辑调整必须写清：调整原因、修改内容、是否修复某类场景。
+
+## Skills
+
+A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list of skills that can be used. Each entry includes a name, description, and file path so you can open the source for full instructions when using a specific skill.
+
+### Available skills
+
+- skill-creator: Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Codex's capabilities with specialized knowledge, workflows, or tool integrations. (file: `C:/Users/ZMT-User/.codex/skills/.system/skill-creator/SKILL.md`)
+- skill-installer: Install Codex skills into `$CODEX_HOME/skills` from a curated list or a GitHub repo path. Use when a user asks to list installable skills, install a curated skill, or install a skill from another repo (including private repos). (file: `C:/Users/ZMT-User/.codex/skills/.system/skill-installer/SKILL.md`)
+
+### How to use skills
+
+- Discovery: The list above is the skills available in this session (name + description + file path). Skill bodies live on disk at the listed paths.
+- Trigger rules: If the user names a skill (with `$SkillName` or plain text) OR the task clearly matches a skill's description shown above, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.
+- Missing/blocked: If a named skill isn't in the list or the path can't be read, say so briefly and continue with the best fallback.
+- How to use a skill (progressive disclosure):
+  - After deciding to use a skill, open its `SKILL.md`. Read only enough to follow the workflow.
+  - When `SKILL.md` references relative paths (for example `scripts/foo.py`), resolve them relative to the skill directory listed above first, and only consider other paths if needed.
+  - If `SKILL.md` points to extra folders such as `references/`, load only the specific files needed for the request; don't bulk-load everything.
+  - If `scripts/` exist, prefer running or patching them instead of retyping large code blocks.
+  - If `assets/` or templates exist, reuse them instead of recreating from scratch.
+- Coordination and sequencing:
+  - If multiple skills apply, choose the minimal set that covers the request and state the order you'll use them.
+  - Announce which skill(s) you're using and why (one short line). If you skip an obvious skill, say why.
+- Context hygiene:
+  - Keep context small: summarize long sections instead of pasting them; only load extra files when needed.
+  - Avoid deep reference-chasing: prefer opening only files directly linked from `SKILL.md` unless you're blocked.
+  - When variants exist (frameworks, providers, domains), pick only the relevant reference file(s) and note that choice.
+- Safety and fallback: If a skill can't be applied cleanly (missing files, unclear instructions), state the issue, pick the next-best approach, and continue.

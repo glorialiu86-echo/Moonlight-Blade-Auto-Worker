@@ -23,6 +23,7 @@ DEFAULT_SCAN_INTERVAL_MS = 180
 DEFAULT_CAMERA_DRAG_MS = 220
 DEFAULT_VERIFY_SETTLE_MS = 180
 OCR_ENGINE = None
+WORLD_HUD_KEYWORDS = ["感知", "潜行", "微风拂柳", "[Shift]", "[Space]", "叫卖"]
 
 
 class ActionExecutionError(RuntimeError):
@@ -294,6 +295,11 @@ def contains_any_keyword(text: str, keywords: list[str]) -> bool:
     return any(keyword in normalized for keyword in keywords)
 
 
+def count_keywords(text: str, keywords: list[str]) -> int:
+    normalized = str(text or "").replace(" ", "")
+    return sum(1 for keyword in keywords if keyword in normalized)
+
+
 def detect_dialog(hwnd: int) -> dict[str, Any]:
     title_text = ocr_text(capture_window_region(hwnd, (0.18, 0.08, 0.82, 0.36)))
     middle_text = ocr_text(capture_window_region(hwnd, (0.12, 0.18, 0.88, 0.62)))
@@ -320,12 +326,13 @@ def detect_npc_interaction_stage(hwnd: int) -> dict[str, Any]:
     chat_panel_text = stage_texts["chat_panel"]
     gift_panel_text = stage_texts["gift_panel"]
     trade_panel_text = stage_texts["trade_panel"]
+    world_hud_visible = contains_any_keyword(bottom_right_text, WORLD_HUD_KEYWORDS)
 
-    if contains_any_keyword(gift_panel_text, GIFT_KEYWORDS):
+    if contains_any_keyword(gift_panel_text, GIFT_KEYWORDS) and not world_hud_visible:
         stage = "gift_screen"
-    elif contains_any_keyword(trade_panel_text, TRADE_KEYWORDS):
+    elif count_keywords(trade_panel_text, TRADE_KEYWORDS) >= 2 and not world_hud_visible:
         stage = "trade_screen"
-    elif contains_any_keyword(chat_panel_text, CHAT_KEYWORDS):
+    elif contains_any_keyword(chat_panel_text, CHAT_KEYWORDS) and not world_hud_visible:
         stage = "chat_ready"
     elif contains_any_keyword(confirm_text, CONFIRM_KEYWORDS):
         stage = "small_talk_confirm"
@@ -500,6 +507,11 @@ def detect_target_threshold(hwnd: int) -> dict[str, Any]:
     }
 
 
+def has_selected_target(target_info: dict[str, Any]) -> bool:
+    text = str(target_info.get("text") or "").strip()
+    return len(text) >= 2 and text != "1"
+
+
 def exit_panel(hwnd: int) -> None:
     click_named_point(hwnd, "close_panel")
     time.sleep(0.25)
@@ -507,10 +519,13 @@ def exit_panel(hwnd: int) -> None:
 
 def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval_ms: int) -> dict[str, Any]:
     click_points = [
+        (0.80, 0.70),
+        (0.84, 0.69),
+        (0.88, 0.68),
+        (0.78, 0.66),
         (0.50, 0.44),
         (0.47, 0.46),
         (0.53, 0.46),
-        (0.50, 0.50),
     ]
     click_attempts = 0
     move_attempts = 0
@@ -523,9 +538,11 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
     focus_window(hwnd)
 
     while (time.time() - start_time) * 1000 < timeout_ms:
+        elapsed_ms = (time.time() - start_time) * 1000
         stage_state = detect_npc_interaction_stage(hwnd)
         last_stage = stage_state["stage"]
         stage_history.append(last_stage)
+        target_info = detect_target_threshold(hwnd)
 
         if last_stage in ["npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"]:
             return {
@@ -536,27 +553,42 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
                 "moveAttempts": move_attempts,
                 "cameraDrags": camera_drags,
                 "clickPointAttempts": click_point_attempts,
+                "targetText": target_info["text"],
             }
 
-        if last_stage == "npc_selected":
+        if last_stage == "npc_selected" or has_selected_target(target_info):
             click_named_point(hwnd, "view")
             click_attempts += 1
-            time.sleep(0.22)
+            time.sleep(0.12)
+            stage_state = detect_npc_interaction_stage(hwnd)
+            last_stage = stage_state["stage"]
+            stage_history.append(last_stage)
+            if last_stage in ["npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"]:
+                return {
+                    "stage": last_stage,
+                    "stageTexts": stage_state["texts"],
+                    "stageHistory": stage_history,
+                    "clickAttempts": click_attempts,
+                    "moveAttempts": move_attempts,
+                    "cameraDrags": camera_drags,
+                    "clickPointAttempts": click_point_attempts,
+                    "targetText": target_info["text"],
+                }
             continue
 
         x_ratio, y_ratio = click_points[click_attempts % len(click_points)]
         click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
         click_point_attempts.append({"xRatio": x_ratio, "yRatio": y_ratio})
         click_attempts += 1
-        time.sleep(0.12)
+        time.sleep(0.1)
 
-        if click_attempts % len(click_points) == 0:
+        if click_attempts % len(click_points) == 0 and elapsed_ms > timeout_ms * 0.65:
             move_attempts += 1
             pulse_forward(hwnd, move_pulse_ms)
             camera_drags += 1
             drag_camera(hwnd, (0.52, 0.48), (0.66, 0.48), DEFAULT_CAMERA_DRAG_MS)
 
-        time.sleep(scan_interval_ms / 1000)
+        time.sleep(min(scan_interval_ms, 90) / 1000)
 
     raise RuntimeError(
         "Failed to open NPC action menu before timeout. "
@@ -580,12 +612,12 @@ def try_enter_chat(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval
 
     if menu_state["stage"] == "small_talk_menu":
         click_named_point(hwnd, "small_talk")
-        time.sleep(0.22)
+        time.sleep(0.14)
     else:
         click_named_point(hwnd, "talk")
-        time.sleep(0.22)
+        time.sleep(0.12)
         click_named_point(hwnd, "small_talk")
-        time.sleep(0.22)
+        time.sleep(0.14)
 
     post_talk_state = detect_npc_interaction_stage(hwnd)
     stage_history.append(post_talk_state["stage"])

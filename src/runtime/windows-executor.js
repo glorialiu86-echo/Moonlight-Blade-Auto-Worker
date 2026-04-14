@@ -92,6 +92,7 @@ function parseWorkerResponse(rawStdout, rawStderr, exitCode) {
   if (!parsed.ok) {
     const error = new Error(parsed.message || "Windows input execution failed");
     error.code = parsed.errorCode || "INPUT_EXECUTION_FAILED";
+    error.workerPayload = parsed;
     throw error;
   }
 
@@ -104,52 +105,66 @@ export async function runWindowsExecution(plan) {
     windowTitleKeyword: process.env.GAME_WINDOW_TITLE?.trim() || "天涯明月刀手游",
     actions: createWorkerActions(plan)
   };
+  const startedAt = Date.now();
 
-  const workerResult = await new Promise((resolve, reject) => {
-    const child = spawn(pythonPath, [workerScript], {
-      cwd: repoRoot,
-      windowsHide: true
+  let workerResult;
+  try {
+    workerResult = await new Promise((resolve, reject) => {
+      const child = spawn(pythonPath, [workerScript], {
+        cwd: repoRoot,
+        windowsHide: true
+      });
+
+      let stdout = "";
+      let stderr = "";
+
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      child.on("error", reject);
+      child.on("close", (code) => {
+        try {
+          resolve(parseWorkerResponse(stdout, stderr, code));
+        } catch (error) {
+          reject(error);
+        }
+      });
+
+      child.stdin.write(JSON.stringify(workerPayload));
+      child.stdin.end();
     });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on("error", reject);
-    child.on("close", (code) => {
-      try {
-        resolve(parseWorkerResponse(stdout, stderr, code));
-      } catch (error) {
-        reject(error);
-      }
-    });
-
-    child.stdin.write(JSON.stringify(workerPayload));
-    child.stdin.end();
-  });
+  } catch (error) {
+    error.workerActions = workerPayload.actions;
+    error.durationMs = Date.now() - startedAt;
+    throw error;
+  }
 
   const steps = workerResult.steps.map((step, index) => ({
     id: step.id || `input-${index + 1}`,
     title: step.title || plan.actions[index]?.title || `步骤 ${index + 1}`,
     detail: step.detail || "已执行输入动作",
-    status: step.status || "performed"
+    status: step.status || "performed",
+    meta: {
+      sourceType: step.sourceType || plan.actions[index]?.type || null,
+      input: step.input || null
+    }
   }));
 
   const performedCount = steps.filter((step) => step.status === "performed").length;
   const outcome = performedCount === 0
-    ? "这轮没有成功打出任何实际输入。"
-    : `这轮已向游戏窗口发送 ${performedCount} 个实际输入动作。`;
+    ? "这一轮没有成功打出任何实际输入。"
+    : `这一轮已向游戏窗口发送 ${performedCount} 个实际输入动作。`;
 
   return {
     executor: workerResult.executor || "WindowsInputExecutor",
     steps,
+    rawSteps: Array.isArray(workerResult.steps) ? workerResult.steps : [],
+    durationMs: Date.now() - startedAt,
     outcome
   };
 }

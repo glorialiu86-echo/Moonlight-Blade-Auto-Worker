@@ -9,6 +9,7 @@
     "llm:test": "node scripts/test-llm.js",
     "llm:test:reasoner": "node scripts/test-llm.js --reasoner",
     "llm:test:vision": "node scripts/test-vision.js",
-    "llm:test:ocr": "node scripts/test-ocr.js"
+    "llm:test:ocr": "node scripts/test-ocr.js",
+    "learning:summary": "node scripts/summarize-interaction-learning.js"
   }
 }

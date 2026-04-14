@@ -196,6 +196,7 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     move_attempts = 0
     start_time = time.time()
     last_dialog_text = ""
+    click_point_attempts: list[dict[str, float]] = []
 
     focus_window(hwnd)
 
@@ -219,6 +220,12 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
         x_ratio, y_ratio = click_points[click_attempts % len(click_points)]
         click_state = click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
+        click_point_attempts.append(
+            {
+                "xRatio": x_ratio,
+                "yRatio": y_ratio,
+            }
+        )
         click_attempts += 1
         time.sleep(0.12)
 
@@ -234,6 +241,7 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
                     "mode": "click_npc_interact",
                     "clickAttempts": click_attempts,
                     "moveAttempts": move_attempts,
+                    "clickPointAttempts": click_point_attempts,
                     "lastClick": click_state,
                     "dialogText": dialog_state["text"],
                 },

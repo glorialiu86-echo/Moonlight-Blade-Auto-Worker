@@ -9,6 +9,11 @@ import { createAutoCaptureService } from "../capture/auto-capture-service.js";
 import { captureGameWindow } from "../capture/windows-game-window.js";
 import { createTurnPlan } from "../llm/planner.js";
 import { analyzeScreenshot } from "../perception/analyzer.js";
+import {
+  appendInteractionSample,
+  buildInteractionSample,
+  isInteractionPlan
+} from "../runtime/interaction-learning.js";
 import { runWindowsExecution } from "../runtime/windows-executor.js";
 import {
   appendExperiment,
@@ -264,6 +269,42 @@ function buildExperimentRecord({
   };
 }
 
+async function recordInteractionLearningSample({
+  instruction,
+  source,
+  scene,
+  plan,
+  perception,
+  execution,
+  error = null
+}) {
+  if (!isInteractionPlan(plan)) {
+    return;
+  }
+
+  try {
+    const sample = buildInteractionSample({
+      instruction,
+      source,
+      scene,
+      plan,
+      perception,
+      execution,
+      error
+    });
+    await appendInteractionSample(sample);
+    appendLog("info", "NPC 交互样本已写入本地学习记录", {
+      sampleId: sample.id,
+      success: sample.success,
+      result: sample.result
+    });
+  } catch (recordError) {
+    appendLog("error", "NPC 交互样本写入失败", {
+      error: recordError.message
+    });
+  }
+}
+
 function pickAutonomousObjective(runtimeState) {
   const nextIndex = runtimeState.agent.autonomousTurnCount % AUTONOMOUS_OBJECTIVE_POOL.length;
   return AUTONOMOUS_OBJECTIVE_POOL[nextIndex];
@@ -326,7 +367,34 @@ async function runPlannedTurn({
     conversationMessages: nextState.messages.slice(0, -1),
     perception
   });
-  const execution = await runWindowsExecution(plan);
+  let execution;
+  try {
+    execution = await runWindowsExecution(plan);
+  } catch (error) {
+    await recordInteractionLearningSample({
+      instruction,
+      source,
+      scene,
+      plan,
+      perception,
+      execution: {
+        rawSteps: [],
+        durationMs: error.durationMs || null
+      },
+      error
+    });
+    throw error;
+  }
+
+  await recordInteractionLearningSample({
+    instruction,
+    source,
+    scene,
+    plan,
+    perception,
+    execution
+  });
+
   const turn = {
     id: `turn-${Date.now()}`,
     instruction,

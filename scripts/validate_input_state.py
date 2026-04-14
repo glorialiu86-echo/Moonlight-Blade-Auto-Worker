@@ -16,30 +16,22 @@ if str(SCRIPT_DIR) not in sys.path:
 import windows_input_worker as input_worker
 
 
-TMP_DIR = Path(__file__).resolve().parents[1] / "tmp"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+TMP_DIR = PROJECT_ROOT / "tmp"
+DATA_DIR = PROJECT_ROOT / "data"
 ITERATIONS = 20
 WAIT_AFTER_CLICK_MS = 300
 GAME_WINDOW_TITLE = "天涯明月刀手游"
+TARGET_NAME = "裴雨筠"
+TARGET_TEMPLATE_PATH = DATA_DIR / "peiyuyun-name-template.png"
+TARGET_BODY_OFFSET_PX = 30
+TARGET_TEMPLATE_THRESHOLD = 0.30
 
-SELECTED_PANEL_ROI = (0.17, 0.16, 0.43, 0.32)
-SELECTED_NAME_ROI = (0.20, 0.18, 0.42, 0.36)
-SELECTED_HP_ROI = (0.27, 0.235, 0.40, 0.285)
-CROSS_TEMPLATE_ROI = (0.295, 0.195, 0.34, 0.275)
-CROSS_SEARCH_ROI = (0.23, 0.16, 0.38, 0.30)
-WORLD_NAME_SEARCH_ROI = (0.36, 0.14, 0.88, 0.72)
-SELECT_CLICK_Y_OFFSET_RATIO = 0.055
-WORLD_TARGET_BLOCKLIST = {
-    "籽小刀",
-    "查看",
-    "生机",
-    "体力",
-    "功力",
-    "任务",
-    "菜单",
-    "背包",
-    "感知",
-    "潜行",
-}
+SELECTED_PANEL_ROI = (0.54, 0.35, 0.87, 0.59)
+SELECTED_NAME_ROI = (0.62, 0.37, 0.78, 0.49)
+SELECTED_HP_ROI = (0.63, 0.48, 0.86, 0.55)
+CROSS_TEMPLATE_ROI = (0.78, 0.38, 0.85, 0.50)
+CROSS_SEARCH_ROI = (0.74, 0.34, 0.88, 0.54)
 
 
 def normalize_name(text: str) -> str:
@@ -139,8 +131,8 @@ def detect_selected_state(full_image: np.ndarray) -> dict:
     has_hp_bar = detect_hp_bar(hp_image)
     has_avatar = detect_avatar_block(panel_image)
     has_cross = detect_cross_symbol(cross_image)
-    has_panel_structure = has_avatar and has_cross and has_hp_bar
-    selected = has_panel_structure or bool(name_text)
+    has_panel_structure = has_avatar and has_cross
+    selected = has_cross and (has_avatar or bool(name_text))
     return {
         "selected": selected,
         "name": name_text,
@@ -173,61 +165,48 @@ def match_cross(hwnd: int, full_image: np.ndarray, template: np.ndarray) -> dict
     }
 
 
-def find_clickable_world_target(hwnd: int, full_image: np.ndarray) -> dict | None:
+def load_target_template() -> np.ndarray:
+    if not TARGET_TEMPLATE_PATH.exists():
+        raise RuntimeError(f"TARGET_TEMPLATE_NOT_FOUND: {TARGET_TEMPLATE_PATH}")
+    encoded = np.fromfile(str(TARGET_TEMPLATE_PATH), dtype=np.uint8)
+    template = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+    if template is None:
+        raise RuntimeError(f"TARGET_TEMPLATE_DECODE_FAILED: {TARGET_TEMPLATE_PATH}")
+    return template
+
+
+def find_target_by_template(hwnd: int, full_image: np.ndarray, template: np.ndarray) -> dict | None:
     bounds = input_worker.get_window_bounds(hwnd)
-    image = crop_roi(full_image, WORLD_NAME_SEARCH_ROI)
-    items = input_worker.ocr_items(image)
-    best_match = None
-    best_score = None
-
-    for item in items:
-        text = normalize_name(item["text"])
-        if not re.fullmatch(r"[\u4e00-\u9fff]{2,4}", text):
-            continue
-        if text in WORLD_TARGET_BLOCKLIST:
-            continue
-        if item["centerY"] < 12:
-            continue
-
-        score = float(item["score"])
-        if best_score is None or score > best_score:
-            best_score = score
-            best_match = {
-                "text": text,
-                "item": item,
-            }
-
-    if best_match is None:
+    result = cv2.matchTemplate(full_image, template, cv2.TM_CCOEFF_NORMED)
+    _min_val, max_val, _min_loc, max_loc = cv2.minMaxLoc(result)
+    if float(max_val) < TARGET_TEMPLATE_THRESHOLD:
         return None
 
-    roi_left = bounds["left"] + int(bounds["width"] * WORLD_NAME_SEARCH_ROI[0])
-    roi_top = bounds["top"] + int(bounds["height"] * WORLD_NAME_SEARCH_ROI[1])
-    roi_left_client = int(bounds["width"] * WORLD_NAME_SEARCH_ROI[0])
-    roi_top_client = int(bounds["height"] * WORLD_NAME_SEARCH_ROI[1])
-    item = best_match["item"]
-    click_x = round(roi_left + item["centerX"])
-    click_y = round(roi_top + item["maxY"] + bounds["height"] * SELECT_CLICK_Y_OFFSET_RATIO)
-    bbox_x = round(roi_left_client + item["minX"])
-    bbox_y = round(roi_top_client + item["minY"])
-    bbox_width = round(item["maxX"] - item["minX"])
-    bbox_height = round(item["maxY"] - item["minY"])
+    template_height, template_width = template.shape[:2]
+    bbox_x = int(max_loc[0])
+    bbox_y = int(max_loc[1])
+    bbox_width = int(template_width)
+    bbox_height = int(template_height)
+    click_client_x = bbox_x + bbox_width // 2
+    click_client_y = min(bounds["height"] - 1, bbox_y + bbox_height + TARGET_BODY_OFFSET_PX)
     return {
-        "name": best_match["text"],
-        "screenX": int(click_x),
-        "screenY": int(click_y),
-        "clientX": int(click_x - bounds["left"]),
-        "clientY": int(click_y - bounds["top"]),
+        "name": TARGET_NAME,
+        "screenX": int(bounds["left"] + click_client_x),
+        "screenY": int(bounds["top"] + click_client_y),
+        "clientX": int(click_client_x),
+        "clientY": int(click_client_y),
         "bboxX": int(bbox_x),
         "bboxY": int(bbox_y),
         "bboxWidth": int(bbox_width),
         "bboxHeight": int(bbox_height),
-        "score": round(float(item["score"]), 4),
+        "score": round(float(max_val), 4),
     }
 
 
-def lock_fixed_world_target(hwnd: int) -> dict:
+def lock_fixed_world_target(hwnd: int) -> dict | None:
     full_image = capture_full_client(hwnd)
-    target = find_clickable_world_target(hwnd, full_image)
+    template = load_target_template()
+    target = find_target_by_template(hwnd, full_image, template)
     if target is None:
         return None
     return {
@@ -301,7 +280,7 @@ def run_phase_one(hwnd: int, fixed_target: dict) -> dict:
             "hasAvatar": selected_state["hasAvatar"],
             "hasCross": selected_state["hasCross"],
             "hasHpBar": selected_state["hasHpBar"],
-            "targetName": click_result.get("targetName", ""),
+            "targetName": click_result["targetName"],
             "targetClientX": click_result["target"]["clientX"],
             "targetClientY": click_result["target"]["clientY"],
             "clientBounds": click_result["debug"]["bounds"],
@@ -336,9 +315,9 @@ def run_phase_two(hwnd: int, fixed_target: dict) -> dict:
                 "phase": 2,
                 "iteration": index,
                 "status": "FAIL",
-                "reason": "RESELECT_FAILED",
+                "reason": "SELECT_NOT_REACHED",
                 "ocrName": selected_state["name"],
-                "targetName": click_result.get("targetName", ""),
+                "targetName": click_result["targetName"],
                 "targetClientX": click_result["target"]["clientX"],
                 "targetClientY": click_result["target"]["clientY"],
                 "clientBounds": click_result["debug"]["bounds"],
@@ -362,7 +341,7 @@ def run_phase_two(hwnd: int, fixed_target: dict) -> dict:
                 "status": "FAIL",
                 "reason": "CROSS_NOT_FOUND",
                 "ocrName": selected_state["name"],
-                "targetName": click_result.get("targetName", ""),
+                "targetName": click_result["targetName"],
                 "targetClientX": click_result["target"]["clientX"],
                 "targetClientY": click_result["target"]["clientY"],
                 "clientBounds": click_result["debug"]["bounds"],
@@ -392,7 +371,7 @@ def run_phase_two(hwnd: int, fixed_target: dict) -> dict:
             "ocrName": after_state["name"],
             "detectedSelectedAfterClose": after_state["selected"],
             "crossScore": cross_match["score"],
-            "targetName": click_result.get("targetName", ""),
+            "targetName": click_result["targetName"],
             "targetClientX": click_result["target"]["clientX"],
             "targetClientY": click_result["target"]["clientY"],
             "clientBounds": click_result["debug"]["bounds"],
@@ -420,15 +399,16 @@ def main() -> int:
     input_worker.focus_window(hwnd)
     fixed_target = lock_fixed_world_target(hwnd)
     if fixed_target is None:
-        raise RuntimeError("NO_WORLD_TARGET_FOUND")
+        raise RuntimeError("TARGET_TEMPLATE_MATCH_NOT_FOUND")
+
     print(
         json.dumps(
             {
                 "phase": "setup",
-                "logic": "lock_once_then_fixed_coordinate_closed_loop",
+                "logic": "template_match_peiyuyun_then_fixed_offset_click",
+                "targetName": TARGET_NAME,
                 "selectedStateOwner": "single_fullscreen_frame",
                 "closeOwner": "template_match_cross_only",
-                "fixedTargetName": fixed_target["targetName"],
                 "fixedTargetClientX": fixed_target["target"]["clientX"],
                 "fixedTargetClientY": fixed_target["target"]["clientY"],
                 "fixedTargetBbox": {
@@ -437,10 +417,12 @@ def main() -> int:
                     "width": fixed_target["target"]["bboxWidth"],
                     "height": fixed_target["target"]["bboxHeight"],
                 },
+                "targetMatchScore": fixed_target["target"]["score"],
             },
             ensure_ascii=False,
         )
     )
+
     phase_one = run_phase_one(hwnd, fixed_target)
     print(json.dumps({"phase": "phase1_summary", **phase_one}, ensure_ascii=False))
 

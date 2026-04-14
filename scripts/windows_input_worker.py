@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 import time
 from typing import Any
@@ -19,12 +20,41 @@ DEFAULT_INTERACT_TIMEOUT_MS = 4500
 DEFAULT_SCAN_INTERVAL_MS = 180
 DEFAULT_CAMERA_DRAG_MS = 220
 OCR_ENGINE = None
+
 NPC_STAGE_ROIS = {
     "look_button": (0.26, 0.48, 0.40, 0.62),
     "bottom_right_actions": (0.64, 0.70, 0.98, 0.98),
     "confirm_dialog": (0.16, 0.10, 0.84, 0.84),
     "chat_panel": (0.00, 0.00, 0.46, 0.98),
+    "gift_panel": (0.64, 0.00, 1.00, 1.00),
+    "trade_panel": (0.18, 0.00, 1.00, 1.00),
+    "selected_target": (0.20, 0.18, 0.42, 0.36),
 }
+
+ACTION_POINTS = {
+    "view": (0.32, 0.57),
+    "talk": (0.74, 0.89),
+    "small_talk": (0.69, 0.77),
+    "confirm_small_talk": (0.59, 0.80),
+    "trade": (0.84, 0.89),
+    "gift": (0.95, 0.89),
+    "close_panel": (0.98, 0.05),
+    "trade_left_slot": (0.27, 0.33),
+    "trade_left_up_shelf": (0.38, 0.82),
+    "trade_right_slot": (0.82, 0.20),
+    "trade_right_currency_slot": (0.69, 0.57),
+    "trade_right_up_shelf": (0.82, 0.82),
+    "trade_submit": (0.53, 0.92),
+    "gift_first_slot": (0.78, 0.46),
+    "gift_plus": (0.82, 0.92),
+    "gift_submit": (0.91, 0.92),
+    "chat_input": (0.18, 0.94),
+}
+
+CHAT_KEYWORDS = ["点击输入聊天", "发送", "第一次见面", "好感度"]
+GIFT_KEYWORDS = ["赠礼", "选择礼物", "赠送", "好感度"]
+TRADE_KEYWORDS = ["交易结果预览", "交易倒计时", "上架", "我的", "总价"]
+CONFIRM_KEYWORDS = ["确认", "闲聊", "取消"]
 
 
 def emit(payload: dict[str, Any]) -> None:
@@ -128,7 +158,6 @@ def ocr_text(image: np.ndarray) -> str:
     for item in result:
         if len(item) < 3:
             continue
-
         text = str(item[1] or "").strip().replace("\n", " ")
         if text:
             parts.append(text)
@@ -136,33 +165,20 @@ def ocr_text(image: np.ndarray) -> str:
     return " ".join(parts)
 
 
+def contains_any_keyword(text: str, keywords: list[str]) -> bool:
+    normalized = str(text or "").replace(" ", "")
+    return any(keyword in normalized for keyword in keywords)
+
+
 def detect_dialog(hwnd: int) -> dict[str, Any]:
     title_text = ocr_text(capture_window_region(hwnd, (0.18, 0.08, 0.82, 0.36)))
     middle_text = ocr_text(capture_window_region(hwnd, (0.12, 0.18, 0.88, 0.62)))
     full_text = f"{title_text} {middle_text}".strip()
-
-    keywords = [
-        "对话",
-        "交谈",
-        "继续",
-        "关闭",
-        "任务",
-        "接受",
-        "提交",
-        "剧情",
-        "路人",
-        "少侠",
-    ]
-
+    keywords = ["对话", "交谈", "继续", "关闭", "任务", "接受", "提交", "剧情", "路人", "少侠"]
     return {
         "visible": any(keyword in full_text for keyword in keywords),
         "text": full_text,
     }
-
-
-def contains_any_keyword(text: str, keywords: list[str]) -> bool:
-    normalized = str(text or "").replace(" ", "")
-    return any(keyword in normalized for keyword in keywords)
 
 
 def read_stage_texts(hwnd: int) -> dict[str, str]:
@@ -178,14 +194,20 @@ def detect_npc_interaction_stage(hwnd: int) -> dict[str, Any]:
     bottom_right_text = stage_texts["bottom_right_actions"]
     confirm_text = stage_texts["confirm_dialog"]
     chat_panel_text = stage_texts["chat_panel"]
+    gift_panel_text = stage_texts["gift_panel"]
+    trade_panel_text = stage_texts["trade_panel"]
 
-    if contains_any_keyword(chat_panel_text, ["点击输入聊天", "发送", "第一次见面", "好感度"]):
+    if contains_any_keyword(gift_panel_text, GIFT_KEYWORDS):
+        stage = "gift_screen"
+    elif contains_any_keyword(trade_panel_text, TRADE_KEYWORDS):
+        stage = "trade_screen"
+    elif contains_any_keyword(chat_panel_text, CHAT_KEYWORDS):
         stage = "chat_ready"
-    elif contains_any_keyword(confirm_text, ["确认", "闲聊", "取消"]):
+    elif contains_any_keyword(confirm_text, CONFIRM_KEYWORDS):
         stage = "small_talk_confirm"
     elif contains_any_keyword(bottom_right_text, ["闲聊", "交谈"]):
         stage = "small_talk_menu"
-    elif contains_any_keyword(bottom_right_text, ["交谈", "赠礼", "邀请", "战斗"]):
+    elif contains_any_keyword(bottom_right_text, ["交谈", "赠礼", "邀请", "战斗", "交易"]):
         stage = "npc_action_menu"
     elif contains_any_keyword(look_text, ["查看"]):
         stage = "npc_selected"
@@ -210,6 +232,11 @@ def click_npc_candidate(hwnd: int, x_ratio: float, y_ratio: float, button: str =
         "xRatio": x_ratio,
         "yRatio": y_ratio,
     }
+
+
+def click_named_point(hwnd: int, point_name: str) -> dict[str, Any]:
+    x_ratio, y_ratio = ACTION_POINTS[point_name]
+    return click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
 
 
 def pulse_forward(hwnd: int, move_pulse_ms: int) -> dict[str, Any]:
@@ -245,27 +272,42 @@ def drag_camera(hwnd: int, start_ratio: tuple[float, float], end_ratio: tuple[fl
     }
 
 
-def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
-    action_id = str(action.get("id") or "")
-    title = str(action.get("title") or "click_npc_interact")
-    timeout_ms = int(action.get("timeoutMs") or DEFAULT_INTERACT_TIMEOUT_MS)
-    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
-    scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
+def parse_favor_value(text: str) -> int | None:
+    match = re.search(r"好感度[:：]\s*(\d+)\s*/\s*\d+", str(text or ""))
+    if not match:
+        return None
+    return int(match.group(1))
 
+
+def detect_target_threshold(hwnd: int) -> dict[str, Any]:
+    text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["selected_target"]))
+    is_special = "<" in text and ">" in text
+    return {
+        "isSpecialNpc": is_special,
+        "threshold": 50 if is_special else 10,
+        "text": text,
+    }
+
+
+def exit_panel(hwnd: int) -> None:
+    click_named_point(hwnd, "close_panel")
+    time.sleep(0.25)
+
+
+def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval_ms: int) -> dict[str, Any]:
     click_points = [
         (0.50, 0.44),
         (0.47, 0.46),
         (0.53, 0.46),
         (0.50, 0.50),
     ]
-
     click_attempts = 0
     move_attempts = 0
+    camera_drags = 0
+    click_point_attempts: list[dict[str, float]] = []
+    stage_history: list[str] = []
     start_time = time.time()
     last_stage = "none"
-    stage_history: list[str] = []
-    click_point_attempts: list[dict[str, float]] = []
-    camera_drags = 0
 
     focus_window(hwnd)
 
@@ -274,78 +316,26 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         last_stage = stage_state["stage"]
         stage_history.append(last_stage)
 
-        if last_stage == "chat_ready":
-            dialog_state = detect_dialog(hwnd)
+        if last_stage in ["npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"]:
             return {
-                "id": action_id,
-                "title": title,
-                "status": "performed",
-                "detail": "Reached road NPC chat screen.",
-                "input": {
-                    "mode": "click_npc_interact",
-                    "clickAttempts": click_attempts,
-                    "moveAttempts": move_attempts,
-                    "cameraDrags": camera_drags,
-                    "stage": "chat_ready",
-                    "stageHistory": stage_history,
-                    "stageTexts": stage_state["texts"],
-                    "dialogText": dialog_state["text"],
-                },
+                "stage": last_stage,
+                "stageTexts": stage_state["texts"],
+                "stageHistory": stage_history,
+                "clickAttempts": click_attempts,
+                "moveAttempts": move_attempts,
+                "cameraDrags": camera_drags,
+                "clickPointAttempts": click_point_attempts,
             }
 
-        if last_stage == "small_talk_confirm":
-            confirm_click = click_npc_candidate(hwnd, 0.59, 0.80, "left")
-            time.sleep(0.25)
-            post_confirm_stage = detect_npc_interaction_stage(hwnd)
-            stage_history.append(post_confirm_stage["stage"])
-            if post_confirm_stage["stage"] == "chat_ready":
-                dialog_state = detect_dialog(hwnd)
-                return {
-                    "id": action_id,
-                    "title": title,
-                    "status": "performed",
-                    "detail": "Completed road NPC small-talk click chain.",
-                    "input": {
-                        "mode": "click_npc_interact",
-                        "clickAttempts": click_attempts,
-                        "moveAttempts": move_attempts,
-                        "cameraDrags": camera_drags,
-                        "stage": "chat_ready",
-                        "stageHistory": stage_history,
-                        "stageTexts": post_confirm_stage["texts"],
-                        "confirmClick": confirm_click,
-                        "dialogText": dialog_state["text"],
-                        "postConfirmStage": post_confirm_stage["stage"],
-                    },
-                }
-            continue
-
-        if last_stage == "small_talk_menu":
-            click_npc_candidate(hwnd, 0.69, 0.77, "left")
-            click_attempts += 1
-            time.sleep(0.22)
-            continue
-
-        if last_stage == "npc_action_menu":
-            click_npc_candidate(hwnd, 0.74, 0.89, "left")
-            click_attempts += 1
-            time.sleep(0.22)
-            continue
-
         if last_stage == "npc_selected":
-            click_npc_candidate(hwnd, 0.32, 0.57, "left")
+            click_named_point(hwnd, "view")
             click_attempts += 1
             time.sleep(0.22)
             continue
 
         x_ratio, y_ratio = click_points[click_attempts % len(click_points)]
-        click_state = click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
-        click_point_attempts.append(
-            {
-                "xRatio": x_ratio,
-                "yRatio": y_ratio,
-            }
-        )
+        click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
+        click_point_attempts.append({"xRatio": x_ratio, "yRatio": y_ratio})
         click_attempts += 1
         time.sleep(0.12)
 
@@ -358,8 +348,261 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         time.sleep(scan_interval_ms / 1000)
 
     raise RuntimeError(
-        "Local click NPC interaction loop timed out before the chat screen was reached. "
+        "Failed to open NPC action menu before timeout. "
         f"Last stage: {last_stage or 'none'}"
+    )
+
+
+def try_enter_chat(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval_ms: int) -> dict[str, Any]:
+    menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
+    stage_history = list(menu_state["stageHistory"])
+
+    if menu_state["stage"] == "chat_ready":
+        dialog_state = detect_dialog(hwnd)
+        return {
+            "success": True,
+            "stage": "chat_ready",
+            "dialogText": dialog_state["text"],
+            "stageHistory": stage_history,
+            "menuState": menu_state,
+        }
+
+    if menu_state["stage"] == "small_talk_menu":
+        click_named_point(hwnd, "small_talk")
+        time.sleep(0.22)
+    else:
+        click_named_point(hwnd, "talk")
+        time.sleep(0.22)
+        click_named_point(hwnd, "small_talk")
+        time.sleep(0.22)
+
+    post_talk_state = detect_npc_interaction_stage(hwnd)
+    stage_history.append(post_talk_state["stage"])
+
+    if post_talk_state["stage"] == "small_talk_confirm":
+        click_named_point(hwnd, "confirm_small_talk")
+        time.sleep(0.25)
+        post_talk_state = detect_npc_interaction_stage(hwnd)
+        stage_history.append(post_talk_state["stage"])
+
+    if post_talk_state["stage"] == "chat_ready":
+        dialog_state = detect_dialog(hwnd)
+        return {
+            "success": True,
+            "stage": "chat_ready",
+            "dialogText": dialog_state["text"],
+            "stageHistory": stage_history,
+            "menuState": menu_state,
+        }
+
+    return {
+        "success": False,
+        "stage": post_talk_state["stage"],
+        "dialogText": "",
+        "stageHistory": stage_history,
+        "menuState": menu_state,
+    }
+
+
+def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "click_npc_interact")
+    timeout_ms = int(action.get("timeoutMs") or DEFAULT_INTERACT_TIMEOUT_MS)
+    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
+    scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
+
+    result = try_enter_chat(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
+    if not result["success"]:
+        raise RuntimeError(
+            "Local click NPC interaction loop timed out before the chat screen was reached. "
+            f"Last stage: {result['stage'] or 'none'}"
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Reached road NPC chat screen.",
+        "input": {
+            "mode": "click_npc_interact",
+            "stage": "chat_ready",
+            "dialogText": result["dialogText"],
+            "stageHistory": result["stageHistory"],
+            "clickAttempts": result["menuState"]["clickAttempts"],
+            "moveAttempts": result["menuState"]["moveAttempts"],
+            "cameraDrags": result["menuState"]["cameraDrags"],
+            "clickPointAttempts": result["menuState"]["clickPointAttempts"],
+        },
+    }
+
+
+def run_town_npc_social_loop(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "town_npc_social_loop")
+    timeout_ms = int(action.get("timeoutMs") or DEFAULT_INTERACT_TIMEOUT_MS)
+    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
+    scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
+
+    threshold_info = detect_target_threshold(hwnd)
+    stage_history: list[str] = []
+    trade_attempted = False
+    trade_completed = False
+    gift_attempts = 0
+    gift_completed = False
+    favor_before = None
+    favor_after = None
+
+    chat_attempt = try_enter_chat(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
+    stage_history.extend(chat_attempt["stageHistory"])
+    if chat_attempt["success"]:
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": "Reached road NPC chat screen without trade or gift.",
+            "input": {
+                "mode": "town_npc_social_loop",
+                "stage": "chat_ready",
+                "dialogText": chat_attempt["dialogText"],
+                "stageHistory": stage_history,
+                "tradeAttempted": trade_attempted,
+                "tradeCompleted": trade_completed,
+                "giftAttempts": gift_attempts,
+                "giftCompleted": gift_completed,
+                "favorBefore": favor_before,
+                "favorAfter": favor_after,
+                "targetThreshold": threshold_info["threshold"],
+                "isSpecialNpc": threshold_info["isSpecialNpc"],
+                "targetText": threshold_info["text"],
+            },
+        }
+
+    menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
+    stage_history.extend(menu_state["stageHistory"])
+    click_named_point(hwnd, "gift")
+    time.sleep(0.35)
+    gift_state = detect_npc_interaction_stage(hwnd)
+    stage_history.append(gift_state["stage"])
+
+    if gift_state["stage"] == "gift_screen":
+        favor_before = parse_favor_value(gift_state["texts"]["gift_panel"])
+        favor_after = favor_before
+        if favor_before is not None and favor_before >= threshold_info["threshold"]:
+            exit_panel(hwnd)
+            retry_chat = try_enter_chat(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
+            stage_history.extend(retry_chat["stageHistory"])
+            if retry_chat["success"]:
+                return {
+                    "id": action_id,
+                    "title": title,
+                    "status": "performed",
+                    "detail": "Reached chat screen after reading favor threshold.",
+                    "input": {
+                        "mode": "town_npc_social_loop",
+                        "stage": "chat_ready",
+                        "dialogText": retry_chat["dialogText"],
+                        "stageHistory": stage_history,
+                        "tradeAttempted": trade_attempted,
+                        "tradeCompleted": trade_completed,
+                        "giftAttempts": gift_attempts,
+                        "giftCompleted": gift_completed,
+                        "favorBefore": favor_before,
+                        "favorAfter": favor_after,
+                        "targetThreshold": threshold_info["threshold"],
+                        "isSpecialNpc": threshold_info["isSpecialNpc"],
+                        "targetText": threshold_info["text"],
+                    },
+                }
+        exit_panel(hwnd)
+
+    menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
+    stage_history.extend(menu_state["stageHistory"])
+    click_named_point(hwnd, "trade")
+    trade_attempted = True
+    time.sleep(0.35)
+    trade_state = detect_npc_interaction_stage(hwnd)
+    stage_history.append(trade_state["stage"])
+
+    if trade_state["stage"] == "trade_screen":
+        click_named_point(hwnd, "trade_left_slot")
+        time.sleep(0.20)
+        click_named_point(hwnd, "trade_left_up_shelf")
+        time.sleep(0.25)
+        click_named_point(hwnd, "trade_right_slot")
+        time.sleep(0.20)
+        click_named_point(hwnd, "trade_right_currency_slot")
+        time.sleep(0.15)
+        click_named_point(hwnd, "trade_right_up_shelf")
+        time.sleep(0.25)
+        click_named_point(hwnd, "trade_submit")
+        time.sleep(0.35)
+        trade_completed = True
+        exit_panel(hwnd)
+
+    menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
+    stage_history.extend(menu_state["stageHistory"])
+    click_named_point(hwnd, "gift")
+    time.sleep(0.35)
+
+    for _ in range(3):
+        gift_state = detect_npc_interaction_stage(hwnd)
+        stage_history.append(gift_state["stage"])
+
+        if gift_state["stage"] != "gift_screen":
+            break
+
+        current_favor = parse_favor_value(gift_state["texts"]["gift_panel"])
+        if favor_before is None:
+            favor_before = current_favor
+        favor_after = current_favor
+
+        if current_favor is not None and current_favor >= threshold_info["threshold"]:
+            break
+
+        click_named_point(hwnd, "gift_first_slot")
+        time.sleep(0.15)
+        click_named_point(hwnd, "gift_submit")
+        gift_attempts += 1
+        gift_completed = True
+        time.sleep(0.45)
+
+        updated_gift_state = detect_npc_interaction_stage(hwnd)
+        stage_history.append(updated_gift_state["stage"])
+        favor_after = parse_favor_value(updated_gift_state["texts"]["gift_panel"])
+        if favor_after is not None and favor_after >= threshold_info["threshold"]:
+            break
+
+    if detect_npc_interaction_stage(hwnd)["stage"] == "gift_screen":
+        exit_panel(hwnd)
+
+    retry_chat = try_enter_chat(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
+    stage_history.extend(retry_chat["stageHistory"])
+    if retry_chat["success"]:
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": "Reached road NPC chat screen after trade and gift flow.",
+            "input": {
+                "mode": "town_npc_social_loop",
+                "stage": "chat_ready",
+                "dialogText": retry_chat["dialogText"],
+                "stageHistory": stage_history,
+                "tradeAttempted": trade_attempted,
+                "tradeCompleted": trade_completed,
+                "giftAttempts": gift_attempts,
+                "giftCompleted": gift_completed,
+                "favorBefore": favor_before,
+                "favorAfter": favor_after,
+                "targetThreshold": threshold_info["threshold"],
+                "isSpecialNpc": threshold_info["isSpecialNpc"],
+                "targetText": threshold_info["text"],
+            },
+        }
+
+    raise RuntimeError(
+        "Town NPC social loop did not reach the chat screen after trade and gift attempts. "
+        f"Last stage: {retry_chat['stage'] or 'none'}"
     )
 
 
@@ -381,6 +624,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "click_npc_interact":
         return run_click_npc_interact(hwnd, action)
+
+    if action_type == "town_npc_social_loop":
+        return run_town_npc_social_loop(hwnd, action)
 
     if action_type == "type_text":
         text = str(action.get("text") or "").strip()

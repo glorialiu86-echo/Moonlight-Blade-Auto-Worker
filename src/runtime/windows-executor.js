@@ -27,6 +27,13 @@ function createWorkerActions(plan) {
 
     switch (action.type) {
       case "talk":
+        return {
+          ...baseAction,
+          type: "town_npc_social_loop",
+          timeoutMs: 7000,
+          movePulseMs: 160,
+          scanIntervalMs: 180
+        };
       case "gift":
       case "threaten":
       case "steal":

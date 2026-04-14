@@ -295,13 +295,15 @@ async function maybeSendNpcReply({ instruction, plan, execution }) {
   }
 
   const talkStep = execution.rawSteps?.find((step) => step?.input?.mode === "click_npc_interact");
-  const talkStage = String(talkStep?.input?.stage || "").trim();
+  const socialStep = execution.rawSteps?.find((step) => step?.input?.mode === "town_npc_social_loop");
+  const finalTalkStep = socialStep || talkStep;
+  const talkStage = String(finalTalkStep?.input?.stage || "").trim();
 
   if (talkStage !== "chat_ready") {
     return null;
   }
 
-  const dialogText = String(talkStep?.input?.dialogText || "").trim();
+  const dialogText = String(finalTalkStep?.input?.dialogText || "").trim();
 
   if (!dialogText) {
     return null;

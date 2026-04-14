@@ -162,7 +162,7 @@ export function buildInteractionSample({
   execution,
   error = null
 }) {
-  const relevantStep = execution?.rawSteps?.find((step) => step?.input?.mode === "click_npc_interact");
+  const relevantStep = execution?.rawSteps?.find((step) => ["click_npc_interact", "town_npc_social_loop"].includes(step?.input?.mode));
   const stepInput = relevantStep?.input || {};
   const actionTypes = Array.isArray(plan?.actions) ? plan.actions.map((action) => action.type) : [];
 
@@ -178,7 +178,7 @@ export function buildInteractionSample({
     sceneLabel: perception?.sceneLabel || "",
     perceptionSummary: perception?.summary || "",
     success: !error,
-    result: error ? (error.code || "execution_failed") : "dialog_detected",
+    result: error ? (error.code || "execution_failed") : (stepInput.stage || "dialog_detected"),
     errorMessage: error?.message || "",
     durationMs: execution?.durationMs || null,
     clickAttempts: stepInput.clickAttempts || 0,
@@ -186,6 +186,14 @@ export function buildInteractionSample({
     clickPointAttempts: Array.isArray(stepInput.clickPointAttempts) ? stepInput.clickPointAttempts : [],
     lastClick: stepInput.lastClick || null,
     dialogText: stepInput.dialogText || "",
+    favorBefore: stepInput.favorBefore ?? null,
+    favorAfter: stepInput.favorAfter ?? null,
+    giftAttempts: stepInput.giftAttempts || 0,
+    tradeAttempted: Boolean(stepInput.tradeAttempted),
+    tradeCompleted: Boolean(stepInput.tradeCompleted),
+    giftCompleted: Boolean(stepInput.giftCompleted),
+    targetThreshold: stepInput.targetThreshold ?? null,
+    isSpecialNpc: Boolean(stepInput.isSpecialNpc),
     workerMode: stepInput.mode || "",
     workerPayload: error?.workerPayload || null
   };

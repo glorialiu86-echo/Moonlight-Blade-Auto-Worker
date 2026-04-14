@@ -25,6 +25,8 @@ ITERATIONS = 20
 TARGET_TEMPLATE_THRESHOLD = 0.30
 TARGET_BODY_RATIO_X = 0.0
 TARGET_BODY_RATIO_Y = 4.8
+CHAT_SEND_BUTTON_CLIENT_RATIO_X = 938 / 2537
+CHAT_SEND_BUTTON_CLIENT_RATIO_Y = 1289 / 1384
 CHAT_INPUT_CLIENT_RATIO_X = 652 / 2537
 CHAT_INPUT_CLIENT_RATIO_Y = 1294 / 1384
 CONFIRM_SMALL_TALK_BUTTON_CLIENT_RATIO_X = 1481 / 2537
@@ -338,6 +340,13 @@ def locate_manual_chat_input_point(hwnd: int) -> dict:
     # opened. It should be clicked directly by relative coordinates, but only
     # after the chat UI is actually ready.
     return build_screen_point_from_ratio(hwnd, CHAT_INPUT_CLIENT_RATIO_X, CHAT_INPUT_CLIENT_RATIO_Y)
+
+
+def locate_manual_chat_send_point(hwnd: int) -> dict:
+    # The send button is fixed UI. The click point can be restored directly by
+    # relative coordinates, but whether it is actually clickable still depends
+    # on a valid input payload being present.
+    return build_screen_point_from_ratio(hwnd, CHAT_SEND_BUTTON_CLIENT_RATIO_X, CHAT_SEND_BUTTON_CLIENT_RATIO_Y)
 
 
 def locate_cross_point(hwnd: int, _full_image: np.ndarray) -> dict:

@@ -94,6 +94,10 @@ ACTION_POINTS = {
     "gift_plus": (0.82, 0.92),
     "gift_submit": (0.91, 0.92),
     "chat_input": (652 / 2537, 1294 / 1384),
+    # Send is fixed UI, but it only becomes actionable after valid text input.
+    # Keep the point calibrated now; do not assume the button is clickable
+    # until the text-entry chain is wired in.
+    "chat_send": (938 / 2537, 1289 / 1384),
 }
 
 CHAT_KEYWORDS = ["点击输入聊天", "发送", "第一次见面", "好感度"]

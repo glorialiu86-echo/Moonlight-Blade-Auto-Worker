@@ -1,3 +1,5 @@
+import base64
+import io
 import json
 import re
 import sys
@@ -19,7 +21,20 @@ DEFAULT_MOVE_PULSE_MS = 160
 DEFAULT_INTERACT_TIMEOUT_MS = 4500
 DEFAULT_SCAN_INTERVAL_MS = 180
 DEFAULT_CAMERA_DRAG_MS = 220
+DEFAULT_VERIFY_SETTLE_MS = 180
 OCR_ENGINE = None
+
+
+class ActionExecutionError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        error_code: str = "INPUT_EXECUTION_FAILED",
+        failed_step: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.failed_step = failed_step
 
 NPC_STAGE_ROIS = {
     "look_button": (0.26, 0.48, 0.40, 0.62),
@@ -165,6 +180,89 @@ def ocr_text(image: np.ndarray) -> str:
     return " ".join(parts)
 
 
+def capture_verify_frame(hwnd: int) -> np.ndarray:
+    return capture_window_region(hwnd, (0.18, 0.16, 0.86, 0.86)).astype(np.int16)
+
+
+def measure_frame_delta(before: np.ndarray, after: np.ndarray) -> dict[str, float]:
+    diff = np.abs(after - before)
+    mean_delta = float(np.mean(diff))
+    gray_diff = np.mean(diff, axis=2)
+    changed_ratio = float(np.mean(gray_diff > 12.0))
+    return {
+        "meanDelta": round(mean_delta, 3),
+        "changedRatio": round(changed_ratio, 4),
+    }
+
+
+def capture_idle_baseline(hwnd: int, sample_gap_ms: int = 140) -> dict[str, Any]:
+    first_frame = capture_verify_frame(hwnd)
+    time.sleep(sample_gap_ms / 1000)
+    second_frame = capture_verify_frame(hwnd)
+    return {
+        "firstFrame": first_frame,
+        "frame": second_frame,
+        "delta": measure_frame_delta(first_frame, second_frame),
+        "sampleGapMs": sample_gap_ms,
+    }
+
+
+def encode_review_frames(baseline: dict[str, Any], after_frame: np.ndarray) -> str:
+    buffer = io.BytesIO()
+    np.savez_compressed(
+        buffer,
+        first_frame=baseline["firstFrame"][::4, ::4, :].astype(np.uint8),
+        reference_frame=baseline["frame"][::4, ::4, :].astype(np.uint8),
+        after_frame=after_frame[::4, ::4, :].astype(np.uint8),
+    )
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def verify_dynamic_change(
+    hwnd: int,
+    baseline: dict[str, Any],
+    settle_ms: int,
+    mean_multiplier: float,
+    ratio_multiplier: float,
+    minimum_mean_floor: float,
+    minimum_ratio_floor: float,
+) -> dict[str, Any]:
+    time.sleep(settle_ms / 1000)
+    after_frame = capture_verify_frame(hwnd)
+    delta = measure_frame_delta(baseline["frame"], after_frame)
+    baseline_delta = baseline["delta"]
+    required_mean = max(minimum_mean_floor, baseline_delta["meanDelta"] * mean_multiplier)
+    required_ratio = max(minimum_ratio_floor, baseline_delta["changedRatio"] * ratio_multiplier)
+
+    decision = "pass"
+    if delta["meanDelta"] < required_mean * 0.7 and delta["changedRatio"] < required_ratio * 0.7:
+        decision = "fail"
+    elif delta["meanDelta"] < required_mean or delta["changedRatio"] < required_ratio:
+        decision = "review"
+
+    payload = {
+        "baselineMeanDelta": baseline_delta["meanDelta"],
+        "baselineChangedRatio": baseline_delta["changedRatio"],
+        "meanDelta": delta["meanDelta"],
+        "changedRatio": delta["changedRatio"],
+        "requiredMeanDelta": round(required_mean, 3),
+        "requiredChangedRatio": round(required_ratio, 4),
+        "decision": decision,
+        "sampleGapMs": baseline["sampleGapMs"],
+        "settleMs": settle_ms,
+    }
+
+    if decision != "pass":
+        payload["reviewArtifact"] = {
+            "format": "npz_base64",
+            "encoding": "base64",
+            "downsampleStep": 4,
+            "framesBase64": encode_review_frames(baseline, after_frame),
+        }
+
+    return payload
+
+
 def contains_any_keyword(text: str, keywords: list[str]) -> bool:
     normalized = str(text or "").replace(" ", "")
     return any(keyword in normalized for keyword in keywords)
@@ -255,15 +353,39 @@ def run_move_forward_pulse(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "move_forward_pulse")
     move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
+    baseline = capture_idle_baseline(hwnd)
     state = pulse_forward(hwnd, move_pulse_ms)
+    verification = verify_dynamic_change(
+        hwnd,
+        baseline,
+        int(action.get("verifySettleMs") or DEFAULT_VERIFY_SETTLE_MS),
+        float(action.get("meanMultiplier") or 2.2),
+        float(action.get("ratioMultiplier") or 2.2),
+        float(action.get("minimumMeanFloor") or 1.1),
+        float(action.get("minimumRatioFloor") or 0.012),
+    )
     time.sleep((int(action.get("postDelayMs") or DEFAULT_POST_DELAY_MS)) / 1000)
-    return {
+    step_payload = {
         "id": action_id,
         "title": title,
-        "status": "performed",
+        "sourceType": action.get("sourceType"),
+        "status": "performed" if verification["decision"] == "pass" else "review_required",
         "detail": f"Moved forward for {move_pulse_ms}ms",
-        "input": state,
+        "input": {
+            **state,
+            "actionType": "move_forward_pulse",
+            "verification": verification,
+        },
     }
+    if verification["decision"] == "fail":
+        step_payload["status"] = "failed"
+        raise ActionExecutionError(
+            "move_forward_pulse verification failed: "
+            f"meanDelta={verification['meanDelta']}, changedRatio={verification['changedRatio']}",
+            error_code="MOTION_VERIFICATION_FAILED",
+            failed_step=step_payload,
+        )
+    return step_payload
 
 
 def drag_camera(hwnd: int, start_ratio: tuple[float, float], end_ratio: tuple[float, float], duration_ms: int) -> dict[str, Any]:
@@ -293,24 +415,46 @@ def run_drag_camera(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     start_ratio = action.get("startRatio") or [0.52, 0.48]
     end_ratio = action.get("endRatio") or [0.66, 0.48]
     duration_ms = int(action.get("durationMs") or DEFAULT_CAMERA_DRAG_MS)
+    baseline = capture_idle_baseline(hwnd)
     state = drag_camera(
         hwnd,
         (float(start_ratio[0]), float(start_ratio[1])),
         (float(end_ratio[0]), float(end_ratio[1])),
         duration_ms,
     )
+    verification = verify_dynamic_change(
+        hwnd,
+        baseline,
+        int(action.get("verifySettleMs") or DEFAULT_VERIFY_SETTLE_MS),
+        float(action.get("meanMultiplier") or 2.8),
+        float(action.get("ratioMultiplier") or 2.8),
+        float(action.get("minimumMeanFloor") or 1.8),
+        float(action.get("minimumRatioFloor") or 0.02),
+    )
     time.sleep((int(action.get("postDelayMs") or DEFAULT_POST_DELAY_MS)) / 1000)
-    return {
+    step_payload = {
         "id": action_id,
         "title": title,
-        "status": "performed",
+        "sourceType": action.get("sourceType"),
+        "status": "performed" if verification["decision"] == "pass" else "review_required",
         "detail": f"Dragged camera for {duration_ms}ms",
         "input": {
+            "actionType": "drag_camera",
             "startRatio": start_ratio,
             "endRatio": end_ratio,
             **state,
+            "verification": verification,
         },
     }
+    if verification["decision"] == "fail":
+        step_payload["status"] = "failed"
+        raise ActionExecutionError(
+            "drag_camera verification failed: "
+            f"meanDelta={verification['meanDelta']}, changedRatio={verification['changedRatio']}",
+            error_code="MOTION_VERIFICATION_FAILED",
+            failed_step=step_payload,
+        )
+    return step_payload
 
 
 def parse_favor_value(text: str) -> int | None:
@@ -785,14 +929,29 @@ def main() -> None:
         )
         return
 
+    results: list[dict[str, Any]] = []
+
     try:
-        results = [run_action(hwnd, action) for action in actions]
+        for action in actions:
+            results.append(run_action(hwnd, action))
+    except ActionExecutionError as exc:
+        emit(
+            {
+                "ok": False,
+                "message": str(exc),
+                "errorCode": exc.error_code,
+                "steps": results,
+                "failedStep": exc.failed_step,
+            }
+        )
+        return
     except Exception as exc:
         emit(
             {
                 "ok": False,
                 "message": str(exc),
                 "errorCode": "INPUT_EXECUTION_FAILED",
+                "steps": results,
             }
         )
         return

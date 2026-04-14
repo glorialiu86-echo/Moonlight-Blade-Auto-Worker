@@ -15,6 +15,11 @@ import {
   buildInteractionSample,
   isInteractionPlan
 } from "../runtime/interaction-learning.js";
+import {
+  appendMotionReviewSamples,
+  buildMotionReviewSamples,
+  triggerMotionReviewPass
+} from "../runtime/motion-review.js";
 import { runWindowsExecution } from "../runtime/windows-executor.js";
 import {
   appendExperiment,
@@ -377,6 +382,56 @@ async function recordInteractionLearningSample({
   }
 }
 
+async function recordMotionReviewSamples({
+  instruction,
+  source,
+  scene,
+  plan,
+  perception,
+  execution,
+  error = null
+}) {
+  try {
+    const samples = buildMotionReviewSamples({
+      instruction,
+      source,
+      scene,
+      plan,
+      perception,
+      execution,
+      error
+    });
+
+    if (samples.length === 0) {
+      return;
+    }
+
+    const persisted = await appendMotionReviewSamples(samples);
+    appendLog("info", "动作边界样本已写入待复核队列", {
+      sampleIds: persisted.map((sample) => sample.id),
+      sampleCount: persisted.length
+    });
+
+    triggerMotionReviewPass().then((results) => {
+      if (results.length === 0) {
+        return;
+      }
+      appendLog("info", "本地模型已完成动作边界样本复核", {
+        reviewCount: results.length,
+        sampleIds: results.map((item) => item.sampleId)
+      });
+    }).catch((reviewError) => {
+      appendLog("error", "动作边界样本复核失败", {
+        error: reviewError.message
+      });
+    });
+  } catch (recordError) {
+    appendLog("error", "动作边界样本写入失败", {
+      error: recordError.message
+    });
+  }
+}
+
 function pickAutonomousObjective(runtimeState) {
   const nextIndex = runtimeState.agent.autonomousTurnCount % AUTONOMOUS_OBJECTIVE_POOL.length;
   return AUTONOMOUS_OBJECTIVE_POOL[nextIndex];
@@ -443,20 +498,41 @@ async function runPlannedTurn({
   try {
     execution = await runWindowsExecution(plan);
   } catch (error) {
+    const failedExecution = {
+      rawSteps: Array.isArray(error.workerPayload?.steps) ? error.workerPayload.steps : [],
+      durationMs: error.durationMs || null
+    };
+
+    await recordMotionReviewSamples({
+      instruction,
+      source,
+      scene,
+      plan,
+      perception,
+      execution: failedExecution,
+      error
+    });
+
     await recordInteractionLearningSample({
       instruction,
       source,
       scene,
       plan,
       perception,
-      execution: {
-        rawSteps: [],
-        durationMs: error.durationMs || null
-      },
+      execution: failedExecution,
       error
     });
     throw error;
   }
+
+  await recordMotionReviewSamples({
+    instruction,
+    source,
+    scene,
+    plan,
+    perception,
+    execution
+  });
 
   await recordInteractionLearningSample({
     instruction,

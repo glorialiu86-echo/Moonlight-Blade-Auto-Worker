@@ -10,6 +10,7 @@
     "llm:test:reasoner": "node scripts/test-llm.js --reasoner",
     "llm:test:vision": "node scripts/test-vision.js",
     "llm:test:ocr": "node scripts/test-ocr.js",
-    "learning:summary": "node scripts/summarize-interaction-learning.js"
+    "learning:summary": "node scripts/summarize-interaction-learning.js",
+    "motion:review": "node scripts/review-motion-samples.js"
   }
 }

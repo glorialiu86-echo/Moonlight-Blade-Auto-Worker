@@ -78,7 +78,7 @@ NPC_STAGE_ROIS = {
 
 ACTION_POINTS = {
     "view": (0.32, 0.57),
-    "talk": (0.74, 0.89),
+    "talk": (1870 / 2537, 1252 / 1384),
     "small_talk": (0.69, 0.77),
     "confirm_small_talk": (0.59, 0.80),
     "trade": (2139 / 2537, 1139 / 1384),

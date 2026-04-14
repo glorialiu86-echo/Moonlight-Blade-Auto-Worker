@@ -88,7 +88,7 @@ function renderEmptyState() {
   elements.messageList.innerHTML = `
     <article class="message message-assistant empty-state">
       <div class="message-role">籽小刀</div>
-      <p class="message-text">这里保留完整调试视图。你可以在主播页发任务，也可以在这里直接发调试指令。</p>
+      <p class="message-text">这里保留完整调试视图。你可以在籽岷页发任务，也可以在这里直接发调试指令。</p>
       <p class="message-meta">建议先启用自动窗口截图，再观察识别结果。</p>
     </article>
   `;
@@ -96,11 +96,11 @@ function renderEmptyState() {
 
 function formatAgentMode(mode, phase) {
   if (mode === "user_priority") {
-    return phase === "queued" ? "等待用户插队生效" : "用户优先";
+    return phase === "queued" ? "等待籽岷插队生效" : "籽岷优先";
   }
 
   if (phase === "cooldown") {
-    return "刚处理完用户命令";
+    return "刚处理完籽岷命令";
   }
 
   if (phase === "waiting") {
@@ -112,7 +112,7 @@ function formatAgentMode(mode, phase) {
 
 function formatTurnSource(source) {
   if (source === "user") {
-    return "主播发起";
+    return "籽岷发起";
   }
 
   if (source === "agent") {
@@ -202,7 +202,7 @@ function renderAssistantMessage(message) {
 function renderUserMessage(message) {
   const node = elements.userMessageTemplate.content.firstElementChild.cloneNode(true);
   node.dataset.origin = message.origin || "user";
-  node.querySelector(".message-role").textContent = message.origin === "agent" ? "自主实验目标" : "主播输入";
+  node.querySelector(".message-role").textContent = message.origin === "agent" ? "自主实验目标" : "籽岷输入";
   node.querySelector(".message-text").textContent = message.text || "";
   return node;
 }

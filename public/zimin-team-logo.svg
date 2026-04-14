@@ -1,0 +1,6 @@
+<svg width="512" height="176" viewBox="0 0 512 176" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="176" rx="18" fill="#050505"/>
+  <rect x="12" y="12" width="488" height="152" rx="12" fill="#050505" stroke="#F4F4F4" stroke-width="8"/>
+  <text x="32" y="86" fill="#F7F7F7" font-family="'Microsoft YaHei UI', 'PingFang SC', sans-serif" font-size="72" font-weight="800" letter-spacing="6">籽岷</text>
+  <text x="36" y="138" fill="#F7F7F7" font-family="'Courier New', monospace" font-size="44" font-weight="700" letter-spacing="4">ZIMINTEAM</text>
+</svg>

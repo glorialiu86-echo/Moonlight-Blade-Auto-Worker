@@ -3,16 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>天涯明月刀 · 主播控制台</title>
+    <title>天涯明月刀 · 籽岷控制台</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="host-page">
     <div class="host-shell">
       <header class="host-header">
-        <div>
-          <p class="host-eyebrow">Broadcaster Console</p>
-          <h1>主播对话窗口</h1>
-          <p class="host-subtitle">主播只需要下达任务、观察 AI 回复，并通过主按钮控制整套本地程序的启停。</p>
+        <div class="host-brand">
+          <img class="brand-logo" src="/zimin-team-logo.svg" alt="籽岷团队 logo" />
+          <div>
+            <p class="host-eyebrow">Zi Min Custom Console</p>
+            <h1>籽岷对话窗口</h1>
+            <p class="host-subtitle">籽岷只需要下达任务、观察籽小刀回复，并通过主按钮控制整套本地程序的启停。</p>
+          </div>
         </div>
         <a class="debug-link" href="/debug">打开调试页</a>
       </header>
@@ -56,14 +59,14 @@
 
     <template id="userMessageTemplate">
       <article class="chat-message chat-message-user">
-        <div class="chat-role">主播</div>
+        <div class="chat-role">籽岷</div>
         <p class="chat-text"></p>
       </article>
     </template>
 
     <template id="assistantMessageTemplate">
       <article class="chat-message chat-message-assistant">
-        <div class="chat-role">AI 助手</div>
+        <div class="chat-role">籽小刀</div>
         <p class="chat-text"></p>
         <p class="chat-meta"></p>
       </article>

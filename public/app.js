@@ -72,8 +72,8 @@ function scrollMessagesToBottom() {
 function renderEmptyState() {
   elements.messageList.innerHTML = `
     <article class="chat-message chat-message-assistant chat-empty">
-      <div class="chat-role">AI 助手</div>
-      <p class="chat-text">点击“开始执行任务”后，主播就可以直接下达任务了。</p>
+      <div class="chat-role">籽小刀</div>
+      <p class="chat-text">点击“开始执行任务”后，籽岷就可以直接给籽小刀下达任务了。</p>
       <p class="chat-meta">调试信息已经移到单独的调试页。</p>
     </article>
   `;

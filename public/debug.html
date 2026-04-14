@@ -9,14 +9,17 @@
   <body class="debug-page">
     <div class="app-shell">
       <header class="hero">
-        <div>
-          <p class="eyebrow">Windows Debug Console</p>
-          <h1>调试页</h1>
-          <p class="subtitle">这里保留截图状态、环境摘要、实验记录和详细消息流。主播首页不再承载这些调试信息。</p>
+        <div class="host-brand">
+          <img class="brand-logo" src="/zimin-team-logo.svg" alt="籽岷团队 logo" />
+          <div>
+            <p class="eyebrow">Zi Min Debug Console</p>
+            <h1>调试页</h1>
+            <p class="subtitle">这里保留截图状态、环境摘要、实验记录和详细消息流。籽岷首页不再承载这些调试信息。</p>
+          </div>
         </div>
         <div class="hero-actions">
           <span id="headerPill" class="header-pill">当前模式：待机</span>
-          <a class="debug-link" href="/">返回主播页</a>
+          <a class="debug-link" href="/">返回籽岷页</a>
         </div>
       </header>
 
@@ -40,7 +43,7 @@
               <p id="agentSourceValue" class="agent-value">-</p>
             </div>
             <div class="agent-card agent-card-wide">
-              <p class="agent-label">用户插队</p>
+              <p class="agent-label">籽岷插队</p>
               <p id="agentQueueValue" class="agent-value">暂无</p>
             </div>
           </section>
@@ -48,7 +51,7 @@
           <section class="panel">
             <div class="panel-head">
               <h2>完整消息流</h2>
-              <p>保留每一轮用户输入、AI 解释、动作方案和补救话术，便于排查执行逻辑。</p>
+              <p>保留每一轮籽岷输入、籽小刀解释、动作方案和补救话术，便于排查执行逻辑。</p>
             </div>
             <div id="messageList" class="message-list" aria-live="polite"></div>
           </section>
@@ -124,7 +127,7 @@
 
     <template id="userMessageTemplate">
       <article class="message message-user">
-        <div class="message-role">主播输入</div>
+        <div class="message-role">籽岷输入</div>
         <p class="message-text"></p>
       </article>
     </template>

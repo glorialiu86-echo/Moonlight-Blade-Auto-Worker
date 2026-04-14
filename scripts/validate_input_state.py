@@ -27,6 +27,8 @@ TARGET_BODY_RATIO_X = 0.0
 TARGET_BODY_RATIO_Y = 4.8
 EXIT_BUTTON_CLIENT_RATIO_X = 2233 / 2537
 EXIT_BUTTON_CLIENT_RATIO_Y = 1022 / 1384
+CROSS_CLIENT_RATIO_X = 959 / 2537
+CROSS_CLIENT_RATIO_Y = 312 / 1384
 WAIT_AFTER_TARGET_CLICK_MS = 150
 WAIT_AFTER_UI_CLICK_MS = 300
 FIXED_FAILURE_DIR = TMP_DIR / "fixed_npc_failures"
@@ -35,7 +37,6 @@ SELECTED_PANEL_ROI = (0.20, 0.10, 0.42, 0.26)
 SELECTED_NAME_ROI = (0.26, 0.12, 0.36, 0.20)
 SELECTED_HP_ROI = (0.26, 0.19, 0.39, 0.23)
 DETAIL_EXIT_ROI = (0.82, 0.66, 0.99, 0.80)
-CROSS_SEARCH_ROI = (0.32, 0.10, 0.42, 0.20)
 RANDOM_NAME_SEARCH_ROI = (0.15, 0.18, 0.84, 0.74)
 IGNORED_WORLD_TEXTS = {
     "查看",
@@ -287,46 +288,17 @@ def click_screen_point(hwnd: int, screen_x: int, screen_y: int) -> dict:
 
 
 def locate_manual_exit_point(hwnd: int) -> dict:
+    # Exit is a fixed UI button. Once the user manually marks a stable truth point,
+    # we should click it directly by relative coordinates instead of waiting for
+    # another screenshot-driven confirmation step.
     return build_screen_point_from_ratio(hwnd, EXIT_BUTTON_CLIENT_RATIO_X, EXIT_BUTTON_CLIENT_RATIO_Y)
 
 
-def locate_cross_point(hwnd: int, full_image: np.ndarray) -> dict | None:
-    bounds = get_window_bounds(hwnd)
-    roi_image = crop_roi(full_image, CROSS_SEARCH_ROI)
-    gray = cv2.cvtColor(roi_image, cv2.COLOR_BGR2GRAY)
-    _, binary = cv2.threshold(gray, 170, 255, cv2.THRESH_BINARY)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, np.ones((3, 3), dtype=np.uint8))
-    contours, _hierarchy = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    best_rect = None
-    best_score = None
-    for contour in contours:
-        x, y, width, height = cv2.boundingRect(contour)
-        if width < 10 or height < 10 or width > 70 or height > 70:
-            continue
-        aspect = width / max(height, 1)
-        if aspect < 0.6 or aspect > 1.6:
-            continue
-        center_x = x + width / 2
-        score = center_x
-        if best_score is None or score > best_score:
-            best_score = score
-            best_rect = (x, y, width, height)
-
-    if best_rect is None:
-        return None
-
-    roi_left = int(bounds["width"] * CROSS_SEARCH_ROI[0])
-    roi_top = int(bounds["height"] * CROSS_SEARCH_ROI[1])
-    x, y, width, height = best_rect
-    client_x = int(roi_left + x + width / 2)
-    client_y = int(roi_top + y + height / 2)
-    return {
-        "clientX": client_x,
-        "clientY": client_y,
-        "screenX": int(bounds["left"] + client_x),
-        "screenY": int(bounds["top"] + client_y),
-    }
+def locate_cross_point(hwnd: int, _full_image: np.ndarray) -> dict:
+    # The close "X" is also fixed UI. It should be treated the same way as exit:
+    # restore from relative coordinates and blind-click directly, rather than
+    # layering extra vision logic on top of a manually validated fixed position.
+    return build_screen_point_from_ratio(hwnd, CROSS_CLIENT_RATIO_X, CROSS_CLIENT_RATIO_Y)
 
 
 def load_target_template() -> np.ndarray:
@@ -443,9 +415,8 @@ def reset_to_world(hwnd: int) -> None:
     selected_state = detect_selection_state(image, None)
     if selected_state["selected"]:
         cross_point = locate_cross_point(hwnd, image)
-        if cross_point is not None:
-            click_screen_point(hwnd, cross_point["screenX"], cross_point["screenY"])
-            time.sleep(WAIT_AFTER_UI_CLICK_MS / 1000.0)
+        click_screen_point(hwnd, cross_point["screenX"], cross_point["screenY"])
+        time.sleep(WAIT_AFTER_UI_CLICK_MS / 1000.0)
 
 
 def record_round_failure(
@@ -777,6 +748,7 @@ def run_fixed_npc_suite(hwnd: int) -> dict:
                 },
                 "targetClick": fixed_click,
                 "exitClick": locate_manual_exit_point(hwnd),
+                "crossClick": locate_cross_point(hwnd, capture_full_client(hwnd)),
             },
             ensure_ascii=False,
         )

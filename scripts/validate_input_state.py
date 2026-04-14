@@ -24,8 +24,8 @@ WAIT_AFTER_CLICK_MS = 300
 GAME_WINDOW_TITLE = "\u5929\u6daf\u660e\u6708\u5200\u624b\u6e38"
 TARGET_NAME = "\u535c\u7389\u4eba"
 TARGET_TEMPLATE_PATH = DATA_DIR / "buyuren-name-template.png"
-TARGET_BODY_X_PROBE_RATIOS = [0.0, -0.18, 0.18, -0.36, 0.36]
-TARGET_BODY_Y_PROBE_RATIOS = [2.4, 3.0, 3.6, 4.2, 4.8]
+TARGET_BODY_RATIO_X = 0.0
+TARGET_BODY_RATIO_Y = 2.4
 TARGET_TEMPLATE_THRESHOLD = 0.30
 
 SELECTED_PANEL_ROI = (0.20, 0.10, 0.42, 0.26)
@@ -33,6 +33,7 @@ SELECTED_NAME_ROI = (0.26, 0.12, 0.36, 0.20)
 SELECTED_HP_ROI = (0.26, 0.19, 0.39, 0.23)
 CROSS_TEMPLATE_ROI = (0.35, 0.11, 0.39, 0.18)
 CROSS_SEARCH_ROI = (0.31, 0.08, 0.42, 0.22)
+FAILURE_DIR = TMP_DIR / "phase1_failures"
 
 
 def normalize_name(text: str) -> str:
@@ -52,9 +53,16 @@ def draw_click_marker(image: np.ndarray, client_x: int, client_y: int) -> np.nda
     return marked
 
 
-def save_debug_image(image: np.ndarray, name: str, client_x: int | None = None, client_y: int | None = None) -> str:
-    TMP_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = TMP_DIR / name
+def save_debug_image(
+    image: np.ndarray,
+    name: str,
+    client_x: int | None = None,
+    client_y: int | None = None,
+    output_dir: Path | None = None,
+) -> str:
+    save_dir = output_dir or TMP_DIR
+    save_dir.mkdir(parents=True, exist_ok=True)
+    output_path = save_dir / name
     output_image = image
     if client_x is not None and client_y is not None:
         output_image = draw_click_marker(image, client_x, client_y)
@@ -138,6 +146,21 @@ def detect_cross_symbol(cross_image: np.ndarray) -> bool:
     return positive >= 1 and negative >= 1
 
 
+def detect_hp_bar(panel_hp_image: np.ndarray) -> bool:
+    blue_mask = (
+        (panel_hp_image[:, :, 0] >= 140)
+        & (panel_hp_image[:, :, 1] >= 140)
+        & (panel_hp_image[:, :, 2] <= 150)
+    ).astype(np.uint8) * 255
+    blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_OPEN, np.ones((3, 3), dtype=np.uint8))
+    contours, _hierarchy = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for contour in contours:
+        _x, _y, width, height = cv2.boundingRect(contour)
+        if width >= 40 and 3 <= height <= 16 and (width / max(height, 1)) >= 4.0:
+            return True
+    return False
+
+
 def detect_world_hp_bar(full_image: np.ndarray, fixed_target: dict | None) -> bool:
     if fixed_target is None:
         return False
@@ -194,6 +217,26 @@ def detect_selected_state(full_image: np.ndarray, fixed_target: dict | None = No
         "hasAvatar": has_avatar,
         "hasCross": has_cross,
         "hasWorldHpBar": has_world_hp_bar,
+    }
+
+
+def detect_left_top_selected_state(full_image: np.ndarray) -> dict:
+    panel_image = crop_roi(full_image, SELECTED_PANEL_ROI)
+    name_image = crop_roi(full_image, SELECTED_NAME_ROI)
+    cross_image = crop_roi(full_image, CROSS_TEMPLATE_ROI)
+    hp_image = crop_roi(full_image, SELECTED_HP_ROI)
+
+    name_text = extract_best_name(name_image)
+    has_avatar = detect_avatar_block(panel_image)
+    has_cross = detect_cross_symbol(cross_image)
+    has_hp_bar = detect_hp_bar(hp_image)
+    selected = has_avatar and (has_cross or has_hp_bar or bool(name_text))
+    return {
+        "selected": selected,
+        "name": name_text,
+        "hasAvatar": has_avatar,
+        "hasCross": has_cross,
+        "hasHpBar": has_hp_bar,
     }
 
 
@@ -338,124 +381,44 @@ def try_close_current_selection(hwnd: int, fixed_target: dict | None = None) -> 
     time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
 
 
-def calibrate_body_probe(hwnd: int, fixed_target: dict) -> dict:
-    calibration_results = []
-    for probe_ratio_y in TARGET_BODY_Y_PROBE_RATIOS:
-        for probe_ratio_x in TARGET_BODY_X_PROBE_RATIOS:
-            try_close_current_selection(hwnd, fixed_target)
-            click_target_state = build_click_target(hwnd, fixed_target, probe_ratio_x, probe_ratio_y)
-            click_result = click_target(hwnd, click_target_state, fixed_target["targetName"])
-            time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
-            image = capture_full_client(hwnd)
-            selected_state = detect_selected_state(image, fixed_target)
-            result = {
-                "probeRatioX": probe_ratio_x,
-                "probeRatioY": probe_ratio_y,
-                "probeOffsetX": click_target_state["probeOffsetX"],
-                "probeOffsetY": click_target_state["probeOffsetY"],
-                "selected": bool(selected_state["selected"]),
-                "ocrName": selected_state["name"],
-                "hasWorldHpBar": selected_state["hasWorldHpBar"],
-                "clickClientX": click_target_state["clientX"],
-                "clickClientY": click_target_state["clientY"],
-            }
-            calibration_results.append(result)
-            print(json.dumps({"phase": "calibration", **result}, ensure_ascii=False))
-            if selected_state["selected"]:
-                try_close_current_selection(hwnd, fixed_target)
-                return {
-                    "probeRatioX": probe_ratio_x,
-                    "probeRatioY": probe_ratio_y,
-                    "probeOffsetX": click_target_state["probeOffsetX"],
-                    "probeOffsetY": click_target_state["probeOffsetY"],
-                    "results": calibration_results,
-                }
-    return {
-        "probeRatioX": None,
-        "probeRatioY": None,
-        "probeOffsetX": None,
-        "probeOffsetY": None,
-        "results": calibration_results,
-    }
-
-
-def run_phase_one(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_ratio_y: float) -> dict:
-    phase_results = []
-    success_count = 0
-
-    for index in range(1, ITERATIONS + 1):
-        click_target_state = build_click_target(hwnd, fixed_target, probe_ratio_x, probe_ratio_y)
-        click_result = click_target(hwnd, click_target_state, fixed_target["targetName"])
-        time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
-        full_image = capture_full_client(hwnd)
-        selected_state = detect_selected_state(full_image, fixed_target)
-        screenshot_path = save_debug_image(
-            full_image,
-            f"phase1-{index:02d}.png",
-            click_result["target"]["clientX"],
-            click_result["target"]["clientY"],
-        )
-
-        success = bool(selected_state["selected"])
-        if success:
-            success_count += 1
-
-        row = {
-            "phase": 1,
-            "iteration": index,
-            "clicked": click_result["clicked"],
-            "detectedSelected": success,
-            "ocrName": selected_state["name"],
-            "hasAvatar": selected_state["hasAvatar"],
-            "hasCross": selected_state["hasCross"],
-            "hasWorldHpBar": selected_state["hasWorldHpBar"],
-            "targetName": click_result["targetName"],
-            "probeRatioX": probe_ratio_x,
-            "probeRatioY": probe_ratio_y,
-            "probeOffsetX": click_target_state["probeOffsetX"],
-            "probeOffsetY": click_target_state["probeOffsetY"],
-            "targetClientX": click_result["target"]["clientX"],
-            "targetClientY": click_result["target"]["clientY"],
-            "clientBounds": click_result["debug"]["bounds"],
-            "targetBbox": click_result["debug"]["targetBbox"],
-            "clickAbsolute": click_result["debug"]["clickAbsolute"],
-            "markerScreenX": click_result["target"]["screenX"],
-            "markerScreenY": click_result["target"]["screenY"],
-            "markerClientX": click_result["target"]["clientX"],
-            "markerClientY": click_result["target"]["clientY"],
-            "mouseBefore": click_result["debug"]["mouseBefore"],
-            "mouseAfter": click_result["debug"]["mouseAfter"],
-            "screenshot": screenshot_path,
-        }
-        phase_results.append(row)
-        print(json.dumps(row, ensure_ascii=False))
-
-    return {
-        "successCount": success_count,
-        "passed": success_count >= 18,
-        "results": phase_results,
-    }
-
-
-def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_ratio_y: float) -> dict:
+def run_fixed_npc_stability_test(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_ratio_y: float) -> dict:
     template = None
     phase_results = []
     success_count = 0
 
     for index in range(1, ITERATIONS + 1):
+        try_close_current_selection(hwnd, fixed_target)
         click_target_state = build_click_target(hwnd, fixed_target, probe_ratio_x, probe_ratio_y)
         click_result = click_target(hwnd, click_target_state, fixed_target["targetName"])
         time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
         selected_image = capture_full_client(hwnd)
-        selected_state = detect_selected_state(selected_image, fixed_target)
+        selected_state = detect_left_top_selected_state(selected_image)
+        selected_screenshot = save_debug_image(
+            selected_image,
+            f"round-{index:02d}-select.png",
+            click_result["target"]["clientX"],
+            click_result["target"]["clientY"],
+        )
+
         if not selected_state["selected"]:
+            failure_screenshot = save_debug_image(
+                selected_image,
+                f"round-{index:02d}-select-fail.png",
+                click_result["target"]["clientX"],
+                click_result["target"]["clientY"],
+                FAILURE_DIR,
+            )
             row = {
-                "phase": 2,
+                "phase": "stability",
                 "iteration": index,
                 "status": "FAIL",
                 "reason": "SELECT_NOT_REACHED",
-                "ocrName": selected_state["name"],
-                "hasWorldHpBar": selected_state["hasWorldHpBar"],
+                "selectedReached": False,
+                "cancelCleared": False,
+                "panelName": selected_state["name"],
+                "hasAvatar": selected_state["hasAvatar"],
+                "hasCross": selected_state["hasCross"],
+                "hasHpBar": selected_state["hasHpBar"],
                 "targetName": click_result["targetName"],
                 "probeRatioX": probe_ratio_x,
                 "probeRatioY": probe_ratio_y,
@@ -463,6 +426,10 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
                 "probeOffsetY": click_target_state["probeOffsetY"],
                 "targetClientX": click_result["target"]["clientX"],
                 "targetClientY": click_result["target"]["clientY"],
+                "screenX": click_result["target"]["screenX"],
+                "screenY": click_result["target"]["screenY"],
+                "selectScreenshot": selected_screenshot,
+                "failureScreenshot": failure_screenshot,
             }
             phase_results.append(row)
             print(json.dumps(row, ensure_ascii=False))
@@ -473,13 +440,24 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
 
         cross_match = match_cross(hwnd, selected_image, template)
         if cross_match is None:
+            failure_screenshot = save_debug_image(
+                selected_image,
+                f"round-{index:02d}-cross-not-found.png",
+                click_result["target"]["clientX"],
+                click_result["target"]["clientY"],
+                FAILURE_DIR,
+            )
             row = {
-                "phase": 2,
+                "phase": "stability",
                 "iteration": index,
                 "status": "FAIL",
                 "reason": "CROSS_NOT_FOUND",
-                "ocrName": selected_state["name"],
-                "hasWorldHpBar": selected_state["hasWorldHpBar"],
+                "selectedReached": True,
+                "cancelCleared": False,
+                "panelName": selected_state["name"],
+                "hasAvatar": selected_state["hasAvatar"],
+                "hasCross": selected_state["hasCross"],
+                "hasHpBar": selected_state["hasHpBar"],
                 "targetName": click_result["targetName"],
                 "probeRatioX": probe_ratio_x,
                 "probeRatioY": probe_ratio_y,
@@ -487,6 +465,10 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
                 "probeOffsetY": click_target_state["probeOffsetY"],
                 "targetClientX": click_result["target"]["clientX"],
                 "targetClientY": click_result["target"]["clientY"],
+                "screenX": click_result["target"]["screenX"],
+                "screenY": click_result["target"]["screenY"],
+                "selectScreenshot": selected_screenshot,
+                "failureScreenshot": failure_screenshot,
             }
             phase_results.append(row)
             print(json.dumps(row, ensure_ascii=False))
@@ -495,25 +477,37 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
         input_worker.click_screen_point(hwnd, cross_match["screenX"], cross_match["screenY"], "left")
         time.sleep(WAIT_AFTER_CLICK_MS / 1000.0)
         after_image = capture_full_client(hwnd)
-        after_state = detect_selected_state(after_image, fixed_target)
+        after_state = detect_left_top_selected_state(after_image)
         screenshot_path = save_debug_image(
             after_image,
-            f"phase2-{index:02d}.png",
-            click_result["target"]["clientX"],
-            click_result["target"]["clientY"],
+            f"round-{index:02d}-after-close.png",
+            cross_match["screenX"] - click_result["debug"]["bounds"]["left"],
+            cross_match["screenY"] - click_result["debug"]["bounds"]["top"],
         )
 
         success = not after_state["selected"]
         if success:
             success_count += 1
+        else:
+            save_debug_image(
+                after_image,
+                f"round-{index:02d}-cancel-fail.png",
+                cross_match["screenX"] - click_result["debug"]["bounds"]["left"],
+                cross_match["screenY"] - click_result["debug"]["bounds"]["top"],
+                FAILURE_DIR,
+            )
 
         row = {
-            "phase": 2,
+            "phase": "stability",
             "iteration": index,
             "status": "SUCCESS" if success else "FAIL",
-            "ocrName": after_state["name"],
+            "selectedReached": True,
+            "cancelCleared": success,
+            "panelNameAfterClose": after_state["name"],
             "detectedSelectedAfterClose": after_state["selected"],
-            "hasWorldHpBarAfterClose": after_state["hasWorldHpBar"],
+            "hasAvatarAfterClose": after_state["hasAvatar"],
+            "hasCrossAfterClose": after_state["hasCross"],
+            "hasHpBarAfterClose": after_state["hasHpBar"],
             "crossScore": cross_match["score"],
             "targetName": click_result["targetName"],
             "probeRatioX": probe_ratio_x,
@@ -522,17 +516,23 @@ def run_phase_two(hwnd: int, fixed_target: dict, probe_ratio_x: float, probe_rat
             "probeOffsetY": click_target_state["probeOffsetY"],
             "targetClientX": click_result["target"]["clientX"],
             "targetClientY": click_result["target"]["clientY"],
-            "markerScreenX": click_result["target"]["screenX"],
-            "markerScreenY": click_result["target"]["screenY"],
-            "markerClientX": click_result["target"]["clientX"],
-            "markerClientY": click_result["target"]["clientY"],
-            "screenshot": screenshot_path,
+            "screenX": click_result["target"]["screenX"],
+            "screenY": click_result["target"]["screenY"],
+            "crossScreenX": cross_match["screenX"],
+            "crossScreenY": cross_match["screenY"],
+            "crossClientX": cross_match["screenX"] - click_result["debug"]["bounds"]["left"],
+            "crossClientY": cross_match["screenY"] - click_result["debug"]["bounds"]["top"],
+            "selectScreenshot": selected_screenshot,
+            "afterCloseScreenshot": screenshot_path,
         }
         phase_results.append(row)
         print(json.dumps(row, ensure_ascii=False))
 
     return {
+        "totalRounds": ITERATIONS,
         "successCount": success_count,
+        "failureCount": ITERATIONS - success_count,
+        "successRate": round((success_count / ITERATIONS) * 100.0, 2),
         "passed": success_count >= 18,
         "results": phase_results,
     }
@@ -548,14 +548,14 @@ def main() -> int:
     if fixed_target is None:
         raise RuntimeError("TARGET_TEMPLATE_MATCH_NOT_FOUND")
 
-    calibration = calibrate_body_probe(hwnd, fixed_target)
+    probe_target = build_click_target(hwnd, fixed_target, TARGET_BODY_RATIO_X, TARGET_BODY_RATIO_Y)
     print(
         json.dumps(
             {
                 "phase": "setup",
-                "logic": "template_match_weishange_then_probe_under_name",
+                "logic": "fixed_npc_closed_loop_stability_test",
                 "targetName": TARGET_NAME,
-                "selectedStateOwner": "single_fullscreen_frame",
+                "selectedStateOwner": "left_top_selected_panel_only",
                 "closeOwner": "template_match_cross_only",
                 "fixedTargetCenterX": fixed_target["target"]["centerX"],
                 "fixedTargetNameBottomY": fixed_target["target"]["nameBottomY"],
@@ -566,29 +566,21 @@ def main() -> int:
                     "height": fixed_target["target"]["bboxHeight"],
                 },
                 "targetMatchScore": fixed_target["target"]["score"],
-                "selectedProbeRatioX": calibration["probeRatioX"],
-                "selectedProbeRatioY": calibration["probeRatioY"],
-                "selectedProbeOffsetX": calibration["probeOffsetX"],
-                "selectedProbeOffsetY": calibration["probeOffsetY"],
+                "selectedProbeRatioX": TARGET_BODY_RATIO_X,
+                "selectedProbeRatioY": TARGET_BODY_RATIO_Y,
+                "selectedProbeOffsetX": probe_target["probeOffsetX"],
+                "selectedProbeOffsetY": probe_target["probeOffsetY"],
+                "selectedClientX": probe_target["clientX"],
+                "selectedClientY": probe_target["clientY"],
+                "selectedScreenX": probe_target["screenX"],
+                "selectedScreenY": probe_target["screenY"],
             },
             ensure_ascii=False,
         )
     )
-
-    if calibration["probeOffsetX"] is None:
-        print(json.dumps({"phase": "calibration_summary", **calibration}, ensure_ascii=False))
-        return 2
-
-    print(json.dumps({"phase": "calibration_summary", **calibration}, ensure_ascii=False))
-    phase_one = run_phase_one(hwnd, fixed_target, calibration["probeRatioX"], calibration["probeRatioY"])
-    print(json.dumps({"phase": "phase1_summary", **phase_one}, ensure_ascii=False))
-
-    if not phase_one["passed"]:
-        return 2
-
-    phase_two = run_phase_two(hwnd, fixed_target, calibration["probeRatioX"], calibration["probeRatioY"])
-    print(json.dumps({"phase": "phase2_summary", **phase_two}, ensure_ascii=False))
-    return 0 if phase_two["passed"] else 3
+    summary = run_fixed_npc_stability_test(hwnd, fixed_target, TARGET_BODY_RATIO_X, TARGET_BODY_RATIO_Y)
+    print(json.dumps({"phase": "stability_summary", **summary}, ensure_ascii=False))
+    return 0 if summary["passed"] else 3
 
 
 if __name__ == "__main__":

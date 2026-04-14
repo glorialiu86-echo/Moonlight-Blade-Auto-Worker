@@ -293,6 +293,64 @@ async function buildNpcReply({ instruction, dialogText }) {
   return String(result.text || "").replace(/\s+/g, " ").trim();
 }
 
+async function maybeReplyFromCurrentChatScreen({ instruction }) {
+  let probeExecution;
+  try {
+    probeExecution = await runWindowsActions([
+      {
+        id: "chat-probe-1",
+        title: "读取当前聊天页",
+        sourceType: "talk_probe",
+        type: "read_current_chat",
+        postDelayMs: 50
+      }
+    ]);
+  } catch {
+    return null;
+  }
+
+  const probeStep = probeExecution.rawSteps?.[0];
+  const talkStage = String(probeStep?.input?.stage || "").trim();
+  const dialogText = String(probeStep?.input?.dialogText || "").trim();
+
+  if (talkStage !== "chat_ready" || !dialogText) {
+    return null;
+  }
+
+  const replyText = await buildNpcReply({
+    instruction,
+    dialogText
+  });
+
+  if (!replyText) {
+    return null;
+  }
+
+  const replyExecution = await runWindowsActions([
+    {
+      id: "reply-1",
+      title: "发送闲聊回复",
+      sourceType: "talk_reply",
+      type: "send_chat_message",
+      text: replyText,
+      closeAfterSend: true,
+      closeSettleMs: 700,
+      postDelayMs: 300
+    }
+  ]);
+
+  appendLog("info", "当前聊天页回复已发送", {
+    replyText
+  });
+
+  return {
+    dialogText,
+    replyText,
+    probeExecution,
+    execution: replyExecution
+  };
+}
+
 async function maybeSendNpcReply({ instruction, plan, execution }) {
   const talkStep = execution.rawSteps?.find((step) => step?.input?.mode === "click_npc_interact");
   const socialStep = execution.rawSteps?.find((step) => step?.input?.mode === "town_npc_social_loop");
@@ -935,6 +993,25 @@ async function handleChat(request, response) {
   });
 
   try {
+    const directReply = await maybeReplyFromCurrentChatScreen({ instruction });
+    if (directReply) {
+      appendMessage({
+        role: "assistant",
+        text: `已读取当前 NPC 对话并发送回复：${directReply.replyText}`,
+        thinkingChain: [],
+        recoveryLine: "当前聊天页已完成一次读取、回复和发送。",
+        perceptionSummary: "本轮直接基于当前聊天页执行，没有重新找 NPC。",
+        sceneLabel: "聊天页直连",
+        riskLevel: "low",
+        actions: directReply.execution.steps
+      });
+
+      return sendJson(response, 200, {
+        ok: true,
+        state: getState()
+      });
+    }
+
     const state = getState();
     const scene = state.scene;
 

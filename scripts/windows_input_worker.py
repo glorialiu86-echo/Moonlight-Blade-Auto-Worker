@@ -701,6 +701,26 @@ def send_chat_message(
     }
 
 
+def read_current_chat(hwnd: int) -> dict[str, Any]:
+    stage_state = detect_npc_interaction_stage(hwnd)
+    if stage_state["stage"] != "chat_ready":
+        raise RuntimeError(
+            "Current screen is not chat_ready. "
+            f"Detected stage: {stage_state['stage'] or 'none'}"
+        )
+
+    dialog_state = detect_dialog(hwnd)
+    dialog_text = str(dialog_state.get("text") or "").strip()
+    if not dialog_text:
+        raise RuntimeError("Current chat screen has no readable dialog text")
+
+    return {
+        "stage": "chat_ready",
+        "dialogText": dialog_text,
+        "stageTexts": stage_state["texts"],
+    }
+
+
 def find_moving_view_button(hwnd: int) -> dict[str, Any] | None:
     roi = NPC_STAGE_ROIS["moving_view_search"]
     bounds = get_window_bounds(hwnd)
@@ -1577,6 +1597,27 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
 
 
 def try_enter_chat(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval_ms: int) -> dict[str, Any]:
+    current_stage = detect_npc_interaction_stage(hwnd)
+    if current_stage["stage"] == "chat_ready":
+        dialog_state = detect_dialog(hwnd)
+        return {
+            "success": True,
+            "stage": "chat_ready",
+            "dialogText": dialog_state["text"],
+            "stageHistory": ["chat_ready"],
+            "menuState": {
+                "stage": "chat_ready",
+                "stageTexts": current_stage["texts"],
+                "clickAttempts": 0,
+                "moveAttempts": 0,
+                "cameraDrags": 0,
+                "clickPointAttempts": [],
+                "selectionAttempts": [],
+                "viewAttempts": [],
+                "targetText": "",
+            },
+        }
+
     menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
     stage_history = list(menu_state["stageHistory"])
 
@@ -1911,6 +1952,17 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
                 "text": text,
                 **input_state,
             },
+        }
+
+    if action_type == "read_current_chat":
+        input_state = read_current_chat(hwnd)
+        time.sleep(post_delay_ms / 1000)
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": f"Read current chat dialog with length {len(input_state['dialogText'])}",
+            "input": input_state,
         }
 
     if action_type == "press_key":

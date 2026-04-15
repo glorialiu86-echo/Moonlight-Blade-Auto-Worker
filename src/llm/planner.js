@@ -310,11 +310,6 @@ function buildThinking(rawThinking, instruction, actions) {
 }
 
 function buildDecide(rawDecide, instruction, actions) {
-  const text = String(rawDecide || "").trim();
-  if (text) {
-    return text;
-  }
-
   const goalType = classifyGoal(instruction, actions);
   return buildGoalTemplate(goalType, actions[0] || "inspect").decide;
 }

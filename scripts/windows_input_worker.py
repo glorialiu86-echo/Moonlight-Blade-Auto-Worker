@@ -90,7 +90,7 @@ ACTION_POINTS = {
     "trade_right_currency_slot": (0.69, 0.57),
     "trade_right_up_shelf": (0.82, 0.82),
     "trade_submit": (0.53, 0.92),
-    "gift_first_slot": (0.78, 0.46),
+    "gift_first_slot": (1721 / 2537, 580 / 1384),
     "gift_plus": (0.82, 0.92),
     "gift_submit": (0.91, 0.92),
     "chat_input": (652 / 2537, 1294 / 1384),

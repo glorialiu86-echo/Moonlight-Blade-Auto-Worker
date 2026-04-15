@@ -35,7 +35,7 @@ const plannerSystemPrompt = `
 - 拉近关系
 
 reply 不是一句话总结，而是一段可展示的思考链路。
-必须写成 7 到 9 句短句。
+必须写成 5 到 8 句短句。
 每一句都单独换行。
 每句尽量控制在 15 到 25 个字。
 不要把一句切得太碎，也不要写成长段。
@@ -306,13 +306,13 @@ function buildReplyChain(rawReply, instruction, actions) {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  if (normalized.length >= 7) {
-    return normalized.slice(0, 9).join("\n");
+  if (normalized.length >= 5) {
+    return normalized.slice(0, 8).join("\n");
   }
 
   const actionLabel = actions[0] || "inspect";
   const goalType = classifyGoal(instruction, actions);
-  return buildGoalTemplate(goalType, actionLabel).slice(0, 9).join("\n");
+  return buildGoalTemplate(goalType, actionLabel).slice(0, 8).join("\n");
 }
 
 function decorateCompat(plan, scene) {

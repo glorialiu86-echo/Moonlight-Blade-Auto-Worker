@@ -29,6 +29,13 @@ const plannerSystemPrompt = `
 1. 给客户端展示的人话回复 reply
 2. 从白名单里挑出的执行动作 actions
 
+reply 不是一句话总结，而是一段可展示的思考链路。
+必须写成 4 到 6 句短句。
+每一句都单独换行。
+要像人在给自己找歪理，一步一步把目标、判断、取舍和结论串起来。
+最后一句必须明确落到自己选择的路子上。
+不要写字段解释，不要写“第1步”“第2步”，不要写 JSON 外的任何字。
+
 actions 只能从这个集合里选：
 ${allowedActions.join(", ")}
 
@@ -115,6 +122,38 @@ function assertArray(value, name) {
   }
 }
 
+function buildReplyChain(rawReply, actions) {
+  const normalized = String(rawReply || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (normalized.length >= 4) {
+    return normalized.slice(0, 6).join("\n");
+  }
+
+  const actionLabel = actions[0] || "inspect";
+  const closingMap = {
+    talk: "我先拿说话开口子，让他先记住我。",
+    gift: "我先拿点东西砸开门缝，再看他吃不吃这一套。",
+    inspect: "我先盯清局面，不急着把动作做死。",
+    trade: "我先拿交换试水，让来往变成习惯。",
+    threaten: "我先给他一点压力，让他不得不记住我。",
+    steal: "我先走偏门，让他先对我留下印象。",
+    strike: "我先走狠一点的路子，让记忆来得更快。",
+    escape: "我先抽身，不把自己白送进去。",
+    wait: "我先压一压节奏，等更顺手的机会。"
+  };
+
+  return [
+    "籽岷要的不是一句客套话，而是尽快把关系往前推。",
+    "关系这东西，靠的就是反复接触和足够深的印象。",
+    "光做规规矩矩的表面工夫，未必能让对方真正记住我。",
+    closingMap[actionLabel] || "我先挑一条更顺手的邪路，把局面撬开。"
+  ].join("\n");
+}
+
 function decorateCompat(plan, scene) {
   const actionNames = [...plan.actions];
   const actionSteps = actionNames.map((action, index) => ({
@@ -181,9 +220,10 @@ function sanitizePlan(rawPlan) {
   }
 
   const plan = {
-    reply: String(
-      rawPlan.reply || "我先挑一条顺手的邪路，把事情往前拱。"
-    ).trim(),
+    reply: buildReplyChain(
+      rawPlan.reply || "我先挑一条顺手的邪路，把事情往前拱。",
+      uniqueOrderedActions
+    ),
     actions: uniqueOrderedActions.slice(0, 5)
   };
 
@@ -192,7 +232,19 @@ function sanitizePlan(rawPlan) {
 
 function buildFallbackPlan(scene) {
   return decorateCompat({
-    reply: "路子先别走死，先摸清位置，再挑个更顺手的坏办法。",
+    reply: scene === "jail_warning"
+      ? [
+        "眼下这地方不算稳，先乱动只会把自己送进去。",
+        "真想把事做成，也得先看清谁在盯着我。",
+        "硬冲是蠢，等他们松一口气才有空子。",
+        "我先收一收手，盯住局面，再挑更顺的邪路。"
+      ].join("\n")
+      : [
+        "籽岷要的是把局面推开，不是听我念废话。",
+        "想和人混熟，靠的不是老实，是让对方记住我。",
+        "可现在眼前细节还没摸透，先乱出手容易走偏。",
+        "我先看清位置，再顺手撬开第一道口子。"
+      ].join("\n"),
     actions: scene === "jail_warning"
       ? ["inspect", "wait"]
       : ["inspect", "talk"]

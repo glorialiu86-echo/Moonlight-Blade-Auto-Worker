@@ -92,7 +92,7 @@ ACTION_POINTS = {
     "trade_submit": (0.53, 0.92),
     "gift_first_slot": (1721 / 2537, 580 / 1384),
     "gift_plus": (0.82, 0.92),
-    "gift_submit": (0.91, 0.92),
+    "gift_submit": (2289 / 2537, 1216 / 1384),
     "chat_input": (652 / 2537, 1294 / 1384),
     # Send is fixed UI, but it only becomes actionable after valid text input.
     # Keep the point calibrated now; do not assume the button is clickable

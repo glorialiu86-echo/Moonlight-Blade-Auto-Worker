@@ -179,19 +179,20 @@ function normalizeExecution(workerResult, actions, durationMs) {
   };
 }
 
-export async function runWindowsActions(actions) {
+export async function runWindowsActions(actions, options = {}) {
   const workerPayload = {
     windowTitleKeyword: process.env.GAME_WINDOW_TITLE?.trim() || "天涯明月刀手游",
-    actions
+    actions,
+    interruptOnExternalInput: Boolean(options.interruptOnExternalInput)
   };
 
   const { workerResult, durationMs } = await runWorkerPayload(workerPayload);
   return normalizeExecution(workerResult, actions, durationMs);
 }
 
-export async function runWindowsExecution(plan) {
+export async function runWindowsExecution(plan, options = {}) {
   const actions = createWorkerActions(plan);
-  return runWindowsActions(actions);
+  return runWindowsActions(actions, options);
 }
 
 export function createPrimitiveActions(sequenceName) {

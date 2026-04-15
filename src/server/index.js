@@ -29,6 +29,7 @@ import {
   resetRuntime,
   setCaptureState,
   setCurrentTurn,
+  setExternalInputGuardEnabled,
   setInteractionMode,
   setLastError,
   setLatestPerception,
@@ -296,7 +297,7 @@ async function buildNpcReply({ instruction, dialogText }) {
   return String(result.text || "").replace(/\s+/g, " ").trim();
 }
 
-async function maybeReplyFromCurrentChatScreen({ instruction }) {
+async function maybeReplyFromCurrentChatScreen({ instruction, externalInputGuardEnabled = true }) {
   let probeExecution;
   try {
     probeExecution = await runWindowsActions([
@@ -340,7 +341,9 @@ async function maybeReplyFromCurrentChatScreen({ instruction }) {
       closeSettleMs: 700,
       postDelayMs: 300
     }
-  ]);
+  ], {
+    interruptOnExternalInput: externalInputGuardEnabled
+  });
 
   appendLog("info", "当前聊天页回复已发送", {
     replyText
@@ -354,7 +357,7 @@ async function maybeReplyFromCurrentChatScreen({ instruction }) {
   };
 }
 
-async function maybeSendNpcReply({ instruction, plan, execution }) {
+async function maybeSendNpcReply({ instruction, plan, execution, externalInputGuardEnabled = true }) {
   const talkStep = execution.rawSteps?.find((step) => step?.input?.mode === "click_npc_interact");
   const socialStep = execution.rawSteps?.find((step) => step?.input?.mode === "town_npc_social_loop");
   const finalTalkStep = socialStep || talkStep;
@@ -390,7 +393,9 @@ async function maybeSendNpcReply({ instruction, plan, execution }) {
       closeSettleMs: 700,
       postDelayMs: 300
     }
-  ]);
+  ], {
+    interruptOnExternalInput: externalInputGuardEnabled
+  });
 
   appendLog("info", "NPC 闲聊回复已发送", {
     replyText
@@ -519,6 +524,7 @@ async function runPlannedTurn({
   perception,
   source,
   interactionMode = "act",
+  externalInputGuardEnabled = true,
   perceptionSummary = perceptionSummaryBySource(perception, source)
 }) {
   const runtimeBefore = getState();
@@ -564,7 +570,9 @@ async function runPlannedTurn({
     };
   } else {
     try {
-      execution = await runWindowsExecution(plan);
+      execution = await runWindowsExecution(plan, {
+        interruptOnExternalInput: interactionMode === "act" && externalInputGuardEnabled
+      });
     } catch (error) {
       const failedExecution = {
         rawSteps: Array.isArray(error.workerPayload?.steps) ? error.workerPayload.steps : [],
@@ -614,7 +622,8 @@ async function runPlannedTurn({
     const replyResult = await maybeSendNpcReply({
       instruction,
       plan,
-      execution
+      execution,
+      externalInputGuardEnabled
     });
 
     if (replyResult) {
@@ -642,6 +651,7 @@ async function runPlannedTurn({
     createdAt: new Date().toISOString(),
     source,
     interactionMode,
+    externalInputGuardEnabled,
     plan,
     execution,
     perception: perception || null
@@ -741,7 +751,8 @@ async function maybeRunAutonomousTurn() {
       scene,
       perception: runtimeState.latestPerception,
       source: "agent",
-      interactionMode: runtimeState.interactionMode || "act"
+      interactionMode: runtimeState.interactionMode || "act",
+      externalInputGuardEnabled: runtimeState.externalInputGuardEnabled !== false
     });
   } catch (error) {
     setLastError(error.message);
@@ -771,7 +782,7 @@ async function waitForTurnSlot() {
 }
 
 async function handleControl(request, response) {
-  const { action, scene, interactionMode } = await readRequestBody(request);
+  const { action, scene, interactionMode, externalInputGuardEnabled } = await readRequestBody(request);
 
   if (scene) {
     setScene(scene);
@@ -787,6 +798,13 @@ async function handleControl(request, response) {
     appendLog("info", interactionMode === "watch" ? "\u524d\u53f0\u5df2\u5207\u5230\u89c2\u770b\u6a21\u5f0f" : "\u524d\u53f0\u5df2\u5207\u5230\u884c\u52a8\u6a21\u5f0f", {
       interactionMode
     });
+  }
+
+  if (typeof externalInputGuardEnabled === "boolean") {
+    setExternalInputGuardEnabled(externalInputGuardEnabled);
+    appendLog("info", externalInputGuardEnabled
+      ? "已开启人类介入保护"
+      : "已关闭人类介入保护");
   }
 
   const transitions = {
@@ -891,7 +909,8 @@ async function handleTurn(request, response) {
       scene,
       perception: state.latestPerception,
       source: "user",
-      interactionMode: state.interactionMode || "act"
+      interactionMode: state.interactionMode || "act",
+      externalInputGuardEnabled: state.externalInputGuardEnabled !== false
     });
 
     return sendJson(response, 200, {
@@ -1015,6 +1034,9 @@ async function handleChat(request, response) {
   const requestedInteractionMode = typeof body.interactionMode === "string"
     ? body.interactionMode.trim()
     : "";
+  const requestedExternalInputGuardEnabled = typeof body.externalInputGuardEnabled === "boolean"
+    ? body.externalInputGuardEnabled
+    : null;
 
   if (!instruction) {
     return sendJson(response, 400, { ok: false, error: "Instruction is required" });
@@ -1030,6 +1052,9 @@ async function handleChat(request, response) {
   if (requestedInteractionMode) {
     setInteractionMode(requestedInteractionMode);
   }
+  if (requestedExternalInputGuardEnabled !== null) {
+    setExternalInputGuardEnabled(requestedExternalInputGuardEnabled);
+  }
   updateAgent({
     mode: "user_priority",
     phase: turnInFlight ? "queued" : "user_priority",
@@ -1040,8 +1065,12 @@ async function handleChat(request, response) {
   try {
     const runtimeState = getState();
     const interactionMode = runtimeState.interactionMode || "act";
+    const externalInputGuardEnabled = runtimeState.externalInputGuardEnabled !== false;
     const directReply = interactionMode === "act"
-      ? await maybeReplyFromCurrentChatScreen({ instruction })
+      ? await maybeReplyFromCurrentChatScreen({
+        instruction,
+        externalInputGuardEnabled
+      })
       : null;
     if (directReply) {
       appendMessage({
@@ -1071,7 +1100,8 @@ async function handleChat(request, response) {
       scene,
       perception: state.latestPerception,
       source: "user",
-      interactionMode: state.interactionMode || "act"
+      interactionMode: state.interactionMode || "act",
+      externalInputGuardEnabled: state.externalInputGuardEnabled !== false
     });
 
     return sendJson(response, 200, {

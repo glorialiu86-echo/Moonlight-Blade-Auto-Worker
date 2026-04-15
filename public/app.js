@@ -3,6 +3,7 @@ const state = {
   voiceSupported: false,
   runtimeStatus: "idle",
   interactionMode: "act",
+  externalInputGuardEnabled: true,
   voice: {
     recording: false,
     transcribing: false,
@@ -24,6 +25,7 @@ const elements = {
   runToggleButton: document.querySelector("#runToggleButton"),
   watchModeButton: document.querySelector("#watchModeButton"),
   actModeButton: document.querySelector("#actModeButton"),
+  externalInputGuardButton: document.querySelector("#externalInputGuardButton"),
   voiceStartButton: document.querySelector("#voiceStartButton"),
   voiceStopButton: document.querySelector("#voiceStopButton"),
   voiceStatus: document.querySelector("#voiceStatus"),
@@ -59,6 +61,10 @@ function isWatchMode() {
   return state.interactionMode === "watch";
 }
 
+function isExternalInputGuardEnabled() {
+  return Boolean(state.externalInputGuardEnabled);
+}
+
 function syncUiState() {
   const busy = state.submitting || state.voice.transcribing;
   const recording = state.voice.recording;
@@ -71,8 +77,11 @@ function syncUiState() {
   elements.runToggleButton.disabled = busy || recording || state.voice.transcribing;
   elements.watchModeButton.disabled = busy || recording || state.voice.transcribing;
   elements.actModeButton.disabled = busy || recording || state.voice.transcribing;
+  elements.externalInputGuardButton.disabled = busy || recording || state.voice.transcribing || isWatchMode();
   elements.watchModeButton.classList.toggle("is-active", isWatchMode());
   elements.actModeButton.classList.toggle("is-active", !isWatchMode());
+  elements.externalInputGuardButton.classList.toggle("is-active", isExternalInputGuardEnabled());
+  elements.externalInputGuardButton.textContent = `人一碰就停：${isExternalInputGuardEnabled() ? "开" : "关"}`;
   elements.runToggleButton.textContent = running ? "停止执行任务" : "开始执行任务";
 }
 
@@ -154,6 +163,7 @@ function renderMessages(messages) {
 function renderRunState(runtimeState) {
   state.runtimeStatus = runtimeState.status || "idle";
   state.interactionMode = runtimeState.interactionMode || "act";
+  state.externalInputGuardEnabled = runtimeState.externalInputGuardEnabled !== false;
   const running = isRunningStatus(state.runtimeStatus);
 
   elements.runStatusText.textContent = running
@@ -165,7 +175,7 @@ function renderRunState(runtimeState) {
   elements.runStatusHint.textContent = running
     ? (isWatchMode()
       ? "当前是观看模式：籽小刀只看屏幕并和籽岷互动，不执行动作。"
-      : "当前是行动模式：籽小刀会按规划链路执行动作。")
+      : `当前是行动模式：籽小刀会按规划链路执行动作。${isExternalInputGuardEnabled() ? " 检测到籽岷动鼠标或键盘时会自动停手。" : ""}`)
     : "当前整套本地程序处于停止或待机状态。";
 }
 
@@ -192,6 +202,14 @@ async function setInteractionMode(mode) {
   const payload = await request("/api/control", {
     method: "POST",
     body: JSON.stringify({ interactionMode: mode })
+  });
+  renderRuntimeState(payload.state);
+}
+
+async function setExternalInputGuardEnabled(enabled) {
+  const payload = await request("/api/control", {
+    method: "POST",
+    body: JSON.stringify({ externalInputGuardEnabled: enabled })
   });
   renderRuntimeState(payload.state);
 }
@@ -472,7 +490,8 @@ elements.composerForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify({
         instruction,
-        interactionMode: state.interactionMode
+        interactionMode: state.interactionMode,
+        externalInputGuardEnabled: state.externalInputGuardEnabled
       })
     });
 
@@ -520,6 +539,28 @@ elements.actModeButton.addEventListener("click", async () => {
     updateVoiceStatus("已切到行动模式，后续会执行动作。");
   } catch (error) {
     updateVoiceStatus(`切换行动模式失败：${error.message}`);
+  } finally {
+    state.submitting = false;
+    syncUiState();
+  }
+});
+
+elements.externalInputGuardButton.addEventListener("click", async () => {
+  if (state.submitting || state.voice.recording || state.voice.transcribing || isWatchMode()) {
+    return;
+  }
+
+  state.submitting = true;
+  syncUiState();
+
+  try {
+    const nextEnabled = !isExternalInputGuardEnabled();
+    await setExternalInputGuardEnabled(nextEnabled);
+    updateVoiceStatus(nextEnabled
+      ? "已开启人类介入保护，籽岷一动鼠标或键盘就会停掉行动。"
+      : "已关闭人类介入保护，行动模式下不会因外界输入自动停止。");
+  } catch (error) {
+    updateVoiceStatus(`切换人类介入保护失败：${error.message}`);
   } finally {
     state.submitting = false;
     syncUiState();

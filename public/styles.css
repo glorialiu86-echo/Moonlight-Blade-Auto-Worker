@@ -239,6 +239,20 @@ textarea:focus {
   color: var(--accent-strong);
 }
 
+.guard-button {
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid rgba(66, 46, 32, 0.14);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.guard-button.is-active {
+  background: linear-gradient(135deg, rgba(214, 138, 66, 0.2) 0%, rgba(151, 47, 36, 0.12) 100%);
+  color: var(--accent-strong);
+}
+
 .chat-panel {
   padding: 18px;
   display: grid;

@@ -12,6 +12,7 @@ import mss
 import numpy as np
 import pydirectinput
 import pyperclip
+import win32api
 import win32con
 import win32gui
 from PIL import Image, ImageDraw
@@ -28,6 +29,111 @@ DEFAULT_VERIFY_SETTLE_MS = 180
 OCR_ENGINE = None
 TMP_DIR = Path(__file__).resolve().parents[1] / "tmp"
 WORLD_HUD_KEYWORDS = ["感知", "潜行", "微风拂柳", "[Shift]", "[Space]", "叫卖"]
+EXTERNAL_INPUT_MOUSE_DELTA_PX = 4
+EXTERNAL_INPUT_CHECK_INTERVAL_MS = 40
+EXTERNAL_INPUT_VKS = [
+    win32con.VK_LBUTTON,
+    win32con.VK_RBUTTON,
+    win32con.VK_MBUTTON,
+    win32con.VK_XBUTTON1,
+    win32con.VK_XBUTTON2,
+    win32con.VK_SHIFT,
+    win32con.VK_CONTROL,
+    win32con.VK_MENU,
+    win32con.VK_SPACE,
+    win32con.VK_TAB,
+    win32con.VK_RETURN,
+    win32con.VK_ESCAPE,
+    win32con.VK_UP,
+    win32con.VK_DOWN,
+    win32con.VK_LEFT,
+    win32con.VK_RIGHT,
+    ord("W"),
+    ord("A"),
+    ord("S"),
+    ord("D"),
+    ord("Q"),
+    ord("E"),
+    ord("R"),
+    ord("F"),
+    ord("G"),
+    ord("X"),
+    ord("C"),
+    ord("V"),
+    ord("B"),
+]
+
+
+def get_cursor_position() -> tuple[int, int]:
+    point = win32api.GetCursorPos()
+    return int(point[0]), int(point[1])
+
+
+def get_pressed_keys() -> set[int]:
+    pressed: set[int] = set()
+    for vk in EXTERNAL_INPUT_VKS:
+        if win32api.GetAsyncKeyState(vk) & 0x8000:
+            pressed.add(vk)
+    return pressed
+
+
+class ExternalInputGuard:
+    def __init__(self) -> None:
+        self.enabled = False
+        self.cursor = (0, 0)
+        self.pressed_keys: set[int] = set()
+
+    def configure(self, enabled: bool) -> None:
+        self.enabled = enabled
+        self.refresh_baseline()
+
+    def refresh_baseline(self) -> None:
+        self.cursor = get_cursor_position()
+        self.pressed_keys = get_pressed_keys()
+
+    def check_or_raise(self, action_title: str = "") -> None:
+        if not self.enabled:
+            return
+
+        cursor = get_cursor_position()
+        pressed_keys = get_pressed_keys()
+        moved = abs(cursor[0] - self.cursor[0]) >= EXTERNAL_INPUT_MOUSE_DELTA_PX or abs(cursor[1] - self.cursor[1]) >= EXTERNAL_INPUT_MOUSE_DELTA_PX
+        new_keys = sorted(pressed_keys - self.pressed_keys)
+
+        if moved or new_keys:
+            raise ActionExecutionError(
+                "Detected external mouse or keyboard input. AI execution was stopped.",
+                error_code="EXTERNAL_INPUT_INTERRUPTED",
+                failed_step={
+                    "actionTitle": action_title,
+                    "cursorBefore": {"x": self.cursor[0], "y": self.cursor[1]},
+                    "cursorAfter": {"x": cursor[0], "y": cursor[1]},
+                    "newKeys": new_keys,
+                },
+            )
+
+        self.cursor = cursor
+        self.pressed_keys = pressed_keys
+
+    def guarded_sleep(self, duration_ms: int, action_title: str = "") -> None:
+        if duration_ms <= 0:
+            self.check_or_raise(action_title)
+            return
+
+        if not self.enabled:
+            time.sleep(duration_ms / 1000)
+            return
+
+        deadline = time.time() + duration_ms / 1000
+        while time.time() < deadline:
+            self.check_or_raise(action_title)
+            remaining_ms = max(0, int((deadline - time.time()) * 1000))
+            time.sleep(min(EXTERNAL_INPUT_CHECK_INTERVAL_MS, remaining_ms) / 1000)
+
+
+INPUT_GUARD = ExternalInputGuard()
+
+
 def set_process_dpi_aware() -> None:
     windll = getattr(ctypes, "windll", None)
     if windll is None:
@@ -638,6 +744,7 @@ def click_npc_candidate(hwnd: int, x_ratio: float, y_ratio: float, button: str =
     click_x = round(bounds["left"] + bounds["width"] * x_ratio)
     click_y = round(bounds["top"] + bounds["height"] * y_ratio)
     pydirectinput.click(x=click_x, y=click_y, button=button)
+    INPUT_GUARD.refresh_baseline()
     return {
         "button": button,
         "screenX": click_x,
@@ -655,6 +762,7 @@ def click_named_point(hwnd: int, point_name: str) -> dict[str, Any]:
 def click_screen_point(hwnd: int, screen_x: int, screen_y: int, button: str = "left") -> dict[str, Any]:
     focus_window(hwnd)
     pydirectinput.click(x=screen_x, y=screen_y, button=button)
+    INPUT_GUARD.refresh_baseline()
     return {
         "button": button,
         "screenX": screen_x,
@@ -680,20 +788,21 @@ def send_chat_message(
 ) -> dict[str, Any]:
     focus_window(hwnd)
     click_named_point(hwnd, "chat_input")
-    time.sleep(0.08)
+    INPUT_GUARD.guarded_sleep(80, "send_chat_message")
 
     pyperclip.copy(text)
     pydirectinput.keyDown("ctrl")
     pydirectinput.press("v")
     pydirectinput.keyUp("ctrl")
-    time.sleep(0.08)
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(80, "send_chat_message")
 
     click_named_point(hwnd, "chat_send")
-    time.sleep(0.18)
+    INPUT_GUARD.guarded_sleep(180, "send_chat_message")
 
     if close_after_send:
         exit_panel(hwnd)
-        time.sleep(max(0, close_settle_ms) / 1000)
+        INPUT_GUARD.guarded_sleep(max(0, close_settle_ms), "send_chat_message")
 
     return {
         "textLength": len(text),
@@ -1183,8 +1292,10 @@ def find_view_button_near_click(
 def pulse_forward(hwnd: int, move_pulse_ms: int) -> dict[str, Any]:
     bounds = focus_window(hwnd)
     pydirectinput.keyDown("w")
-    time.sleep(move_pulse_ms / 1000)
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(move_pulse_ms, "move_forward_pulse")
     pydirectinput.keyUp("w")
+    INPUT_GUARD.refresh_baseline()
     return {
         "screenX": round(bounds["left"] + bounds["width"] * 0.5),
         "screenY": round(bounds["top"] + bounds["height"] * 0.5),
@@ -1242,6 +1353,7 @@ def drag_camera(hwnd: int, start_ratio: tuple[float, float], end_ratio: tuple[fl
     pydirectinput.mouseDown(button="right")
     pydirectinput.moveTo(end_x, end_y, duration=duration_ms / 1000)
     pydirectinput.mouseUp(button="right")
+    INPUT_GUARD.refresh_baseline()
 
     return {
         "startX": start_x,
@@ -1384,6 +1496,7 @@ def verify_npc_selection(
     attempts: list[dict[str, Any]] = []
 
     while time.time() <= deadline:
+        INPUT_GUARD.check_or_raise("verify_npc_selection")
         target_info = detect_target_threshold(hwnd)
         actual_name = normalize_npc_name(target_info["text"])
         matched = names_match(expected_name, actual_name)
@@ -1401,7 +1514,7 @@ def verify_npc_selection(
                 "attempts": attempts,
                 "click": click_state,
             }
-        time.sleep(0.04)
+        INPUT_GUARD.guarded_sleep(40, "verify_npc_selection")
 
     last_actual = attempts[-1]["actualName"] if attempts else ""
     return {
@@ -1453,7 +1566,7 @@ def exit_panel(hwnd: int) -> None:
     click_named_point(hwnd, "close_panel")
     # Closing the chat page is not instantaneous. Wait for the UI transition to
     # settle before assuming the clean town page is ready for the next action.
-    time.sleep(0.25)
+    INPUT_GUARD.guarded_sleep(250, "exit_panel")
 
 
 def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval_ms: int) -> dict[str, Any]:
@@ -1481,6 +1594,7 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
     focus_window(hwnd)
 
     while (time.time() - start_time) * 1000 < timeout_ms:
+        INPUT_GUARD.check_or_raise("ensure_npc_action_menu")
         elapsed_ms = (time.time() - start_time) * 1000
         stage_state = detect_npc_interaction_stage(hwnd)
         last_stage = stage_state["stage"]
@@ -1512,7 +1626,7 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
             if moving_view:
                 click_screen_point(hwnd, moving_view["screenX"], moving_view["screenY"], "left")
                 viewAttempts.append(moving_view)
-                time.sleep(0.08)
+                INPUT_GUARD.guarded_sleep(80, "ensure_npc_action_menu")
                 quick_menu_state = detect_bottom_right_menu_stage(hwnd)
                 stage_history.append(quick_menu_state["stage"])
                 if quick_menu_state["stage"] in ["npc_action_menu", "small_talk_menu"]:
@@ -1532,7 +1646,7 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
                         "targetText": target_info["text"],
                     }
             click_attempts += 1
-            time.sleep(0.12)
+            INPUT_GUARD.guarded_sleep(120, "ensure_npc_action_menu")
             stage_state = detect_npc_interaction_stage(hwnd)
             last_stage = stage_state["stage"]
             stage_history.append(last_stage)
@@ -1582,14 +1696,14 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
             )
             last_npc_click = None
         click_attempts += 1
-        time.sleep(0.1)
+        INPUT_GUARD.guarded_sleep(100, "ensure_npc_action_menu")
 
         if click_attempts % len(click_points) == 0:
             move_attempts += 1
             pulse_forward(hwnd, move_pulse_ms)
-            time.sleep(0.08)
+            INPUT_GUARD.guarded_sleep(80, "ensure_npc_action_menu")
 
-        time.sleep(min(scan_interval_ms, 90) / 1000)
+        INPUT_GUARD.guarded_sleep(min(scan_interval_ms, 90), "ensure_npc_action_menu")
 
     raise RuntimeError(
         "Failed to open NPC action menu before timeout. "
@@ -1634,19 +1748,19 @@ def try_enter_chat(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval
 
     if menu_state["stage"] == "small_talk_menu":
         click_named_point(hwnd, "small_talk")
-        time.sleep(0.14)
+        INPUT_GUARD.guarded_sleep(140, "try_enter_chat")
     else:
         click_named_point(hwnd, "talk")
-        time.sleep(0.12)
+        INPUT_GUARD.guarded_sleep(120, "try_enter_chat")
         click_named_point(hwnd, "small_talk")
-        time.sleep(0.14)
+        INPUT_GUARD.guarded_sleep(140, "try_enter_chat")
 
     post_talk_state = detect_npc_interaction_stage(hwnd)
     stage_history.append(post_talk_state["stage"])
 
     if post_talk_state["stage"] == "small_talk_confirm":
         click_named_point(hwnd, "confirm_small_talk")
-        time.sleep(0.25)
+        INPUT_GUARD.guarded_sleep(250, "try_enter_chat")
         post_talk_state = detect_npc_interaction_stage(hwnd)
         stage_history.append(post_talk_state["stage"])
 
@@ -1749,7 +1863,7 @@ def run_town_npc_social_loop(hwnd: int, action: dict[str, Any]) -> dict[str, Any
     menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
     stage_history.extend(menu_state["stageHistory"])
     click_named_point(hwnd, "gift")
-    time.sleep(0.35)
+    INPUT_GUARD.guarded_sleep(350, "town_npc_social_loop")
     gift_state = detect_npc_interaction_stage(hwnd)
     stage_history.append(gift_state["stage"])
 
@@ -1788,30 +1902,30 @@ def run_town_npc_social_loop(hwnd: int, action: dict[str, Any]) -> dict[str, Any
     stage_history.extend(menu_state["stageHistory"])
     click_named_point(hwnd, "trade")
     trade_attempted = True
-    time.sleep(0.35)
+    INPUT_GUARD.guarded_sleep(350, "town_npc_social_loop")
     trade_state = detect_npc_interaction_stage(hwnd)
     stage_history.append(trade_state["stage"])
 
     if trade_state["stage"] == "trade_screen":
         click_named_point(hwnd, "trade_left_slot")
-        time.sleep(0.20)
+        INPUT_GUARD.guarded_sleep(200, "town_npc_social_loop")
         click_named_point(hwnd, "trade_left_up_shelf")
-        time.sleep(0.25)
+        INPUT_GUARD.guarded_sleep(250, "town_npc_social_loop")
         click_named_point(hwnd, "trade_right_slot")
-        time.sleep(0.20)
+        INPUT_GUARD.guarded_sleep(200, "town_npc_social_loop")
         click_named_point(hwnd, "trade_right_currency_slot")
-        time.sleep(0.15)
+        INPUT_GUARD.guarded_sleep(150, "town_npc_social_loop")
         click_named_point(hwnd, "trade_right_up_shelf")
-        time.sleep(0.25)
+        INPUT_GUARD.guarded_sleep(250, "town_npc_social_loop")
         click_named_point(hwnd, "trade_submit")
-        time.sleep(0.35)
+        INPUT_GUARD.guarded_sleep(350, "town_npc_social_loop")
         trade_completed = True
         exit_panel(hwnd)
 
     menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
     stage_history.extend(menu_state["stageHistory"])
     click_named_point(hwnd, "gift")
-    time.sleep(0.35)
+    INPUT_GUARD.guarded_sleep(350, "town_npc_social_loop")
 
     for _ in range(3):
         gift_state = detect_npc_interaction_stage(hwnd)
@@ -1829,11 +1943,11 @@ def run_town_npc_social_loop(hwnd: int, action: dict[str, Any]) -> dict[str, Any
             break
 
         click_named_point(hwnd, "gift_first_slot")
-        time.sleep(0.15)
+        INPUT_GUARD.guarded_sleep(150, "town_npc_social_loop")
         click_named_point(hwnd, "gift_submit")
         gift_attempts += 1
         gift_completed = True
-        time.sleep(0.45)
+        INPUT_GUARD.guarded_sleep(450, "town_npc_social_loop")
 
         updated_gift_state = detect_npc_interaction_stage(hwnd)
         stage_history.append(updated_gift_state["stage"])
@@ -1880,6 +1994,7 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_type = str(action.get("type") or "inspect")
     title = str(action.get("title") or action_type)
     post_delay_ms = int(action.get("postDelayMs") or DEFAULT_POST_DELAY_MS)
+    INPUT_GUARD.check_or_raise(title)
 
     if action_type == "focus_window":
         bounds = focus_window(hwnd)
@@ -1912,18 +2027,20 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         click_ratio = action.get("clickRatio")
         if isinstance(click_ratio, list) and len(click_ratio) == 2:
             click_npc_candidate(hwnd, float(click_ratio[0]), float(click_ratio[1]), "left")
-            time.sleep(0.08)
+            INPUT_GUARD.guarded_sleep(80, title)
 
         pyperclip.copy(text)
         pydirectinput.keyDown("ctrl")
         pydirectinput.press("v")
         pydirectinput.keyUp("ctrl")
+        INPUT_GUARD.refresh_baseline()
 
         if bool(action.get("pressEnter", False)):
-            time.sleep(0.08)
+            INPUT_GUARD.guarded_sleep(80, title)
             pydirectinput.press("enter")
+            INPUT_GUARD.refresh_baseline()
 
-        time.sleep(post_delay_ms / 1000)
+        INPUT_GUARD.guarded_sleep(post_delay_ms, title)
         return {
             "id": action_id,
             "title": title,
@@ -1943,7 +2060,7 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         close_after_send = bool(action.get("closeAfterSend", True))
         close_settle_ms = int(action.get("closeSettleMs") or 600)
         input_state = send_chat_message(hwnd, text, close_after_send, close_settle_ms)
-        time.sleep(post_delay_ms / 1000)
+        INPUT_GUARD.guarded_sleep(post_delay_ms, title)
         return {
             "id": action_id,
             "title": title,
@@ -1957,7 +2074,7 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "read_current_chat":
         input_state = read_current_chat(hwnd)
-        time.sleep(post_delay_ms / 1000)
+        INPUT_GUARD.guarded_sleep(post_delay_ms, title)
         return {
             "id": action_id,
             "title": title,
@@ -1972,7 +2089,8 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError("press_key action requires key")
         focus_window(hwnd)
         pydirectinput.press(key)
-        time.sleep(post_delay_ms / 1000)
+        INPUT_GUARD.refresh_baseline()
+        INPUT_GUARD.guarded_sleep(post_delay_ms, title)
         return {
             "id": action_id,
             "title": title,
@@ -1986,7 +2104,8 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         key = resolve_shortcut_key(shortcut)
         focus_window(hwnd)
         pydirectinput.press(key)
-        time.sleep(post_delay_ms / 1000)
+        INPUT_GUARD.refresh_baseline()
+        INPUT_GUARD.guarded_sleep(post_delay_ms, title)
         return {
             "id": action_id,
             "title": title,
@@ -2006,7 +2125,8 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         click_x = round(bounds["left"] + bounds["width"] * x_ratio)
         click_y = round(bounds["top"] + bounds["height"] * y_ratio)
         pydirectinput.click(x=click_x, y=click_y, button=button)
-        time.sleep(post_delay_ms / 1000)
+        INPUT_GUARD.refresh_baseline()
+        INPUT_GUARD.guarded_sleep(post_delay_ms, title)
         return {
             "id": action_id,
             "title": title,
@@ -2023,7 +2143,7 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "sleep":
         duration_ms = int(action.get("durationMs") or 1000)
-        time.sleep(duration_ms / 1000)
+        INPUT_GUARD.guarded_sleep(duration_ms, title)
         return {
             "id": action_id,
             "title": title,
@@ -2059,6 +2179,8 @@ def main() -> None:
             }
         )
         return
+
+    INPUT_GUARD.configure(interrupt_on_external_input)
 
     results: list[dict[str, Any]] = []
 

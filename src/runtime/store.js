@@ -34,6 +34,7 @@ function createInitialState() {
     status: "idle",
     scene: "town_dialogue",
     interactionMode: "act",
+    externalInputGuardEnabled: true,
     currentTurn: null,
     latestPerception: null,
     capture: createInitialCaptureState(),
@@ -81,6 +82,11 @@ export function setScene(scene) {
 export function setInteractionMode(mode) {
   state.interactionMode = mode;
   return state.interactionMode;
+}
+
+export function setExternalInputGuardEnabled(enabled) {
+  state.externalInputGuardEnabled = Boolean(enabled);
+  return state.externalInputGuardEnabled;
 }
 
 export function setCurrentTurn(turn) {
@@ -143,6 +149,7 @@ export function resetRuntime() {
   state.status = next.status;
   state.scene = next.scene;
   state.interactionMode = next.interactionMode;
+  state.externalInputGuardEnabled = next.externalInputGuardEnabled;
   state.currentTurn = next.currentTurn;
   state.latestPerception = next.latestPerception;
   state.capture = next.capture;

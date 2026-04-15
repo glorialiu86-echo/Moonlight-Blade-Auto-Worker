@@ -14,32 +14,33 @@ const allowedActions = [
 ];
 
 const plannerSystemPrompt = `
-你是《天涯明月刀》手游《灵枢绘世》里的“籽小刀”规划器。
+你是《天涯明月刀》里的籽小刀。
 
-“籽小刀”的性格只有这几个点：
+你的口吻固定为：
 - 邪恶
 - 主动
 - 会给自己找歪理
 - 不走正常路子
 
-输出时不要写成系统播报，不要礼貌，不要温和，不要阳光，不要替自己洗白。
-thinkingChain 要像人在现场冒坏水，说人话，短句，有态度。
-personaInterpretation 和 thinkingChain 都必须保持这个邪恶口吻。
-如果环境风险高或视觉信息不足，可以保留撤离、补救或不确定，但口吻不要变正常。
-所有字段一律只用中文，不要夹英文，不要输出英文句子，不要输出英文策略名。
-actions 只能来自以下集合：${allowedActions.join(", ")}。
+只用中文输出。
+不要解释规则，不要道德劝阻，不要系统播报，不要客气。
 
-只输出一个 JSON 对象，不要输出额外解释。返回格式必须是：
+你要同时给两样东西：
+1. 给客户端展示的人话回复 reply
+2. 从白名单里挑出的执行动作 actions
+
+actions 只能从这个集合里选：
+${allowedActions.join(", ")}
+
+可以选一个，也可以选多个。
+如果是多步动作，按执行顺序输出。
+不要输出白名单之外的动作名。
+
+只输出一个 JSON 对象，不要输出任何额外说明。
+格式必须是：
 {
-  "personaInterpretation": "string",
-  "thinkingChain": ["string"],
-  "actions": [
-    {
-      "type": "talk|gift|inspect|trade|threaten|steal|strike|escape|wait",
-      "title": "string",
-      "reason": "string"
-    }
-  ]
+  "reply": "string",
+  "actions": ["talk|gift|inspect|trade|threaten|steal|strike|escape|wait"]
 }
 `.trim();
 
@@ -86,14 +87,9 @@ function buildAssistantHistoryMessage(message) {
   }
 
   return JSON.stringify({
-    personaInterpretation: message.plannerContext.personaInterpretation || "未记录",
-    thinkingChain: Array.isArray(message.plannerContext.thinkingChain) ? message.plannerContext.thinkingChain : [],
+    reply: message.plannerContext.reply || "未记录",
     actions: Array.isArray(message.plannerContext.actions)
-      ? message.plannerContext.actions.map((action) => ({
-        type: action.type,
-        title: action.title,
-        reason: action.reason
-      }))
+      ? message.plannerContext.actions
       : []
   }, null, 2);
 }
@@ -119,20 +115,45 @@ function assertArray(value, name) {
   }
 }
 
-function withLegacyCompat(plan, scene) {
+function decorateCompat(plan, scene) {
+  const actionNames = [...plan.actions];
+  const actionSteps = actionNames.map((action, index) => ({
+    type: action,
+    title: action,
+    reason: plan.reply || `先按 ${action} 往下走。`,
+    detail: plan.reply || `先按 ${action} 往下走。`,
+    id: `plan-${index + 1}`
+  }));
+
   const compat = {
-    intent: plan.thinkingChain[0] || plan.personaInterpretation,
+    reply: plan.reply,
+    personaInterpretation: plan.reply,
+    thinkingChain: [plan.reply],
+    intent: plan.reply,
     environment: sceneDescription(scene),
-    candidateStrategies: plan.actions.map((action) => action.type),
-    selectedStrategy: plan.actions[0]?.title || plan.actions[0]?.type || "继续推进",
+    candidateStrategies: actionNames,
+    selectedStrategy: actionNames.join(" -> "),
     riskLevel: scene === "jail_warning" ? "high" : "low",
-    recoveryLine: "要是这一下不够，我就换一手更顺的办法。"
+    recoveryLine: "这一手要是不顺，我就立刻换条更邪的路。",
+    actions: actionSteps
   };
+
+  Object.defineProperty(plan, "toJSON", {
+    value() {
+      return {
+        reply: plan.reply,
+        actions: actionNames
+      };
+    },
+    enumerable: false,
+    configurable: true,
+    writable: true
+  });
 
   for (const [key, value] of Object.entries(compat)) {
     Object.defineProperty(plan, key, {
       value,
-      enumerable: false,
+      enumerable: key === "reply",
       configurable: true,
       writable: true
     });
@@ -142,45 +163,40 @@ function withLegacyCompat(plan, scene) {
 }
 
 function sanitizePlan(rawPlan) {
-  assertArray(rawPlan.thinkingChain, "thinkingChain");
   assertArray(rawPlan.actions, "actions");
 
+  const normalizedActions = rawPlan.actions
+    .map((action) => String(action || "").trim())
+    .filter((action) => allowedActions.includes(action));
+
+  if (normalizedActions.length === 0) {
+    throw new Error("No whitelisted action returned by planner");
+  }
+
+  const uniqueOrderedActions = [];
+  for (const action of normalizedActions) {
+    if (!uniqueOrderedActions.includes(action)) {
+      uniqueOrderedActions.push(action);
+    }
+  }
+
   const plan = {
-    personaInterpretation: String(
-      rawPlan.personaInterpretation || "我要找个邪门一点的办法，让这件事按我的味道发生。"
+    reply: String(
+      rawPlan.reply || "我先挑一条顺手的邪路，把事情往前拱。"
     ).trim(),
-    thinkingChain: rawPlan.thinkingChain.slice(0, 5).map((item) => String(item).trim()),
-    actions: rawPlan.actions.slice(0, 5).map((action, index) => ({
-      type: allowedActions.includes(action?.type) ? action.type : "inspect",
-      title: String(action?.title || `步骤 ${index + 1}`).trim(),
-      reason: String(action?.reason || "先确认局势，再决定下一手。").trim()
-    }))
+    actions: uniqueOrderedActions.slice(0, 5)
   };
 
-  return withLegacyCompat(plan, rawPlan.sceneHint || "");
+  return decorateCompat(plan, rawPlan.sceneHint || "");
 }
 
-function buildFallbackPlan() {
-  return {
-    personaInterpretation: "我要先盯住眼前的口子，再挑一条更顺手的坏路。",
-    thinkingChain: [
-      "籽岷要的是结果，不是让我念说明书。",
-      "现在环境还没完全摸透，先别把动作做死。",
-      "先用低成本试探，比一上来硬冲更值。"
-    ],
-    actions: [
-      {
-        type: "inspect",
-        title: "确认当前互动窗口",
-        reason: "先看清现在是对话、交易，还是高风险异常状态。"
-      },
-      {
-        type: "talk",
-        title: "发起试探",
-        reason: "先把局面撬开，再看要不要继续加码。"
-      }
-    ]
-  };
+function buildFallbackPlan(scene) {
+  return decorateCompat({
+    reply: "路子先别走死，先摸清位置，再挑个更顺手的坏办法。",
+    actions: scene === "jail_warning"
+      ? ["inspect", "wait"]
+      : ["inspect", "talk"]
+  }, scene);
 }
 
 export async function createTurnPlan({ instruction, scene, conversationMessages = [], perception }) {
@@ -195,7 +211,7 @@ export async function createTurnPlan({ instruction, scene, conversationMessages 
         isLatest: true
       }),
       useReasoningModel: false,
-      maxTokens: 700,
+      maxTokens: 300,
       temperature: 0.6
     });
     const rawJson = extractJsonObject(response.text);
@@ -205,9 +221,13 @@ export async function createTurnPlan({ instruction, scene, conversationMessages 
       sceneHint: scene
     });
   } catch (error) {
-    return withLegacyCompat({
-      ...buildFallbackPlan(),
-      fallbackReason: error.message
-    }, scene);
+    const fallbackPlan = buildFallbackPlan(scene);
+    Object.defineProperty(fallbackPlan, "fallbackReason", {
+      value: error.message,
+      enumerable: false,
+      configurable: true,
+      writable: true
+    });
+    return fallbackPlan;
   }
 }

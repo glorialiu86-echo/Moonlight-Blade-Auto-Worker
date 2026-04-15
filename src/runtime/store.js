@@ -33,6 +33,7 @@ function createInitialState() {
   return {
     status: "idle",
     scene: "town_dialogue",
+    interactionMode: "act",
     currentTurn: null,
     latestPerception: null,
     capture: createInitialCaptureState(),
@@ -75,6 +76,11 @@ export function setStatus(status) {
 export function setScene(scene) {
   state.scene = scene;
   return state.scene;
+}
+
+export function setInteractionMode(mode) {
+  state.interactionMode = mode;
+  return state.interactionMode;
 }
 
 export function setCurrentTurn(turn) {
@@ -136,6 +142,7 @@ export function resetRuntime() {
   const next = createInitialState();
   state.status = next.status;
   state.scene = next.scene;
+  state.interactionMode = next.interactionMode;
   state.currentTurn = next.currentTurn;
   state.latestPerception = next.latestPerception;
   state.capture = next.capture;

@@ -26,7 +26,13 @@
           <p id="runStatusText" class="run-value">待机</p>
           <p id="runStatusHint" class="run-hint">当前还没有开始执行任务。</p>
         </div>
-        <button id="runToggleButton" class="run-toggle" type="button">开始执行任务</button>
+        <div class="run-panel-actions">
+          <div class="mode-switch" role="group" aria-label="交互模式">
+            <button id="watchModeButton" class="mode-button" type="button">观看</button>
+            <button id="actModeButton" class="mode-button" type="button">行动</button>
+          </div>
+          <button id="runToggleButton" class="run-toggle" type="button">开始执行任务</button>
+        </div>
       </section>
 
       <main class="chat-panel">

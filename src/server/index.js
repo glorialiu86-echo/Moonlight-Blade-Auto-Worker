@@ -29,6 +29,7 @@ import {
   resetRuntime,
   setCaptureState,
   setCurrentTurn,
+  setInteractionMode,
   setLastError,
   setLatestPerception,
   setScene,
@@ -209,7 +210,8 @@ function buildAssistantMessage({ plan, execution, perceptionSummary }) {
     perceptionSummary,
     sceneLabel: plan.environment,
     riskLevel: plan.riskLevel,
-    actions: execution.steps
+    actions: execution.steps,
+    decide: plan.decide
   };
 }
 
@@ -233,7 +235,8 @@ function buildPlannerContext(plan) {
     riskLevel: plan.riskLevel,
     thinkingChain: plan.thinkingChain,
     recoveryLine: plan.recoveryLine,
-    actions: plan.actions
+    actions: plan.actions,
+    decide: plan.decide
   };
 }
 
@@ -515,6 +518,7 @@ async function runPlannedTurn({
   scene,
   perception,
   source,
+  interactionMode = "act",
   perceptionSummary = perceptionSummaryBySource(perception, source)
 }) {
   const runtimeBefore = getState();
@@ -528,7 +532,8 @@ async function runPlannedTurn({
   appendLog("info", source === "agent" ? `自主目标开始：${instruction}` : `收到对话输入：${instruction}`, {
     instruction,
     scene,
-    source
+    source,
+    interactionMode
   });
 
   updateAgent({
@@ -547,14 +552,46 @@ async function runPlannedTurn({
     conversationMessages: nextState.messages.slice(0, -1),
     perception
   });
+
   let execution;
-  try {
-    execution = await runWindowsExecution(plan);
-  } catch (error) {
-    const failedExecution = {
-      rawSteps: Array.isArray(error.workerPayload?.steps) ? error.workerPayload.steps : [],
-      durationMs: error.durationMs || null
+  if (interactionMode === "watch") {
+    execution = {
+      executor: "WatchMode",
+      steps: [],
+      rawSteps: [],
+      durationMs: 0,
+      outcome: "当前处于观看模式，本轮只观察屏幕并和籽岷互动，不执行动作。"
     };
+  } else {
+    try {
+      execution = await runWindowsExecution(plan);
+    } catch (error) {
+      const failedExecution = {
+        rawSteps: Array.isArray(error.workerPayload?.steps) ? error.workerPayload.steps : [],
+        durationMs: error.durationMs || null
+      };
+
+      await recordMotionReviewSamples({
+        instruction,
+        source,
+        scene,
+        plan,
+        perception,
+        execution: failedExecution,
+        error
+      });
+
+      await recordInteractionLearningSample({
+        instruction,
+        source,
+        scene,
+        plan,
+        perception,
+        execution: failedExecution,
+        error
+      });
+      throw error;
+    }
 
     await recordMotionReviewSamples({
       instruction,
@@ -562,8 +599,7 @@ async function runPlannedTurn({
       scene,
       plan,
       perception,
-      execution: failedExecution,
-      error
+      execution
     });
 
     await recordInteractionLearningSample({
@@ -572,51 +608,31 @@ async function runPlannedTurn({
       scene,
       plan,
       perception,
-      execution: failedExecution,
-      error
+      execution
     });
-    throw error;
-  }
 
-  await recordMotionReviewSamples({
-    instruction,
-    source,
-    scene,
-    plan,
-    perception,
-    execution
-  });
+    const replyResult = await maybeSendNpcReply({
+      instruction,
+      plan,
+      execution
+    });
 
-  await recordInteractionLearningSample({
-    instruction,
-    source,
-    scene,
-    plan,
-    perception,
-    execution
-  });
-
-  const replyResult = await maybeSendNpcReply({
-    instruction,
-    plan,
-    execution
-  });
-
-  if (replyResult) {
-    execution = {
-      ...execution,
-      steps: [
-        ...execution.steps,
-        ...replyResult.execution.steps
-      ],
-      rawSteps: [
-        ...execution.rawSteps,
-        ...replyResult.execution.rawSteps
-      ],
-      durationMs: execution.durationMs + replyResult.execution.durationMs,
-      outcome: `${execution.outcome} 已自动发送一句闲聊回复。`,
-      replyText: replyResult.replyText
-    };
+    if (replyResult) {
+      execution = {
+        ...execution,
+        steps: [
+          ...execution.steps,
+          ...replyResult.execution.steps
+        ],
+        rawSteps: [
+          ...execution.rawSteps,
+          ...replyResult.execution.rawSteps
+        ],
+        durationMs: execution.durationMs + replyResult.execution.durationMs,
+        outcome: `${execution.outcome} 已自动发送一句闲聊回复。`,
+        replyText: replyResult.replyText
+      };
+    }
   }
 
   const turn = {
@@ -625,6 +641,7 @@ async function runPlannedTurn({
     scene,
     createdAt: new Date().toISOString(),
     source,
+    interactionMode,
     plan,
     execution,
     perception: perception || null
@@ -637,12 +654,16 @@ async function runPlannedTurn({
     strategy: plan.selectedStrategy,
     source
   });
-  appendLog("info", "行为计划已生成", {
+  appendLog("info", "执行器返回结果", {
     actionCount: plan.actions.length,
     riskLevel: plan.riskLevel,
     source
   });
-  appendLog("info", "执行器返回结果", {
+  appendLog("info", interactionMode === "watch" ? "前台已切到观看模式" : "前台已切到行动模式", {
+    interactionMode,
+    source
+  });
+  appendLog("info", "\u6267\u884c\u5668\u8fd4\u56de\u7ed3\u679c", {
     executor: execution.executor,
     outcome: execution.outcome,
     source
@@ -675,7 +696,7 @@ async function runPlannedTurn({
   updateAgent({
     mode: "autonomous",
     phase: source === "user" ? "cooldown" : "autonomous",
-    currentObjective: plan.selectedStrategy,
+    currentObjective: interactionMode === "watch" ? "watch" : plan.selectedStrategy,
     queuedUserObjective: source === "user" ? null : agentBeforeUpdate.queuedUserObjective,
     lastTurnSource: source,
     lastTurnAt: new Date().toISOString(),
@@ -719,7 +740,8 @@ async function maybeRunAutonomousTurn() {
       instruction,
       scene,
       perception: runtimeState.latestPerception,
-      source: "agent"
+      source: "agent",
+      interactionMode: runtimeState.interactionMode || "act"
     });
   } catch (error) {
     setLastError(error.message);
@@ -749,11 +771,22 @@ async function waitForTurnSlot() {
 }
 
 async function handleControl(request, response) {
-  const { action, scene } = await readRequestBody(request);
+  const { action, scene, interactionMode } = await readRequestBody(request);
 
   if (scene) {
     setScene(scene);
     appendLog("info", `场景已切换为 ${scene}`, { scene });
+  }
+
+  if (interactionMode) {
+    if (!["watch", "act"].includes(interactionMode)) {
+      return sendJson(response, 400, { ok: false, error: "Unsupported interaction mode" });
+    }
+
+    setInteractionMode(interactionMode);
+    appendLog("info", interactionMode === "watch" ? "\u524d\u53f0\u5df2\u5207\u5230\u89c2\u770b\u6a21\u5f0f" : "\u524d\u53f0\u5df2\u5207\u5230\u884c\u52a8\u6a21\u5f0f", {
+      interactionMode
+    });
   }
 
   const transitions = {
@@ -777,19 +810,20 @@ async function handleControl(request, response) {
     }
   };
 
-  if (!transitions[action]) {
-    return sendJson(response, 400, { ok: false, error: "Unsupported control action" });
-  }
+  if (action) {
+    if (!transitions[action]) {
+      return sendJson(response, 400, { ok: false, error: "Unsupported control action" });
+    }
 
-  transitions[action]();
+    transitions[action]();
 
-  if (action !== "reset") {
-    appendLog("info", `控制动作已执行：${action}`);
+    if (action !== "reset") {
+      appendLog("info", `控制动作已执行：${action}`);
+    }
   }
 
   return sendJson(response, 200, statePayload());
 }
-
 async function handleCaptureControl(request, response) {
   const { action } = await readRequestBody(request);
 
@@ -856,7 +890,8 @@ async function handleTurn(request, response) {
       instruction,
       scene,
       perception: state.latestPerception,
-      source: "user"
+      source: "user",
+      interactionMode: state.interactionMode || "act"
     });
 
     return sendJson(response, 200, {
@@ -977,14 +1012,24 @@ async function handleVoiceTranscription(request, response) {
 async function handleChat(request, response) {
   const body = await readRequestBody(request);
   const instruction = String(body.instruction || "").trim();
+  const requestedInteractionMode = typeof body.interactionMode === "string"
+    ? body.interactionMode.trim()
+    : "";
 
   if (!instruction) {
     return sendJson(response, 400, { ok: false, error: "Instruction is required" });
   }
 
+  if (requestedInteractionMode && !["watch", "act"].includes(requestedInteractionMode)) {
+    return sendJson(response, 400, { ok: false, error: "Unsupported interaction mode" });
+  }
+
   setStatus("running");
   ensureAutoCaptureRunning();
   setLastError(null);
+  if (requestedInteractionMode) {
+    setInteractionMode(requestedInteractionMode);
+  }
   updateAgent({
     mode: "user_priority",
     phase: turnInFlight ? "queued" : "user_priority",
@@ -993,7 +1038,11 @@ async function handleChat(request, response) {
   });
 
   try {
-    const directReply = await maybeReplyFromCurrentChatScreen({ instruction });
+    const runtimeState = getState();
+    const interactionMode = runtimeState.interactionMode || "act";
+    const directReply = interactionMode === "act"
+      ? await maybeReplyFromCurrentChatScreen({ instruction })
+      : null;
     if (directReply) {
       appendMessage({
         role: "assistant",
@@ -1021,7 +1070,8 @@ async function handleChat(request, response) {
       instruction,
       scene,
       perception: state.latestPerception,
-      source: "user"
+      source: "user",
+      interactionMode: state.interactionMode || "act"
     });
 
     return sendJson(response, 200, {

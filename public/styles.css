@@ -169,6 +169,12 @@ textarea:focus {
   padding: 18px;
 }
 
+.run-panel-actions {
+  display: grid;
+  gap: 12px;
+  justify-items: end;
+}
+
 .run-status {
   display: grid;
   gap: 8px;
@@ -204,6 +210,33 @@ textarea:focus {
   color: #fff6f0;
   font-size: 1rem;
   font-weight: 700;
+}
+
+.mode-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(92px, 1fr));
+  gap: 6px;
+  padding: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.mode-button {
+  min-height: 42px;
+  padding: 0 18px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.mode-button:hover:not(:disabled) {
+  background: rgba(66, 46, 32, 0.1);
+}
+
+.mode-button.is-active {
+  background: linear-gradient(135deg, rgba(151, 47, 36, 0.12) 0%, rgba(214, 138, 66, 0.22) 100%);
+  color: var(--accent-strong);
 }
 
 .chat-panel {
@@ -539,8 +572,16 @@ textarea:focus {
     align-items: stretch;
   }
 
+  .run-panel-actions {
+    justify-items: stretch;
+  }
+
   .run-toggle {
     min-width: 0;
+    width: 100%;
+  }
+
+  .mode-switch {
     width: 100%;
   }
 

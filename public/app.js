@@ -2,6 +2,7 @@ const state = {
   submitting: false,
   voiceSupported: false,
   runtimeStatus: "idle",
+  interactionMode: "act",
   voice: {
     recording: false,
     transcribing: false,
@@ -21,6 +22,8 @@ const elements = {
   runStatusText: document.querySelector("#runStatusText"),
   runStatusHint: document.querySelector("#runStatusHint"),
   runToggleButton: document.querySelector("#runToggleButton"),
+  watchModeButton: document.querySelector("#watchModeButton"),
+  actModeButton: document.querySelector("#actModeButton"),
   voiceStartButton: document.querySelector("#voiceStartButton"),
   voiceStopButton: document.querySelector("#voiceStopButton"),
   voiceStatus: document.querySelector("#voiceStatus"),
@@ -52,6 +55,10 @@ function isRunningStatus(status) {
   return status === "running";
 }
 
+function isWatchMode() {
+  return state.interactionMode === "watch";
+}
+
 function syncUiState() {
   const busy = state.submitting || state.voice.transcribing;
   const recording = state.voice.recording;
@@ -62,6 +69,10 @@ function syncUiState() {
   elements.voiceStartButton.disabled = !state.voiceSupported || busy || recording || !running;
   elements.voiceStopButton.disabled = !recording;
   elements.runToggleButton.disabled = busy || recording || state.voice.transcribing;
+  elements.watchModeButton.disabled = busy || recording || state.voice.transcribing;
+  elements.actModeButton.disabled = busy || recording || state.voice.transcribing;
+  elements.watchModeButton.classList.toggle("is-active", isWatchMode());
+  elements.actModeButton.classList.toggle("is-active", !isWatchMode());
   elements.runToggleButton.textContent = running ? "停止执行任务" : "开始执行任务";
 }
 
@@ -70,11 +81,15 @@ function scrollMessagesToBottom() {
 }
 
 function renderEmptyState() {
+  const modeText = isWatchMode()
+    ? "切到观看模式后，籽小刀会只根据屏幕内容和籽岷互动。"
+    : "点“开始执行任务”后，籽岷就可以直接给籽小刀下任务了。";
+
   elements.messageList.innerHTML = `
     <article class="chat-message chat-message-assistant chat-empty">
       <div class="chat-role">籽小刀</div>
-      <p class="chat-text">点“开始执行任务”后，籽岷就可以直接给籽小刀下任务了。</p>
-      <p class="chat-meta">更完整的思考链和调试信息在 `/debug` 页面里看。</p>
+      <p class="chat-text">${modeText}</p>
+      <p class="chat-meta">更完整的思考链和调试信息可以在 \`/debug\` 页面里看。</p>
     </article>
   `;
 }
@@ -86,41 +101,26 @@ function renderUserMessage(message) {
 }
 
 function buildAssistantText(message) {
-  const lines = [];
   const thinkingChain = Array.isArray(message.thinkingChain)
     ? message.thinkingChain
-      .slice(0, 5)
       .map((item) => String(item || "").trim())
       .filter(Boolean)
+      .slice(0, 6)
     : [];
-  const actionPreview = Array.isArray(message.actions)
-    ? message.actions
-      .slice(0, 3)
-      .map((action) => String(action?.title || "").trim())
-      .filter(Boolean)
-      .join(" -> ")
-    : "";
 
-  if (message.personaInterpretation) {
-    lines.push(`我先听成这样：${message.personaInterpretation}`);
-  } else if (message.text) {
-    lines.push(message.text);
-  } else {
-    lines.push("这轮我先按眼前局势试一把。");
-  }
+  const lines = [];
 
   if (thinkingChain.length > 0) {
-    lines.push("我脑子里的路数是：");
-    thinkingChain.forEach((item) => {
-      lines.push(`- ${item}`);
-    });
+    lines.push(...thinkingChain);
   }
 
-  if (actionPreview) {
-    lines.push(`先按这条链路试：${actionPreview}`);
+  if (message.decide) {
+    lines.push(String(message.decide).trim());
+  } else if (message.text) {
+    lines.push(String(message.text).trim());
   }
 
-  return lines.join("\n");
+  return lines.filter(Boolean).join("\n");
 }
 
 function renderAssistantMessage(message) {
@@ -153,6 +153,7 @@ function renderMessages(messages) {
 
 function renderRunState(runtimeState) {
   state.runtimeStatus = runtimeState.status || "idle";
+  state.interactionMode = runtimeState.interactionMode || "act";
   const running = isRunningStatus(state.runtimeStatus);
 
   elements.runStatusText.textContent = running
@@ -160,8 +161,11 @@ function renderRunState(runtimeState) {
     : state.runtimeStatus === "paused"
       ? "已暂停"
       : "待机";
+
   elements.runStatusHint.textContent = running
-    ? "本地服务、自动截图和真实执行链路都已进入运行状态。"
+    ? (isWatchMode()
+      ? "当前是观看模式：籽小刀只看屏幕并和籽岷互动，不执行动作。"
+      : "当前是行动模式：籽小刀会按规划链路执行动作。")
     : "当前整套本地程序处于停止或待机状态。";
 }
 
@@ -184,6 +188,14 @@ async function sendControlAction(action) {
   renderRuntimeState(payload.state);
 }
 
+async function setInteractionMode(mode) {
+  const payload = await request("/api/control", {
+    method: "POST",
+    body: JSON.stringify({ interactionMode: mode })
+  });
+  renderRuntimeState(payload.state);
+}
+
 function appendTranscriptToComposer(text) {
   const transcript = String(text || "").trim();
 
@@ -193,7 +205,7 @@ function appendTranscriptToComposer(text) {
 
   const current = elements.instructionInput.value.trim();
   elements.instructionInput.value = current
-    ? `${current}${current.endsWith("。") ? "" : "，"}${transcript}`
+    ? `${current}${/[。！？]$/.test(current) ? "" : "，"}${transcript}`
     : transcript;
 }
 
@@ -453,12 +465,15 @@ elements.composerForm.addEventListener("submit", async (event) => {
 
   state.submitting = true;
   syncUiState();
-  updateVoiceStatus("正在执行这一轮任务。");
+  updateVoiceStatus(isWatchMode() ? "正在按观看模式生成回复。" : "正在按行动模式执行这一轮任务。");
 
   try {
     const payload = await request("/api/chat", {
       method: "POST",
-      body: JSON.stringify({ instruction })
+      body: JSON.stringify({
+        instruction,
+        interactionMode: state.interactionMode
+      })
     });
 
     elements.instructionInput.value = "";
@@ -467,6 +482,44 @@ elements.composerForm.addEventListener("submit", async (event) => {
   } catch (error) {
     updateVoiceStatus(`本轮处理失败：${error.message}`);
     await refresh().catch(() => {});
+  } finally {
+    state.submitting = false;
+    syncUiState();
+  }
+});
+
+elements.watchModeButton.addEventListener("click", async () => {
+  if (state.submitting || state.voice.recording || state.voice.transcribing || isWatchMode()) {
+    return;
+  }
+
+  state.submitting = true;
+  syncUiState();
+
+  try {
+    await setInteractionMode("watch");
+    updateVoiceStatus("已切到观看模式，当前只观察和回复。");
+  } catch (error) {
+    updateVoiceStatus(`切换观看模式失败：${error.message}`);
+  } finally {
+    state.submitting = false;
+    syncUiState();
+  }
+});
+
+elements.actModeButton.addEventListener("click", async () => {
+  if (state.submitting || state.voice.recording || state.voice.transcribing || !isWatchMode()) {
+    return;
+  }
+
+  state.submitting = true;
+  syncUiState();
+
+  try {
+    await setInteractionMode("act");
+    updateVoiceStatus("已切到行动模式，后续会执行动作。");
+  } catch (error) {
+    updateVoiceStatus(`切换行动模式失败：${error.message}`);
   } finally {
     state.submitting = false;
     syncUiState();

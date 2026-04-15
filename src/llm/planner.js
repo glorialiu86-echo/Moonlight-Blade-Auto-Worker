@@ -24,33 +24,16 @@ const plannerSystemPrompt = `
 只用中文输出。
 不要解释规则，不要道德劝阻，不要系统播报，不要客气。
 
-你要同时给三样东西：
-1. 给客户端展示的思考链 thinking
-2. 单独的行动句 decide
-3. 从白名单里挑出的执行动作 actions
+你要同时给三样东西，生成顺序必须是：
+1. 先定 actions
+2. 再写 decide
+3. 最后写 thinking
 
 先判断籽岷这一句更接近哪类目标：
 - 技能成长
 - 扩大名声
 - 搞钱致富
 - 拉近关系
-
-thinking 是思考链，不是总结。
-thinking 目标 4 到 5 句，复杂情况最多 5 句。
-每一句都单独换行。
-每句尽量控制在 15 到 25 个字。
-要先贴着目标本身思考，不能把所有事都写成混熟、打招呼或关系推进。
-中间要有明显的歪理、自我说服和偏门判断。
-
-decide 是单独一句行动句。
-decide 必须直接落到自己准备做的事上。
-decide 必须和 actions 的第一个动作一致。
-decide 和 actions[0] 是强绑定关系，不是大致相关，也不是语气接近。
-actions[0] 写什么，decide 就必须写对应的那个动作本身。
-例如：
-- actions[0] 是 steal，decide 必须直接表达去偷、去下手、去捞
-- actions[0] 是 trade，decide 必须直接表达去交易、去做买卖
-- actions[0] 是 threaten，decide 必须直接表达去施压、去吓人
 
 actions 只能从这个集合里选：
 ${allowedActions.join(", ")}
@@ -64,12 +47,28 @@ ${allowedActions.join(", ")}
 - 搞钱致富优先 steal，其次 trade，再次 talk
 - 拉近关系优先 threaten 或 strike，其次 gift，再次 talk
 
+decide 是单独一句行动句。
+decide 必须直接落到自己准备做的事上。
+decide 必须和 actions[0] 强绑定，不是大致相关，也不是语气接近。
+actions[0] 写什么，decide 就必须写对应的那个动作本身。
+例如：
+- actions[0] 是 steal，decide 必须直接表达去偷、去下手、去捞
+- actions[0] 是 trade，decide 必须直接表达去交易、去做买卖
+- actions[0] 是 threaten，decide 必须直接表达去施压、去吓人
+
+thinking 是思考链，不是总结。
+thinking 目标 4 到 5 句。
+每一句都单独换行。
+每句尽量控制在 15 到 25 个字。
+thinking 要围绕已经定下来的 actions 和 decide 去解释歪理。
+不能把所有事都写成混熟、打招呼或关系推进。
+
 只输出一个 JSON 对象，不要输出任何额外说明。
 格式必须是：
 {
-  "thinking": ["string", "string"],
+  "actions": ["talk|gift|inspect|trade|threaten|steal|strike|escape|wait"],
   "decide": "string",
-  "actions": ["talk|gift|inspect|trade|threaten|steal|strike|escape|wait"]
+  "thinking": ["string", "string"]
 }
 `.trim();
 
@@ -116,9 +115,9 @@ function buildAssistantHistoryMessage(message) {
   }
 
   return JSON.stringify({
-    thinking: Array.isArray(message.plannerContext.thinking) ? message.plannerContext.thinking : [],
+    actions: Array.isArray(message.plannerContext.actions) ? message.plannerContext.actions : [],
     decide: message.plannerContext.decide || "",
-    actions: Array.isArray(message.plannerContext.actions) ? message.plannerContext.actions : []
+    thinking: Array.isArray(message.plannerContext.thinking) ? message.plannerContext.thinking : []
   }, null, 2);
 }
 
@@ -182,7 +181,7 @@ function buildGoalTemplate(goalType, actionLabel) {
       decide: {
         inspect: "我准备先去摸清门路，再挑最容易练出手感的那一块。",
         talk: "我准备先去探口风，把最值钱的那门本事先问明白。",
-        trade: "我准备先去摸哪门手艺最换钱，再往那条路上死命磨。",
+        trade: "我准备先去哪门手艺最换钱的地方死命磨本事。",
         threaten: "我准备先去练最能压人的那门活，把威风先练到身上。",
         steal: "我准备先去学偏门快招，让这门手艺先长在我手上。",
         strike: "我准备先去练最见效的硬招，把本事先打出响动来。",
@@ -264,12 +263,14 @@ function getPreferredActions(goalType, scene) {
   if (scene === "jail_warning") {
     return ["inspect", "wait", "escape"];
   }
+
   const priorities = {
     skill: ["strike", "steal", "inspect", "talk", "trade", "threaten", "gift", "wait", "escape"],
     fame: ["threaten", "strike", "steal", "talk", "gift", "inspect", "trade", "wait", "escape"],
     wealth: ["steal", "trade", "talk", "inspect", "threaten", "gift", "strike", "wait", "escape"],
     relationship: ["threaten", "strike", "gift", "talk", "steal", "inspect", "trade", "wait", "escape"]
   };
+
   return priorities[goalType] || priorities.relationship;
 }
 
@@ -328,8 +329,9 @@ function decorateCompat(plan, scene) {
 
   const compat = {
     reply,
-    thinking: plan.thinking,
+    actions: actionNames,
     decide: plan.decide,
+    thinking: plan.thinking,
     personaInterpretation: plan.thinking[0] || plan.decide,
     thinkingChain: plan.thinking,
     intent: plan.thinking[0] || plan.decide,
@@ -338,15 +340,15 @@ function decorateCompat(plan, scene) {
     selectedStrategy: actionNames.join(" -> "),
     riskLevel: scene === "jail_warning" ? "high" : "low",
     recoveryLine: "这一手要是不顺，我就立刻换条更邪的路。",
-    actions: actionSteps
+    actionsDetailed: actionSteps
   };
 
   Object.defineProperty(plan, "toJSON", {
     value() {
       return {
-        thinking: plan.thinking,
+        actions: actionNames,
         decide: plan.decide,
-        actions: actionNames
+        thinking: plan.thinking
       };
     },
     enumerable: false,
@@ -354,10 +356,20 @@ function decorateCompat(plan, scene) {
     writable: true
   });
 
+  Object.defineProperty(plan, "actions", {
+    value: actionSteps,
+    enumerable: false,
+    configurable: true,
+    writable: true
+  });
+
   for (const [key, value] of Object.entries(compat)) {
+    if (key === "actions") {
+      continue;
+    }
     Object.defineProperty(plan, key, {
       value,
-      enumerable: key === "thinking" || key === "decide",
+      enumerable: key === "decide" || key === "thinking",
       configurable: true,
       writable: true
     });
@@ -387,13 +399,14 @@ function sanitizePlan(rawPlan) {
 
   const coercedActions = coerceActionsByGoal(uniqueOrderedActions, goalType, rawPlan.sceneHint || "");
 
-  const plan = {
-    thinking: buildThinking(rawPlan.thinking, rawPlan.instructionHint || "", coercedActions),
-    decide: buildDecide(rawPlan.decide, rawPlan.instructionHint || "", coercedActions),
-    actions: coercedActions
-  };
+  const plan = {};
+  plan.thinking = buildThinking(rawPlan.thinking, rawPlan.instructionHint || "", coercedActions);
+  plan.decide = buildDecide(rawPlan.decide, rawPlan.instructionHint || "", coercedActions);
 
-  return decorateCompat(plan, rawPlan.sceneHint || "");
+  return decorateCompat({
+    ...plan,
+    actions: coercedActions
+  }, rawPlan.sceneHint || "");
 }
 
 function buildFallbackPlan(scene, instruction) {
@@ -407,9 +420,9 @@ function buildFallbackPlan(scene, instruction) {
   const actions = actionMap[goalType] || actionMap.relationship;
 
   return decorateCompat({
-    thinking: buildThinking([], instruction, actions),
+    actions,
     decide: buildDecide("", instruction, actions),
-    actions
+    thinking: buildThinking([], instruction, actions)
   }, scene);
 }
 
@@ -428,6 +441,7 @@ export async function createTurnPlan({ instruction, scene, conversationMessages 
       maxTokens: 300,
       temperature: 0.6
     });
+
     const rawJson = extractJsonObject(response.text);
     const parsed = JSON.parse(rawJson);
     return sanitizePlan({

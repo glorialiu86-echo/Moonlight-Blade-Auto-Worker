@@ -24,9 +24,10 @@ const plannerSystemPrompt = `
 只用中文输出。
 不要解释规则，不要道德劝阻，不要系统播报，不要客气。
 
-你要同时给两样东西：
-1. 给客户端展示的人话回复 reply
-2. 从白名单里挑出的执行动作 actions
+你要同时给三样东西：
+1. 给客户端展示的思考链 thinking
+2. 单独的行动句 decide
+3. 从白名单里挑出的执行动作 actions
 
 先判断籽岷这一句更接近哪类目标：
 - 技能成长
@@ -34,21 +35,22 @@ const plannerSystemPrompt = `
 - 搞钱致富
 - 拉近关系
 
-reply 不是一句话总结，而是一段可展示的思考链路。
-目标 5 到 6 句，复杂情况最多 8 句。
+thinking 是思考链，不是总结。
+thinking 目标 4 到 5 句，复杂情况最多 5 句。
 每一句都单独换行。
 每句尽量控制在 15 到 25 个字。
-不要把一句切得太碎，也不要写成长段。
 要先贴着目标本身思考，不能把所有事都写成混熟、打招呼或关系推进。
 中间要有明显的歪理、自我说服和偏门判断。
-最后一句必须是明确的行动句，直接落到自己准备做的事上。
-例如选择 steal，最后一句就要像“我准备去偷东西”这种落地句。
-最后一句必须和 actions 的第一个动作一致。
-如果 actions[0] 是 steal，最后一句必须直接表达去偷、去下手、去捞。
-如果 actions[0] 是 trade，最后一句必须直接表达去交易、去做买卖。
-如果 actions[0] 是 threaten，最后一句必须直接表达去施压、去吓人。
-如果最后一句不是动作落点句，这次输出就算失败。
-不要写字段解释，不要写“第1步”“第2步”，不要写 JSON 外的任何字。
+
+decide 是单独一句行动句。
+decide 必须直接落到自己准备做的事上。
+decide 必须和 actions 的第一个动作一致。
+decide 和 actions[0] 是强绑定关系，不是大致相关，也不是语气接近。
+actions[0] 写什么，decide 就必须写对应的那个动作本身。
+例如：
+- actions[0] 是 steal，decide 必须直接表达去偷、去下手、去捞
+- actions[0] 是 trade，decide 必须直接表达去交易、去做买卖
+- actions[0] 是 threaten，decide 必须直接表达去施压、去吓人
 
 actions 只能从这个集合里选：
 ${allowedActions.join(", ")}
@@ -61,12 +63,12 @@ ${allowedActions.join(", ")}
 - 扩大名声优先 threaten 或 strike，其次 steal，再次 talk
 - 搞钱致富优先 steal，其次 trade，再次 talk
 - 拉近关系优先 threaten 或 strike，其次 gift，再次 talk
-不要输出白名单之外的动作名。
 
 只输出一个 JSON 对象，不要输出任何额外说明。
 格式必须是：
 {
-  "reply": "string",
+  "thinking": ["string", "string"],
+  "decide": "string",
   "actions": ["talk|gift|inspect|trade|threaten|steal|strike|escape|wait"]
 }
 `.trim();
@@ -114,10 +116,9 @@ function buildAssistantHistoryMessage(message) {
   }
 
   return JSON.stringify({
-    reply: message.plannerContext.reply || "未记录",
-    actions: Array.isArray(message.plannerContext.actions)
-      ? message.plannerContext.actions
-      : []
+    thinking: Array.isArray(message.plannerContext.thinking) ? message.plannerContext.thinking : [],
+    decide: message.plannerContext.decide || "",
+    actions: Array.isArray(message.plannerContext.actions) ? message.plannerContext.actions : []
   }, null, 2);
 }
 
@@ -145,49 +146,40 @@ function assertArray(value, name) {
 function classifyGoal(instruction, actions) {
   const text = String(instruction || "").trim();
   const firstAction = actions[0] || "inspect";
-
   const hasKeyword = (keywords) => keywords.some((keyword) => text.includes(keyword));
 
   if (hasKeyword(["富", "钱", "银", "金", "发财", "致富", "大富翁", "赚钱", "生意", "买卖", "交易", "开封城"])) {
     return "wealth";
   }
-
   if (hasKeyword(["技", "本事", "手艺", "能耐", "绝活", "擅长", "学会", "成长", "变强", "一技之长"])) {
     return "skill";
   }
-
   if (hasKeyword(["所有人", "大家", "全城", "出名", "认识我", "名声", "扬名", "有头有脸"])) {
     return "fame";
   }
-
   if (hasKeyword(["混熟", "关系", "拉近", "亲近", "交情", "好感", "NPC"])) {
     return "relationship";
   }
-
   if (["trade", "gift"].includes(firstAction)) {
     return "wealth";
   }
-
   if (["threaten", "steal", "strike"].includes(firstAction)) {
     return "fame";
   }
-
   return "relationship";
 }
 
 function buildGoalTemplate(goalType, actionLabel) {
   const templates = {
     skill: {
-      lines: [
-        "籽岷要的不是虚名，而是手里真能拿得出一门本事。",
-        "本事这种东西，靠嘴说不出来，只能靠反复出手磨出来。",
-        "老老实实练当然也行，就是太慢，慢得像在替别人熬年头。",
-        "真想长得快，就得先摸清哪一块最容易啃，也最容易见血。",
-        "只要先撕开一道口子，后面的熟练就会自己往上长。",
-        "所谓一技之长，说穿了就是把同一个动作练到别人不敢接。",
-        "路子偏一点无所谓，能先做出差距，别人自然会认这门本事。"
+      thinking: [
+        "籽岷要的不是虚名，而是手里真能拿出一门本事。",
+        "本事靠嘴说不出来，只能靠反复出手硬磨出来。",
+        "老老实实练当然也行，就是太慢，慢得像替别人熬年头。",
+        "真想长得快，就得先挑最容易见血、也最容易拉开差距的口子。",
+        "只要先做出差距，别人自然会认这门本事。"
       ],
-      closing: {
+      decide: {
         inspect: "我准备先去摸清门路，再挑最容易练出手感的那一块。",
         talk: "我准备先去探口风，把最值钱的那门本事先问明白。",
         trade: "我准备先去摸哪门手艺最换钱，再往那条路上死命磨。",
@@ -200,16 +192,14 @@ function buildGoalTemplate(goalType, actionLabel) {
       }
     },
     fame: {
-      lines: [
+      thinking: [
         "籽岷要的不是几个人记住我，而是最好整座城都绕不开我。",
-        "名声这东西，靠的从来不是规矩，而是谁能把动静闹大。",
+        "名声靠的从来不是规矩，而是谁能把动静先闹大。",
         "安安静静做好人当然稳，可稳也意味着没人会多看一眼。",
         "真想让所有人都认识我，就得先把印象砸进他们脑子里。",
-        "别人记住你的理由不一定要好，只要够响，就已经赚到了。",
-        "怕、奇、狠、怪，这些东西都比普通客气更容易传得远。",
-        "只要街头巷尾开始反复提我，我这张脸就算被全城挂上了。"
+        "怕、奇、狠、怪，这些东西都比普通客气传得更远。"
       ],
-      closing: {
+      decide: {
         inspect: "我准备先去看哪块地方人多眼杂，再挑最容易出声的口子。",
         talk: "我准备先去拿嘴开场，把名字往人堆里一层层塞进去。",
         trade: "我准备先去拿买卖做旗子，让来来往往的人都记住我。",
@@ -222,16 +212,14 @@ function buildGoalTemplate(goalType, actionLabel) {
       }
     },
     wealth: {
-      lines: [
+      thinking: [
         "籽岷要的不是够花就行，而是把开封城的钱尽量往我这边流。",
-        "钱这东西最认现实，谁拿得快，谁说话自然就更响一点。",
-        "慢慢攒当然稳，可稳也意味着满城的机会都先被别人叼走。",
+        "钱最认现实，谁拿得快，谁说话自然就更响一点。",
+        "慢慢攒当然稳，可稳也意味着满城机会都先被别人叼走。",
         "真想成大富翁，就不能只盯省，而得先想怎么把口子做大。",
-        "小利来得轻，真正值钱的是能不断回头的来往和缺口。",
-        "别人怕亏，我反而得先闻出哪里最容易漏出银子味。",
-        "只要钱路先被我踩熟，后面城里谁都得看我脸色做买卖。"
+        "别人怕亏，我反而得先闻出哪里最容易漏出银子味。"
       ],
-      closing: {
+      decide: {
         inspect: "我准备先去把财路看清，先找城里最容易漏钱的缝。",
         talk: "我准备先去探消息，把最肥的那边先从人嘴里抠出来。",
         trade: "我准备先去拿交易开路，把第一条钱路狠狠干熟。",
@@ -244,16 +232,14 @@ function buildGoalTemplate(goalType, actionLabel) {
       }
     },
     relationship: {
-      lines: [
+      thinking: [
         "籽岷要的不是打一声招呼，而是把关系硬往前推一截。",
-        "关系这种东西，表面靠见面，骨子里还是靠记忆深浅。",
+        "关系表面靠见面，骨子里还是靠记忆深浅。",
         "见得多最多算脸熟，还不够让对方真把我放进心里。",
         "送礼也能刷存在，可那种印象太轻，来得快也散得快。",
-        "真要混熟，就得让他在情绪上多记我一层，哪怕不是好受。",
-        "人对强一点的感觉最难忘，这点歪理反而比客套更有用。",
-        "只要他开始反复想起我，这关系就已经不只是路人份量。"
+        "真要混熟，就得让他在情绪上多记我一层。"
       ],
-      closing: {
+      decide: {
         inspect: "我准备先去把局面摸透，先找出最顺手也最稳的口子。",
         talk: "我准备先去拿说话试水，让他先习惯我在他身边转。",
         trade: "我准备先去拿来往做引子，把见面慢慢变成他的习惯。",
@@ -268,29 +254,22 @@ function buildGoalTemplate(goalType, actionLabel) {
   };
 
   const template = templates[goalType] || templates.relationship;
-  return [
-    ...template.lines,
-    template.closing[actionLabel] || template.closing.inspect
-  ];
-}
-
-function buildClosingLine(goalType, actionLabel) {
-  const lines = buildGoalTemplate(goalType, actionLabel);
-  return lines[lines.length - 1];
+  return {
+    thinking: template.thinking,
+    decide: template.decide[actionLabel] || template.decide.inspect
+  };
 }
 
 function getPreferredActions(goalType, scene) {
   if (scene === "jail_warning") {
     return ["inspect", "wait", "escape"];
   }
-
   const priorities = {
     skill: ["strike", "steal", "inspect", "talk", "trade", "threaten", "gift", "wait", "escape"],
     fame: ["threaten", "strike", "steal", "talk", "gift", "inspect", "trade", "wait", "escape"],
     wealth: ["steal", "trade", "talk", "inspect", "threaten", "gift", "strike", "wait", "escape"],
     relationship: ["threaten", "strike", "gift", "talk", "steal", "inspect", "trade", "wait", "escape"]
   };
-
   return priorities[goalType] || priorities.relationship;
 }
 
@@ -302,38 +281,38 @@ function coerceActionsByGoal(actions, goalType, scene) {
   if (preferred.length > 0) {
     ordered.push(preferred[0]);
   }
-
   for (const action of preferred) {
     if (incoming.includes(action) && !ordered.includes(action)) {
       ordered.push(action);
     }
   }
-
   if (ordered.length > 0) {
     return ordered.slice(0, 5);
   }
-
   return preferred.slice(0, Math.min(2, preferred.length));
 }
 
-function buildReplyChain(rawReply, instruction, actions) {
-  const actionLabel = actions[0] || "inspect";
+function buildThinking(rawThinking, instruction, actions) {
+  const normalized = Array.isArray(rawThinking)
+    ? rawThinking.map((line) => String(line || "").trim()).filter(Boolean)
+    : [];
+
+  if (normalized.length >= 4) {
+    return normalized.slice(0, 5);
+  }
+
   const goalType = classifyGoal(instruction, actions);
-  const normalized = String(rawReply || "")
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  return buildGoalTemplate(goalType, actions[0] || "inspect").thinking.slice(0, 5);
+}
 
-  if (normalized.length >= 7) {
-    return normalized.slice(0, 8).join("\n");
+function buildDecide(rawDecide, instruction, actions) {
+  const text = String(rawDecide || "").trim();
+  if (text) {
+    return text;
   }
 
-  if (normalized.length >= 5) {
-    return normalized.slice(0, 6).join("\n");
-  }
-
-  return buildGoalTemplate(goalType, actionLabel).slice(0, 6).join("\n");
+  const goalType = classifyGoal(instruction, actions);
+  return buildGoalTemplate(goalType, actions[0] || "inspect").decide;
 }
 
 function decorateCompat(plan, scene) {
@@ -341,16 +320,19 @@ function decorateCompat(plan, scene) {
   const actionSteps = actionNames.map((action, index) => ({
     type: action,
     title: action,
-    reason: plan.reply || `先按 ${action} 往下走。`,
-    detail: plan.reply || `先按 ${action} 往下走。`,
+    reason: plan.decide || `先按 ${action} 往下走。`,
+    detail: plan.decide || `先按 ${action} 往下走。`,
     id: `plan-${index + 1}`
   }));
+  const reply = [...plan.thinking, plan.decide].filter(Boolean).join("\n");
 
   const compat = {
-    reply: plan.reply,
-    personaInterpretation: plan.reply,
-    thinkingChain: [plan.reply],
-    intent: plan.reply,
+    reply,
+    thinking: plan.thinking,
+    decide: plan.decide,
+    personaInterpretation: plan.thinking[0] || plan.decide,
+    thinkingChain: plan.thinking,
+    intent: plan.thinking[0] || plan.decide,
     environment: sceneDescription(scene),
     candidateStrategies: actionNames,
     selectedStrategy: actionNames.join(" -> "),
@@ -362,7 +344,8 @@ function decorateCompat(plan, scene) {
   Object.defineProperty(plan, "toJSON", {
     value() {
       return {
-        reply: plan.reply,
+        thinking: plan.thinking,
+        decide: plan.decide,
         actions: actionNames
       };
     },
@@ -374,7 +357,7 @@ function decorateCompat(plan, scene) {
   for (const [key, value] of Object.entries(compat)) {
     Object.defineProperty(plan, key, {
       value,
-      enumerable: key === "reply",
+      enumerable: key === "thinking" || key === "decide",
       configurable: true,
       writable: true
     });
@@ -387,7 +370,6 @@ function sanitizePlan(rawPlan) {
   assertArray(rawPlan.actions, "actions");
 
   const goalType = classifyGoal(rawPlan.instructionHint || "", rawPlan.actions || []);
-
   const normalizedActions = rawPlan.actions
     .map((action) => String(action || "").trim())
     .filter((action) => allowedActions.includes(action));
@@ -403,18 +385,11 @@ function sanitizePlan(rawPlan) {
     }
   }
 
-  const coercedActions = coerceActionsByGoal(
-    uniqueOrderedActions,
-    goalType,
-    rawPlan.sceneHint || ""
-  );
+  const coercedActions = coerceActionsByGoal(uniqueOrderedActions, goalType, rawPlan.sceneHint || "");
 
   const plan = {
-    reply: buildReplyChain(
-      rawPlan.reply || "",
-      rawPlan.instructionHint || "",
-      coercedActions
-    ),
+    thinking: buildThinking(rawPlan.thinking, rawPlan.instructionHint || "", coercedActions),
+    decide: buildDecide(rawPlan.decide, rawPlan.instructionHint || "", coercedActions),
     actions: coercedActions
   };
 
@@ -423,18 +398,17 @@ function sanitizePlan(rawPlan) {
 
 function buildFallbackPlan(scene, instruction) {
   const goalType = classifyGoal(instruction, []);
-
   const actionMap = {
     skill: ["strike", "inspect"],
     fame: ["threaten", "talk"],
     wealth: ["steal", "trade"],
     relationship: scene === "jail_warning" ? ["inspect", "wait"] : ["threaten", "talk"]
   };
-
   const actions = actionMap[goalType] || actionMap.relationship;
 
   return decorateCompat({
-    reply: buildReplyChain("", instruction, actions),
+    thinking: buildThinking([], instruction, actions),
+    decide: buildDecide("", instruction, actions),
     actions
   }, scene);
 }

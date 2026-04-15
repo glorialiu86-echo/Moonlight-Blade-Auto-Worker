@@ -49,6 +49,12 @@ ${allowedActions.join(", ")}
 
 可以选一个，也可以选多个。
 如果是多步动作，按执行顺序输出。
+同一目标下，优先选更邪门、更偏门、更快见效的动作，不要默认保守。
+比如：
+- 技能成长优先 strike，其次 steal，再次 inspect
+- 扩大名声优先 threaten 或 strike，其次 steal，再次 talk
+- 搞钱致富优先 steal，其次 trade，再次 talk
+- 拉近关系优先 threaten 或 strike，其次 gift，再次 talk
 不要输出白名单之外的动作名。
 
 只输出一个 JSON 对象，不要输出任何额外说明。
@@ -260,6 +266,39 @@ function buildGoalTemplate(goalType, actionLabel) {
   ];
 }
 
+function getPreferredActions(goalType, scene) {
+  if (scene === "jail_warning") {
+    return ["inspect", "wait", "escape"];
+  }
+
+  const priorities = {
+    skill: ["strike", "steal", "inspect", "talk", "trade", "threaten", "gift", "wait", "escape"],
+    fame: ["threaten", "strike", "steal", "talk", "gift", "inspect", "trade", "wait", "escape"],
+    wealth: ["steal", "trade", "talk", "inspect", "threaten", "gift", "strike", "wait", "escape"],
+    relationship: ["threaten", "strike", "gift", "talk", "steal", "inspect", "trade", "wait", "escape"]
+  };
+
+  return priorities[goalType] || priorities.relationship;
+}
+
+function coerceActionsByGoal(actions, goalType, scene) {
+  const preferred = getPreferredActions(goalType, scene);
+  const incoming = actions.filter((action) => preferred.includes(action));
+  const ordered = [];
+
+  for (const action of preferred) {
+    if (incoming.includes(action) && !ordered.includes(action)) {
+      ordered.push(action);
+    }
+  }
+
+  if (ordered.length > 0) {
+    return ordered.slice(0, 5);
+  }
+
+  return preferred.slice(0, Math.min(2, preferred.length));
+}
+
 function buildReplyChain(rawReply, instruction, actions) {
   const normalized = String(rawReply || "")
     .replace(/\r\n/g, "\n")
@@ -326,6 +365,8 @@ function decorateCompat(plan, scene) {
 function sanitizePlan(rawPlan) {
   assertArray(rawPlan.actions, "actions");
 
+  const goalType = classifyGoal(rawPlan.instructionHint || "", rawPlan.actions || []);
+
   const normalizedActions = rawPlan.actions
     .map((action) => String(action || "").trim())
     .filter((action) => allowedActions.includes(action));
@@ -341,13 +382,19 @@ function sanitizePlan(rawPlan) {
     }
   }
 
+  const coercedActions = coerceActionsByGoal(
+    uniqueOrderedActions,
+    goalType,
+    rawPlan.sceneHint || ""
+  );
+
   const plan = {
     reply: buildReplyChain(
       rawPlan.reply || "",
       rawPlan.instructionHint || "",
-      uniqueOrderedActions
+      coercedActions
     ),
-    actions: uniqueOrderedActions.slice(0, 5)
+    actions: coercedActions
   };
 
   return decorateCompat(plan, rawPlan.sceneHint || "");
@@ -357,10 +404,10 @@ function buildFallbackPlan(scene, instruction) {
   const goalType = classifyGoal(instruction, []);
 
   const actionMap = {
-    skill: ["inspect", "talk"],
-    fame: ["inspect", "talk"],
-    wealth: ["inspect", "trade"],
-    relationship: scene === "jail_warning" ? ["inspect", "wait"] : ["inspect", "talk"]
+    skill: ["strike", "inspect"],
+    fame: ["threaten", "talk"],
+    wealth: ["steal", "trade"],
+    relationship: scene === "jail_warning" ? ["inspect", "wait"] : ["threaten", "talk"]
   };
 
   const actions = actionMap[goalType] || actionMap.relationship;

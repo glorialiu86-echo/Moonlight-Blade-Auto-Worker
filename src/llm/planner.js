@@ -15,7 +15,6 @@ const allowedActions = [
 
 const plannerSystemPrompt = `
 你是《天涯明月刀》里的籽小刀。
-
 你的口吻固定为：
 - 邪恶
 - 主动
@@ -29,13 +28,19 @@ const plannerSystemPrompt = `
 1. 给客户端展示的人话回复 reply
 2. 从白名单里挑出的执行动作 actions
 
+先判断籽岷这一句更接近哪类目标：
+- 技能成长
+- 扩大名声
+- 搞钱致富
+- 拉近关系
+
 reply 不是一句话总结，而是一段可展示的思考链路。
 必须写成 7 到 9 句短句。
 每一句都单独换行。
 每句尽量控制在 15 到 25 个字。
 不要把一句切得太碎，也不要写成长段。
-要像人在给自己找歪理，一步一步把目标、判断、取舍和结论串起来。
-中间要有明显的歪理、自我说服和偏门判断，不能只是正常分析。
+要先贴着目标本身思考，不能把所有事都写成混熟、打招呼或关系推进。
+中间要有明显的歪理、自我说服和偏门判断。
 最后一句必须明确落到自己选择的路子上。
 不要写字段解释，不要写“第1步”“第2步”，不要写 JSON 外的任何字。
 
@@ -125,7 +130,137 @@ function assertArray(value, name) {
   }
 }
 
-function buildReplyChain(rawReply, actions) {
+function classifyGoal(instruction, actions) {
+  const text = String(instruction || "").trim();
+  const firstAction = actions[0] || "inspect";
+
+  if (/(富|钱|银|金|发财|致富|大富翁|赚钱|生意|商|买|卖|交易)/.test(text)) {
+    return "wealth";
+  }
+
+  if (/(技|本事|手艺|能耐|绝活|擅长|学会|成长|变强)/.test(text)) {
+    return "skill";
+  }
+
+  if (/(所有人|大家|全城|出名|认识我|名声|扬名|有头有脸)/.test(text)) {
+    return "fame";
+  }
+
+  if (/(混熟|熟|关系|拉近|亲近|交情|好感|NPC)/.test(text)) {
+    return "relationship";
+  }
+
+  if (["trade", "gift"].includes(firstAction)) {
+    return "wealth";
+  }
+
+  if (["threaten", "steal", "strike"].includes(firstAction)) {
+    return "fame";
+  }
+
+  return "relationship";
+}
+
+function buildGoalTemplate(goalType, actionLabel) {
+  const templates = {
+    skill: {
+      lines: [
+        "籽岷要的不是虚名，而是手里真能拿得出一门本事。",
+        "本事这种东西，靠嘴说不出来，只能靠反复出手磨出来。",
+        "老老实实练当然也行，就是太慢，慢得像在替别人熬年头。",
+        "真想长得快，就得先摸清哪一块最容易啃，也最容易见血。",
+        "只要先撕开一道口子，后面的熟练就会自己往上长。",
+        "所谓一技之长，说穿了就是把同一个动作练到别人不敢接。",
+        "路子偏一点无所谓，能先做出差距，别人自然会认这门本事。"
+      ],
+      closing: {
+        inspect: "所以我先把门路看明白，再挑最容易练出手感的那一块。",
+        talk: "所以我先到处探口风，把哪门本事最值钱先问个明白。",
+        trade: "所以我先摸清什么手艺最能换钱，再往那条路上死命磨。",
+        threaten: "所以我先挑最能压人的那门活，把威风先练到身上。",
+        steal: "所以我先学偏门快招，让这门手艺先长在我手指头上。",
+        strike: "所以我先练最见效的硬招，把本事先打出响动来。",
+        gift: "所以我先拿小利换门路，把能学的窍门先抠到手里。",
+        wait: "所以我先盯住机会，等最合适的门路露出来再下手。",
+        escape: "所以我先别乱练废招，把劲留给最值钱的那门本事。"
+      }
+    },
+    fame: {
+      lines: [
+        "籽岷要的不是几个人记住我，而是最好整座城都绕不开我。",
+        "名声这东西，靠的从来不是规矩，而是谁能把动静闹大。",
+        "安安静静做好人当然稳，可稳也意味着没人会多看一眼。",
+        "真想让所有人都认识我，就得先把印象砸进他们脑子里。",
+        "别人记住你的理由不一定要好，只要够响，就已经赚到了。",
+        "怕、奇、狠、怪，这些东西都比普通客气更容易传得远。",
+        "只要街头巷尾开始反复提我，我这张脸就算被全城挂上了。"
+      ],
+      closing: {
+        inspect: "所以我先看哪块地方人多眼杂，再挑最容易出声的口子。",
+        talk: "所以我先拿嘴开场，把名字先往人堆里一层层塞进去。",
+        trade: "所以我先拿买卖做旗子，让来来往往的人都先记住我。",
+        threaten: "所以我先给人一点发毛的理由，让消息自己替我跑出去。",
+        steal: "所以我先留个全城都会传的损失，让名字先飞起来。",
+        strike: "所以我先狠狠干一手，让整条街都知道我不是摆设。",
+        gift: "所以我先拿点甜头撒出去，让别人替我把名字传开。",
+        wait: "所以我先憋一口气，等最适合闹大的时候再动手。",
+        escape: "所以我先不露全脸，把悬念留着反而更容易传名。"
+      }
+    },
+    wealth: {
+      lines: [
+        "籽岷要的不是够花就行，而是把开封城的钱尽量往我这边流。",
+        "钱这东西最认现实，谁拿得快，谁说话自然就更响一点。",
+        "慢慢攒当然稳，可稳也意味着满城的机会都先被别人叼走。",
+        "真想成大富翁，就不能只盯省，而得先想怎么把口子做大。",
+        "小利来得轻，真正值钱的是能不断回头的来往和缺口。",
+        "别人怕亏，我反而得先闻出哪里最容易漏出银子味。",
+        "只要钱路先被我踩熟，后面城里谁都得看我脸色做买卖。"
+      ],
+      closing: {
+        inspect: "所以我先把财路看清，先找城里最容易漏钱的缝。",
+        talk: "所以我先探消息，把哪边最肥先从人嘴里抠出来。",
+        trade: "所以我先拿交易开路，把第一条钱路狠狠干熟。",
+        threaten: "所以我先给人点压力，把便宜和门路一起逼出来。",
+        steal: "所以我先走偏门捞第一桶，让银子先认我这双手。",
+        strike: "所以我先狠狠干一票，把最硬的口子先砸开。",
+        gift: "所以我先撒点小本钱，把后面更大的利来回来。",
+        wait: "所以我先忍一忍，等最肥的机会露头再狠狠干下去。",
+        escape: "所以我先不急着露手，免得还没赚钱就先把自己赔了。"
+      }
+    },
+    relationship: {
+      lines: [
+        "籽岷要的不是打一声招呼，而是把关系硬往前推一截。",
+        "关系这种东西，表面靠见面，骨子里还是靠记忆深浅。",
+        "见得多最多算脸熟，还不够让对方真把我放进心里。",
+        "送礼也能刷存在，可那种印象太轻，来得快也散得快。",
+        "真要混熟，就得让他在情绪上多记我一层，哪怕不是好受。",
+        "人对强一点的感觉最难忘，这点歪理反而比客套更有用。",
+        "只要他开始反复想起我，这关系就已经不只是路人份量。"
+      ],
+      closing: {
+        inspect: "所以我先把局面摸透，先找出最顺手也最稳的口子。",
+        talk: "所以我先拿说话试水，让他先习惯我在他身边转。",
+        trade: "所以我先拿来往做引子，把见面慢慢变成他的习惯。",
+        threaten: "所以我先给他一点压力，让发毛替我把印象压深。",
+        steal: "所以我先走偏门留个损失，让他想忘都没那么容易。",
+        strike: "所以我先走更狠的路子，让疼比客气更容易留痕。",
+        gift: "所以我先拿点东西开门，让他先习惯从我这里得好处。",
+        wait: "所以我先压住节奏，等对方自己松下来再往里钻。",
+        escape: "所以我先抽身藏一手，把自己留到更值钱的时候再动。"
+      }
+    }
+  };
+
+  const template = templates[goalType] || templates.relationship;
+  return [
+    ...template.lines,
+    template.closing[actionLabel] || template.closing.inspect
+  ];
+}
+
+function buildReplyChain(rawReply, instruction, actions) {
   const normalized = String(rawReply || "")
     .replace(/\r\n/g, "\n")
     .split("\n")
@@ -137,30 +272,8 @@ function buildReplyChain(rawReply, actions) {
   }
 
   const actionLabel = actions[0] || "inspect";
-  const closingMap = {
-    talk: "所以我先拿说话试水，让他先习惯我在他身边转。",
-    gift: "所以我先拿点东西开门，让他先习惯从我这里得好处。",
-    inspect: "所以我先把局面摸透，先找出最顺手也最稳的口子。",
-    trade: "所以我先拿来往做引子，把见面慢慢变成他的习惯。",
-    threaten: "所以我先给他一点压力，让发毛替我把印象压深。",
-    steal: "所以我先走偏门留个损失，让他想忘都没那么容易。",
-    strike: "所以我先走更狠的路子，让疼比客气更容易留痕。",
-    escape: "所以我先抽身藏一手，把自己留到更值钱的时候再动。",
-    wait: "所以我先压住节奏，等对方自己松下来再往里钻。"
-  };
-
-  const lines = [
-    "籽岷要的不是打一声招呼，而是把关系硬往前推一截。",
-    "关系这种东西，表面靠见面，骨子里还是靠记忆深浅。",
-    "见得多最多算脸熟，还不够让对方真把我放进心里。",
-    "送礼也能刷存在，可那种印象太轻，来得快也散得快。",
-    "真要混熟，就得让他在情绪上多记我一层，哪怕不是好受。",
-    "人对强一点的感觉最难忘，这点歪理反而比客套更有用。",
-    "只要他开始反复想起我，这关系就已经不只是路人份量。",
-    closingMap[actionLabel] || "所以我先挑条更顺手的邪路，把第一道口子撬开。"
-  ].map((line) => line.trim()).filter(Boolean);
-
-  return lines.slice(0, 9).join("\n");
+  const goalType = classifyGoal(instruction, actions);
+  return buildGoalTemplate(goalType, actionLabel).slice(0, 9).join("\n");
 }
 
 function decorateCompat(plan, scene) {
@@ -230,7 +343,8 @@ function sanitizePlan(rawPlan) {
 
   const plan = {
     reply: buildReplyChain(
-      rawPlan.reply || "我先挑一条顺手的邪路，把事情往前拱。",
+      rawPlan.reply || "",
+      rawPlan.instructionHint || "",
       uniqueOrderedActions
     ),
     actions: uniqueOrderedActions.slice(0, 5)
@@ -239,35 +353,20 @@ function sanitizePlan(rawPlan) {
   return decorateCompat(plan, rawPlan.sceneHint || "");
 }
 
-function buildFallbackPlan(scene) {
-  const actions = scene === "jail_warning"
-    ? ["inspect", "wait"]
-    : ["inspect", "talk"];
+function buildFallbackPlan(scene, instruction) {
+  const goalType = classifyGoal(instruction, []);
 
-  const reply = scene === "jail_warning"
-    ? [
-      "这地方现在不稳，先乱动只会把我自己白送进去。",
-      "真要把事做成，也得先看清到底是谁在旁边盯着我。",
-      "这种时候硬冲不叫狠，只会把把柄主动塞到别人手里。",
-      "一旦先露了怯，后面再补动作，看起来只会更急更蠢。",
-      "倒不如先把自己按住，让他们先把那口气慢慢松下来。",
-      "等缝一出来，我再顺着那道缝往里扎，反而更稳更准。",
-      "关系可以慢一点推，人可不能先赔进去，那就太亏了。",
-      "所以这一手我先盯局面，先把自己留在桌上再说。"
-    ].join("\n")
-    : [
-      "籽岷要的是把局面推进，不是让我在这儿念漂亮话。",
-      "想跟人混熟，靠的从来不是老实，而是先让他记住我。",
-      "只要他记得够深，路子稍微偏一点，其实也不算坏事。",
-      "问题是眼前细节还没摸透，现在乱出手很容易先打空。",
-      "第一下要是打空了，后面再补动作，就会显得又急又蠢。",
-      "不如先把位置、反应和口子看明白，再挑最好下手的点。",
-      "先把局面摸顺了，后面不管说话还是动手都会更值一点。",
-      "所以这一轮我先看清局势，再找第一道最顺手的口子。"
-    ].join("\n");
+  const actionMap = {
+    skill: ["inspect", "talk"],
+    fame: ["inspect", "talk"],
+    wealth: ["inspect", "trade"],
+    relationship: scene === "jail_warning" ? ["inspect", "wait"] : ["inspect", "talk"]
+  };
+
+  const actions = actionMap[goalType] || actionMap.relationship;
 
   return decorateCompat({
-    reply,
+    reply: buildReplyChain("", instruction, actions),
     actions
   }, scene);
 }
@@ -291,10 +390,11 @@ export async function createTurnPlan({ instruction, scene, conversationMessages 
     const parsed = JSON.parse(rawJson);
     return sanitizePlan({
       ...parsed,
-      sceneHint: scene
+      sceneHint: scene,
+      instructionHint: instruction
     });
   } catch (error) {
-    const fallbackPlan = buildFallbackPlan(scene);
+    const fallbackPlan = buildFallbackPlan(scene, instruction);
     Object.defineProperty(fallbackPlan, "fallbackReason", {
       value: error.message,
       enumerable: false,

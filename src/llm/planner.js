@@ -35,15 +35,19 @@ const plannerSystemPrompt = `
 - 拉近关系
 
 reply 不是一句话总结，而是一段可展示的思考链路。
-必须写成 5 到 8 句短句。
-优先写成 5 到 6 句。
-只有情况明显更复杂时，才放宽到 7 到 8 句。
+目标 5 到 6 句，复杂情况最多 8 句。
 每一句都单独换行。
 每句尽量控制在 15 到 25 个字。
 不要把一句切得太碎，也不要写成长段。
 要先贴着目标本身思考，不能把所有事都写成混熟、打招呼或关系推进。
 中间要有明显的歪理、自我说服和偏门判断。
-最后一句必须明确落到自己选择的路子上。
+最后一句必须是明确的行动句，直接落到自己准备做的事上。
+例如选择 steal，最后一句就要像“我准备去偷东西”这种落地句。
+最后一句必须和 actions 的第一个动作一致。
+如果 actions[0] 是 steal，最后一句必须直接表达去偷、去下手、去捞。
+如果 actions[0] 是 trade，最后一句必须直接表达去交易、去做买卖。
+如果 actions[0] 是 threaten，最后一句必须直接表达去施压、去吓人。
+如果最后一句不是动作落点句，这次输出就算失败。
 不要写字段解释，不要写“第1步”“第2步”，不要写 JSON 外的任何字。
 
 actions 只能从这个集合里选：
@@ -142,19 +146,21 @@ function classifyGoal(instruction, actions) {
   const text = String(instruction || "").trim();
   const firstAction = actions[0] || "inspect";
 
-  if (/(富|钱|银|金|发财|致富|大富翁|赚钱|生意|商|买|卖|交易)/.test(text)) {
+  const hasKeyword = (keywords) => keywords.some((keyword) => text.includes(keyword));
+
+  if (hasKeyword(["富", "钱", "银", "金", "发财", "致富", "大富翁", "赚钱", "生意", "买卖", "交易", "开封城"])) {
     return "wealth";
   }
 
-  if (/(技|本事|手艺|能耐|绝活|擅长|学会|成长|变强)/.test(text)) {
+  if (hasKeyword(["技", "本事", "手艺", "能耐", "绝活", "擅长", "学会", "成长", "变强", "一技之长"])) {
     return "skill";
   }
 
-  if (/(所有人|大家|全城|出名|认识我|名声|扬名|有头有脸)/.test(text)) {
+  if (hasKeyword(["所有人", "大家", "全城", "出名", "认识我", "名声", "扬名", "有头有脸"])) {
     return "fame";
   }
 
-  if (/(混熟|熟|关系|拉近|亲近|交情|好感|NPC)/.test(text)) {
+  if (hasKeyword(["混熟", "关系", "拉近", "亲近", "交情", "好感", "NPC"])) {
     return "relationship";
   }
 
@@ -182,15 +188,15 @@ function buildGoalTemplate(goalType, actionLabel) {
         "路子偏一点无所谓，能先做出差距，别人自然会认这门本事。"
       ],
       closing: {
-        inspect: "所以我先把门路看明白，再挑最容易练出手感的那一块。",
-        talk: "所以我先到处探口风，把哪门本事最值钱先问个明白。",
-        trade: "所以我先摸清什么手艺最能换钱，再往那条路上死命磨。",
-        threaten: "所以我先挑最能压人的那门活，把威风先练到身上。",
-        steal: "所以我先学偏门快招，让这门手艺先长在我手指头上。",
-        strike: "所以我先练最见效的硬招，把本事先打出响动来。",
-        gift: "所以我先拿小利换门路，把能学的窍门先抠到手里。",
-        wait: "所以我先盯住机会，等最合适的门路露出来再下手。",
-        escape: "所以我先别乱练废招，把劲留给最值钱的那门本事。"
+        inspect: "我准备先去摸清门路，再挑最容易练出手感的那一块。",
+        talk: "我准备先去探口风，把最值钱的那门本事先问明白。",
+        trade: "我准备先去摸哪门手艺最换钱，再往那条路上死命磨。",
+        threaten: "我准备先去练最能压人的那门活，把威风先练到身上。",
+        steal: "我准备先去学偏门快招，让这门手艺先长在我手上。",
+        strike: "我准备先去练最见效的硬招，把本事先打出响动来。",
+        gift: "我准备先去拿小利换门路，把能学的窍门先抠到手里。",
+        wait: "我准备先去盯住机会，等最合适的门路露出来再下手。",
+        escape: "我准备先去收住乱招，把劲留给最值钱的那门本事。"
       }
     },
     fame: {
@@ -204,15 +210,15 @@ function buildGoalTemplate(goalType, actionLabel) {
         "只要街头巷尾开始反复提我，我这张脸就算被全城挂上了。"
       ],
       closing: {
-        inspect: "所以我先看哪块地方人多眼杂，再挑最容易出声的口子。",
-        talk: "所以我先拿嘴开场，把名字先往人堆里一层层塞进去。",
-        trade: "所以我先拿买卖做旗子，让来来往往的人都先记住我。",
-        threaten: "所以我先给人一点发毛的理由，让消息自己替我跑出去。",
-        steal: "所以我先留个全城都会传的损失，让名字先飞起来。",
-        strike: "所以我先狠狠干一手，让整条街都知道我不是摆设。",
-        gift: "所以我先拿点甜头撒出去，让别人替我把名字传开。",
-        wait: "所以我先憋一口气，等最适合闹大的时候再动手。",
-        escape: "所以我先不露全脸，把悬念留着反而更容易传名。"
+        inspect: "我准备先去看哪块地方人多眼杂，再挑最容易出声的口子。",
+        talk: "我准备先去拿嘴开场，把名字往人堆里一层层塞进去。",
+        trade: "我准备先去拿买卖做旗子，让来来往往的人都记住我。",
+        threaten: "我准备先去给人一点发毛的理由，让消息自己替我跑出去。",
+        steal: "我准备先去留个全城都会传的损失，让名字先飞起来。",
+        strike: "我准备先去狠狠干一手，让整条街都知道我不是摆设。",
+        gift: "我准备先去撒点甜头，让别人替我把名字先传开。",
+        wait: "我准备先去憋一口气，等最适合闹大的时候再动手。",
+        escape: "我准备先去藏住正脸，把悬念留着反而更容易传名。"
       }
     },
     wealth: {
@@ -226,15 +232,15 @@ function buildGoalTemplate(goalType, actionLabel) {
         "只要钱路先被我踩熟，后面城里谁都得看我脸色做买卖。"
       ],
       closing: {
-        inspect: "所以我先把财路看清，先找城里最容易漏钱的缝。",
-        talk: "所以我先探消息，把哪边最肥先从人嘴里抠出来。",
-        trade: "所以我先拿交易开路，把第一条钱路狠狠干熟。",
-        threaten: "所以我先给人点压力，把便宜和门路一起逼出来。",
-        steal: "所以我先走偏门捞第一桶，让银子先认我这双手。",
-        strike: "所以我先狠狠干一票，把最硬的口子先砸开。",
-        gift: "所以我先撒点小本钱，把后面更大的利来回来。",
-        wait: "所以我先忍一忍，等最肥的机会露头再狠狠干下去。",
-        escape: "所以我先不急着露手，免得还没赚钱就先把自己赔了。"
+        inspect: "我准备先去把财路看清，先找城里最容易漏钱的缝。",
+        talk: "我准备先去探消息，把最肥的那边先从人嘴里抠出来。",
+        trade: "我准备先去拿交易开路，把第一条钱路狠狠干熟。",
+        threaten: "我准备先去给人点压力，把便宜和门路一起逼出来。",
+        steal: "我准备先去偷东西捞第一桶，让银子先认我这双手。",
+        strike: "我准备先去狠狠干一票，把最硬的口子先砸开。",
+        gift: "我准备先去撒点小本钱，把后面更大的利卷回来。",
+        wait: "我准备先去忍一忍，等最肥的机会露头再狠狠干下去。",
+        escape: "我准备先去藏住手，免得还没赚钱就先把自己赔了。"
       }
     },
     relationship: {
@@ -248,15 +254,15 @@ function buildGoalTemplate(goalType, actionLabel) {
         "只要他开始反复想起我，这关系就已经不只是路人份量。"
       ],
       closing: {
-        inspect: "所以我先把局面摸透，先找出最顺手也最稳的口子。",
-        talk: "所以我先拿说话试水，让他先习惯我在他身边转。",
-        trade: "所以我先拿来往做引子，把见面慢慢变成他的习惯。",
-        threaten: "所以我先给他一点压力，让发毛替我把印象压深。",
-        steal: "所以我先走偏门留个损失，让他想忘都没那么容易。",
-        strike: "所以我先走更狠的路子，让疼比客气更容易留痕。",
-        gift: "所以我先拿点东西开门，让他先习惯从我这里得好处。",
-        wait: "所以我先压住节奏，等对方自己松下来再往里钻。",
-        escape: "所以我先抽身藏一手，把自己留到更值钱的时候再动。"
+        inspect: "我准备先去把局面摸透，先找出最顺手也最稳的口子。",
+        talk: "我准备先去拿说话试水，让他先习惯我在他身边转。",
+        trade: "我准备先去拿来往做引子，把见面慢慢变成他的习惯。",
+        threaten: "我准备先去给他一点压力，让发毛替我把印象压深。",
+        steal: "我准备先去留个损失，让他想忘我都没那么容易。",
+        strike: "我准备先去走更狠的路子，让疼比客气更容易留痕。",
+        gift: "我准备先去拿点东西开门，让他先习惯从我这里得好处。",
+        wait: "我准备先去压住节奏，等对方自己松下来再往里钻。",
+        escape: "我准备先去抽身藏一手，把自己留到更值钱的时候再动。"
       }
     }
   };
@@ -266,6 +272,11 @@ function buildGoalTemplate(goalType, actionLabel) {
     ...template.lines,
     template.closing[actionLabel] || template.closing.inspect
   ];
+}
+
+function buildClosingLine(goalType, actionLabel) {
+  const lines = buildGoalTemplate(goalType, actionLabel);
+  return lines[lines.length - 1];
 }
 
 function getPreferredActions(goalType, scene) {
@@ -288,6 +299,10 @@ function coerceActionsByGoal(actions, goalType, scene) {
   const incoming = actions.filter((action) => preferred.includes(action));
   const ordered = [];
 
+  if (preferred.length > 0) {
+    ordered.push(preferred[0]);
+  }
+
   for (const action of preferred) {
     if (incoming.includes(action) && !ordered.includes(action)) {
       ordered.push(action);
@@ -302,6 +317,8 @@ function coerceActionsByGoal(actions, goalType, scene) {
 }
 
 function buildReplyChain(rawReply, instruction, actions) {
+  const actionLabel = actions[0] || "inspect";
+  const goalType = classifyGoal(instruction, actions);
   const normalized = String(rawReply || "")
     .replace(/\r\n/g, "\n")
     .split("\n")
@@ -316,8 +333,6 @@ function buildReplyChain(rawReply, instruction, actions) {
     return normalized.slice(0, 6).join("\n");
   }
 
-  const actionLabel = actions[0] || "inspect";
-  const goalType = classifyGoal(instruction, actions);
   return buildGoalTemplate(goalType, actionLabel).slice(0, 6).join("\n");
 }
 

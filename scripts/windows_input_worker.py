@@ -83,8 +83,8 @@ ACTION_POINTS = {
     "confirm_small_talk": (1481 / 2537, 1018 / 1384),
     "trade": (2139 / 2537, 1139 / 1384),
     "gift": (2404 / 2537, 1141 / 1384),
-    "close_panel": (1115 / 2537, 691 / 1384),
-    "gift_close": (2494 / 2537, 48 / 1384),
+    "target_close": (1115 / 2537, 691 / 1384),
+    "close_panel": (2494 / 2537, 48 / 1384),
     "trade_left_slot": (0.27, 0.33),
     "trade_left_up_shelf": (0.38, 0.82),
     "trade_right_slot": (0.82, 0.20),
@@ -1450,9 +1450,7 @@ def find_selected_target_anchor(hwnd: int, target_text: str) -> dict[str, Any] |
 
 
 def exit_panel(hwnd: int) -> None:
-    stage_state = detect_npc_interaction_stage(hwnd)
-    point_name = "gift_close" if stage_state["stage"] == "gift_screen" else "close_panel"
-    click_named_point(hwnd, point_name)
+    click_named_point(hwnd, "close_panel")
     # Closing the chat page is not instantaneous. Wait for the UI transition to
     # settle before assuming the clean town page is ready for the next action.
     time.sleep(0.25)

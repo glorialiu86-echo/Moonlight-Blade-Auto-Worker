@@ -51,6 +51,9 @@ decide 是单独一句行动句。
 decide 必须直接落到自己准备做的事上。
 decide 必须和 actions[0] 强绑定，不是大致相关，也不是语气接近。
 actions[0] 写什么，decide 就必须写对应的那个动作本身。
+decide 只能描述 actions[0] 这一个动作。
+decide 不能夹带第二个动作，不能顺手补充后续计划，不能一边偷一边拉拢，一边交易一边威胁。
+decide 不要写动作结果，不要写愿景，不要写总结，只写马上准备做的这一下。
 例如：
 - actions[0] 是 steal，decide 必须直接表达去偷、去下手、去捞
 - actions[0] 是 trade，decide 必须直接表达去交易、去做买卖

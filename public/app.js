@@ -73,8 +73,8 @@ function renderEmptyState() {
   elements.messageList.innerHTML = `
     <article class="chat-message chat-message-assistant chat-empty">
       <div class="chat-role">籽小刀</div>
-      <p class="chat-text">点击“开始执行任务”后，籽岷就可以直接给籽小刀下达任务了。</p>
-      <p class="chat-meta">调试信息已经移到单独的调试页。</p>
+      <p class="chat-text">点“开始执行任务”后，籽岷就可以直接给籽小刀下任务了。</p>
+      <p class="chat-meta">更完整的思考链和调试信息在 `/debug` 页面里看。</p>
     </article>
   `;
 }
@@ -85,9 +85,47 @@ function renderUserMessage(message) {
   return node;
 }
 
+function buildAssistantText(message) {
+  const lines = [];
+  const thinkingChain = Array.isArray(message.thinkingChain)
+    ? message.thinkingChain
+      .slice(0, 5)
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+    : [];
+  const actionPreview = Array.isArray(message.actions)
+    ? message.actions
+      .slice(0, 3)
+      .map((action) => String(action?.title || "").trim())
+      .filter(Boolean)
+      .join(" -> ")
+    : "";
+
+  if (message.personaInterpretation) {
+    lines.push(`我先听成这样：${message.personaInterpretation}`);
+  } else if (message.text) {
+    lines.push(message.text);
+  } else {
+    lines.push("这轮我先按眼前局势试一把。");
+  }
+
+  if (thinkingChain.length > 0) {
+    lines.push("我脑子里的路数是：");
+    thinkingChain.forEach((item) => {
+      lines.push(`- ${item}`);
+    });
+  }
+
+  if (actionPreview) {
+    lines.push(`先按这条链路试：${actionPreview}`);
+  }
+
+  return lines.join("\n");
+}
+
 function renderAssistantMessage(message) {
   const node = elements.assistantMessageTemplate.content.firstElementChild.cloneNode(true);
-  node.querySelector(".chat-text").textContent = message.text || "本轮暂无回复。";
+  node.querySelector(".chat-text").textContent = buildAssistantText(message);
   node.querySelector(".chat-meta").textContent = message.perceptionSummary || `风险：${message.riskLevel || "-"}`;
   return node;
 }
@@ -117,7 +155,11 @@ function renderRunState(runtimeState) {
   state.runtimeStatus = runtimeState.status || "idle";
   const running = isRunningStatus(state.runtimeStatus);
 
-  elements.runStatusText.textContent = running ? "执行中" : state.runtimeStatus === "paused" ? "已暂停" : "待机";
+  elements.runStatusText.textContent = running
+    ? "执行中"
+    : state.runtimeStatus === "paused"
+      ? "已暂停"
+      : "待机";
   elements.runStatusHint.textContent = running
     ? "本地服务、自动截图和真实执行链路都已进入运行状态。"
     : "当前整套本地程序处于停止或待机状态。";
@@ -357,7 +399,7 @@ async function startVoiceRecording() {
     sourceNode.connect(processorNode);
     processorNode.connect(audioContext.destination);
 
-    updateVoiceStatus("录音中。点击“停止语音”后会自动转写到输入框。");
+    updateVoiceStatus("录音中。点“停止语音”后会自动转写到输入框。");
     syncUiState();
   } catch (error) {
     await releaseVoiceCapture();

@@ -270,6 +270,7 @@ textarea:focus {
 .message-recovery {
   margin: 0;
   line-height: 1.75;
+  white-space: pre-wrap;
 }
 
 .chat-meta,

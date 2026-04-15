@@ -13,6 +13,9 @@ const allowedActions = [
   "wait"
 ];
 
+// Note: the current actions whitelist is still incomplete.
+// We still need to expand and refine the behavior paths behind these actions.
+
 const plannerSystemPrompt = `
 你是《天涯明月刀》里的籽小刀。
 你的口吻固定为：

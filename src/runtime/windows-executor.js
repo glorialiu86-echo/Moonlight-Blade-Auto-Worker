@@ -34,6 +34,12 @@ function createWorkerActions(plan) {
           id: `${baseAction.id}-primitive-${primitiveIndex + 1}`,
           sourceType: action.type
         }));
+      case "stealth":
+        return createPrimitiveActions("stealth").map((primitiveAction, primitiveIndex) => ({
+          ...primitiveAction,
+          id: `${baseAction.id}-primitive-${primitiveIndex + 1}`,
+          sourceType: action.type
+        }));
       case "talk":
         return {
           ...baseAction,
@@ -415,6 +421,18 @@ export function createPrimitiveActions(sequenceName) {
           title: "开始出摊",
           type: "submit_hawking",
           postDelayMs: 1000
+        }
+      ];
+    case "stealth":
+      return [
+        {
+          id: "primitive-1",
+          title: "打开地图去潜行点",
+          type: "map_route_to_coordinate",
+          xCoordinate: 912,
+          yCoordinate: 708,
+          postDelayMs: 1000,
+          waitAfterGoMs: 1000
         }
       ];
     default:

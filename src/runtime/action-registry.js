@@ -6,6 +6,13 @@ export const ACTION_REGISTRY = {
     availability: "ready",
     note: "我会按整条固定链路执行：开地图、找货商、进货、去大街、上货出摊。"
   },
+  stealth: {
+    key: "stealth",
+    label: "潜行起手",
+    executorType: "primitive_sequence",
+    availability: "partial",
+    note: "当前先只做潜行链路第一步：打开地图并前往 708,912。"
+  },
   talk: {
     key: "talk",
     label: "搭话",

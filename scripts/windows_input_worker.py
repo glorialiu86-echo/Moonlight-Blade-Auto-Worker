@@ -948,10 +948,10 @@ def input_map_coordinate_field(
         })
 
     confirm_click = None
-    if field_name == "vertical":
+    if field_name in {"vertical", "horizontal"}:
         confirm_button = layout["buttons"].get("confirm")
         if not confirm_button:
-            raise RuntimeError("Map keypad confirm button for vertical field was not found")
+            raise RuntimeError(f"Map keypad confirm button for {field_name} field was not found")
         click_screen_point(hwnd, int(confirm_button["screenX"]), int(confirm_button["screenY"]), "left")
         INPUT_GUARD.guarded_sleep(1000, title)
         confirm_click = {

@@ -11,7 +11,7 @@ export const ACTION_REGISTRY = {
     label: "潜行起手",
     executorType: "primitive_sequence",
     availability: "partial",
-    note: "当前先只做潜行链路第一步：打开地图并前往 708,912。"
+    note: "当前先只做潜行链路第一步：打开地图并前往 711,950。"
   },
   talk: {
     key: "talk",

@@ -429,8 +429,8 @@ export function createPrimitiveActions(sequenceName) {
           id: "primitive-1",
           title: "打开地图去潜行点",
           type: "map_route_to_coordinate",
-          xCoordinate: 912,
-          yCoordinate: 708,
+          xCoordinate: 950,
+          yCoordinate: 711,
           postDelayMs: 1000,
           waitAfterGoMs: 1000
         }

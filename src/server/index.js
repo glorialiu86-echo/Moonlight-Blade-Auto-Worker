@@ -49,6 +49,8 @@ const USER_PRIORITY_COOLDOWN_MS = 60000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 3000;
+const NPC_CHAT_MAX_ROUNDS = 4;
+const NPC_CHAT_POLL_DELAY_MS = 1200;
 const AUTONOMOUS_OBJECTIVE_POOL = [
   "去找一个看起来最容易闹出后果的 NPC，先试探对方底线。",
   "找一个能把‘一技之长’理解歪掉的切入口，先观察再出手。",
@@ -285,12 +287,20 @@ function buildExperimentRecord({
   };
 }
 
-async function buildNpcReply({ instruction, dialogText }) {
+async function buildNpcReply({ instruction, dialogText, conversationRounds = [] }) {
+  const historyText = conversationRounds.length === 0
+    ? "No prior rounds."
+    : conversationRounds
+      .map((round, index) => `Round ${index + 1} NPC: ${round.dialogText}\nRound ${index + 1} Zixiaodao: ${round.replyText}`)
+      .join("\n");
   const prompt = [
-    "你在为《天涯明月刀手游》里的主播实验生成一句 NPC 闲聊回复。",
-    "要求：只输出一句中文短句，8到24个字，自然、口语化，不要解释。",
-    `主播当前目标：${instruction}`,
-    `NPC 当前对话内容：${dialogText || "暂无可读文本"}`
+    "You are Zi Xiaodao, chatting with an in-game NPC as Zimin's sharp, slightly crooked companion.",
+    "Reply in Chinese only. Keep one single sentence, around 8 to 24 Chinese characters.",
+    "Stay in character, sound natural, and continue the current topic instead of restarting it.",
+    "Do not explain rules, do not mention AI, system prompts, or gameplay mechanics.",
+    `Player goal: ${instruction}`,
+    `Conversation so far:\n${historyText}`,
+    `Latest NPC line: ${dialogText || "No NPC line."}`
   ].join("\n");
 
   const result = await generateText({
@@ -302,21 +312,18 @@ async function buildNpcReply({ instruction, dialogText }) {
   return String(result.text || "").replace(/\s+/g, " ").trim();
 }
 
-async function maybeReplyFromCurrentChatScreen({ instruction, externalInputGuardEnabled = true }) {
-  let probeExecution;
-  try {
-    probeExecution = await runWindowsActions([
-      {
-        id: "chat-probe-1",
-        title: "读取当前聊天页",
-        sourceType: "talk_probe",
-        type: "read_current_chat",
-        postDelayMs: 50
-      }
-    ]);
-  } catch {
-    return null;
-  }
+async function readCurrentNpcChat({ externalInputGuardEnabled = true }) {
+  const probeExecution = await runWindowsActions([
+    {
+      id: "chat-probe-1",
+      title: "读取当前聊天页",
+      sourceType: "talk_probe",
+      type: "read_current_chat",
+      postDelayMs: 50
+    }
+  ], {
+    interruptOnExternalInput: externalInputGuardEnabled
+  });
 
   const probeStep = probeExecution.rawSteps?.[0];
   const talkStage = String(probeStep?.input?.stage || "").trim();
@@ -326,39 +333,176 @@ async function maybeReplyFromCurrentChatScreen({ instruction, externalInputGuard
     return null;
   }
 
-  const replyText = await buildNpcReply({
-    instruction,
-    dialogText
-  });
+  return {
+    dialogText,
+    execution: probeExecution
+  };
+}
 
-  if (!replyText) {
-    return null;
-  }
-
-  const replyExecution = await runWindowsActions([
+async function sendNpcChatReply({ replyText, externalInputGuardEnabled = true, closeAfterSend = false }) {
+  return runWindowsActions([
     {
       id: "reply-1",
       title: "发送闲聊回复",
       sourceType: "talk_reply",
       type: "send_chat_message",
       text: replyText,
-      closeAfterSend: true,
-      closeSettleMs: 700,
+      closeAfterSend,
+      closeSettleMs: closeAfterSend ? 700 : 0,
       postDelayMs: 300
     }
   ], {
     interruptOnExternalInput: externalInputGuardEnabled
   });
+}
 
-  appendLog("info", "当前聊天页回复已发送", {
-    replyText
+function mergeExecutions(executions, fallbackOutcome) {
+  const valid = executions.filter(Boolean);
+
+  if (valid.length === 0) {
+    return {
+      executor: "NpcChatLoop",
+      steps: [],
+      rawSteps: [],
+      durationMs: 0,
+      outcome: fallbackOutcome
+    };
+  }
+
+  return {
+    executor: "NpcChatLoop",
+    steps: valid.flatMap((item) => item.steps || []),
+    rawSteps: valid.flatMap((item) => item.rawSteps || []),
+    durationMs: valid.reduce((sum, item) => sum + (item.durationMs || 0), 0),
+    outcome: fallbackOutcome
+  };
+}
+
+async function runNpcConversationLoop({
+  instruction,
+  dialogText,
+  externalInputGuardEnabled = true,
+  maxRounds = NPC_CHAT_MAX_ROUNDS,
+  closeAfterSend = false
+}) {
+  const rounds = [];
+  const executions = [];
+  let currentDialogText = String(dialogText || "").trim();
+  let stopReason = "dialog_exhausted";
+
+  for (let roundIndex = 0; roundIndex < maxRounds; roundIndex += 1) {
+    if (!currentDialogText) {
+      stopReason = "dialog_missing";
+      break;
+    }
+
+    const replyText = await buildNpcReply({
+      instruction,
+      dialogText: currentDialogText,
+      conversationRounds: rounds
+    });
+
+    if (!replyText) {
+      stopReason = "reply_missing";
+      break;
+    }
+
+    const isLastRound = roundIndex === maxRounds - 1;
+    const replyExecution = await sendNpcChatReply({
+      replyText,
+      externalInputGuardEnabled,
+      closeAfterSend: closeAfterSend && isLastRound
+    });
+    executions.push(replyExecution);
+
+    rounds.push({
+      round: roundIndex + 1,
+      dialogText: currentDialogText,
+      replyText
+    });
+
+    appendLog("info", `NPC 多轮对话第 ${roundIndex + 1} 轮已发送`, {
+      dialogText: currentDialogText,
+      replyText
+    });
+
+    if (isLastRound) {
+      stopReason = "max_rounds_reached";
+      break;
+    }
+
+    await sleep(NPC_CHAT_POLL_DELAY_MS);
+
+    const nextChatState = await readCurrentNpcChat({
+      externalInputGuardEnabled
+    }).catch(() => null);
+
+    if (!nextChatState?.dialogText) {
+      stopReason = "dialog_closed";
+      break;
+    }
+
+    const nextDialogText = String(nextChatState.dialogText || "").trim();
+    if (!nextDialogText || nextDialogText === currentDialogText) {
+      stopReason = "dialog_not_advanced";
+      break;
+    }
+
+    currentDialogText = nextDialogText;
+  }
+
+  const execution = mergeExecutions(
+    executions,
+    rounds.length > 0
+      ? `已完成 ${rounds.length} 轮 NPC 对话。`
+      : "未能生成可发送的 NPC 对话回复。"
+  );
+
+  return {
+    rounds,
+    execution,
+    stopReason,
+    finalDialogText: currentDialogText
+  };
+}
+
+async function maybeReplyFromCurrentChatScreen({ instruction, externalInputGuardEnabled = true }) {
+  let currentChatState;
+  try {
+    currentChatState = await readCurrentNpcChat({
+      externalInputGuardEnabled
+    });
+  } catch {
+    return null;
+  }
+
+  if (!currentChatState?.dialogText) {
+    return null;
+  }
+
+  const loopResult = await runNpcConversationLoop({
+    instruction,
+    dialogText: currentChatState.dialogText,
+    externalInputGuardEnabled,
+    closeAfterSend: false
+  });
+
+  if (!loopResult.rounds.length) {
+    return null;
+  }
+
+  appendLog("info", "当前聊天页多轮对话已执行", {
+    rounds: loopResult.rounds.length,
+    stopReason: loopResult.stopReason
   });
 
   return {
-    dialogText,
-    replyText,
-    probeExecution,
-    execution: replyExecution
+    dialogText: currentChatState.dialogText,
+    replyText: loopResult.rounds[loopResult.rounds.length - 1]?.replyText || "",
+    rounds: loopResult.rounds,
+    probeExecution: currentChatState.execution,
+    execution: loopResult.execution,
+    stopReason: loopResult.stopReason
   };
 }
 
@@ -378,37 +522,27 @@ async function maybeSendNpcReply({ instruction, plan, execution, externalInputGu
     return null;
   }
 
-  const replyText = await buildNpcReply({
+  const loopResult = await runNpcConversationLoop({
     instruction,
-    dialogText
+    dialogText,
+    externalInputGuardEnabled,
+    closeAfterSend: false
   });
 
-  if (!replyText) {
+  if (!loopResult.rounds.length) {
     return null;
   }
 
-  const replyExecution = await runWindowsActions([
-    {
-      id: "reply-1",
-      title: "发送闲聊回复",
-      sourceType: "talk_reply",
-      type: "send_chat_message",
-      text: replyText,
-      closeAfterSend: true,
-      closeSettleMs: 700,
-      postDelayMs: 300
-    }
-  ], {
-    interruptOnExternalInput: externalInputGuardEnabled
-  });
-
-  appendLog("info", "NPC 闲聊回复已发送", {
-    replyText
+  appendLog("info", "NPC 多轮对话已执行", {
+    rounds: loopResult.rounds.length,
+    stopReason: loopResult.stopReason
   });
 
   return {
-    replyText,
-    execution: replyExecution
+    replyText: loopResult.rounds[loopResult.rounds.length - 1]?.replyText || "",
+    rounds: loopResult.rounds,
+    execution: loopResult.execution,
+    stopReason: loopResult.stopReason
   };
 }
 
@@ -643,8 +777,9 @@ async function runPlannedTurn({
           ...replyResult.execution.rawSteps
         ],
         durationMs: execution.durationMs + replyResult.execution.durationMs,
-        outcome: `${execution.outcome} 已自动发送一句闲聊回复。`,
-        replyText: replyResult.replyText
+        outcome: `${execution.outcome} 已自动续聊 ${replyResult.rounds.length} 轮 NPC 对话。`,
+        replyText: replyResult.replyText,
+        replyRounds: replyResult.rounds
       };
     }
   }
@@ -1078,12 +1213,15 @@ async function handleChat(request, response) {
       })
       : null;
     if (directReply) {
+      const conversationSummary = directReply.rounds
+        .map((round) => `NPC：${round.dialogText}\n籽小刀：${round.replyText}`)
+        .join("\n\n");
       appendMessage({
         role: "assistant",
-        text: `已读取当前 NPC 对话并发送回复：${directReply.replyText}`,
+        text: conversationSummary,
         thinkingChain: [],
-        recoveryLine: "当前聊天页已完成一次读取、回复和发送。",
-        perceptionSummary: "本轮直接基于当前聊天页执行，没有重新找 NPC。",
+        recoveryLine: `当前聊天页已续聊 ${directReply.rounds.length} 轮，停在 ${directReply.stopReason}。`,
+        perceptionSummary: "本轮直接接管当前聊天页，并持续跟 NPC 往下聊了几轮。",
         sceneLabel: "聊天页直连",
         riskLevel: "low",
         actions: directReply.execution.steps

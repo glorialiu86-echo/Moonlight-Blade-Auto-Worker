@@ -205,7 +205,7 @@ ACTION_POINTS = {
     "close_panel": (2494 / 2537, 48 / 1384),
     "trade_left_item_tab": (0.037, 0.394),
     "trade_left_item_slot": (0.115, 0.409),
-    "trade_left_up_shelf_button": (0.362, 0.794),
+    "trade_left_up_shelf_button": (0.362, 0.764),
     "trade_right_money_slot": (0.843, 0.159),
     "trade_scale_button": (0.744, 0.542),
     "trade_right_up_shelf_button": (0.639, 0.703),

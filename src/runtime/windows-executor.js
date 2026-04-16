@@ -19,7 +19,7 @@ function resolvePythonPath() {
 }
 
 function createWorkerActions(plan) {
-  return plan.actions.map((action, index) => {
+  return plan.actions.flatMap((action, index) => {
     const actionDefinition = getActionDefinition(action.type);
     const baseAction = {
       id: `input-${index + 1}`,
@@ -28,6 +28,12 @@ function createWorkerActions(plan) {
     };
 
     switch (action.type) {
+      case "sale":
+        return createPrimitiveActions("sale").map((primitiveAction, primitiveIndex) => ({
+          ...primitiveAction,
+          id: `${baseAction.id}-primitive-${primitiveIndex + 1}`,
+          sourceType: action.type
+        }));
       case "talk":
         return {
           ...baseAction,
@@ -294,6 +300,118 @@ export function createPrimitiveActions(sequenceName) {
         },
         {
           id: "primitive-9",
+          title: "开始出摊",
+          type: "submit_hawking",
+          postDelayMs: 1000
+        }
+      ];
+    case "sale":
+      return [
+        {
+          id: "primitive-1",
+          title: "打开地图去货商",
+          type: "map_route_to_coordinate",
+          xCoordinate: 667,
+          yCoordinate: 554,
+          postDelayMs: 1000,
+          waitAfterGoMs: 1000
+        },
+        {
+          id: "primitive-2",
+          title: "收起地图准备找货商",
+          type: "press_key",
+          key: "m",
+          postDelayMs: 1000
+        },
+        {
+          id: "primitive-3",
+          title: "等待籽岷跑到货商",
+          type: "sleep",
+          durationMs: 15000
+        },
+        {
+          id: "primitive-4",
+          title: "下马准备进货",
+          type: "press_key",
+          key: "1",
+          postDelayMs: 1000
+        },
+        {
+          id: "primitive-5",
+          title: "矫正视角准备进货",
+          type: "press_key",
+          key: "v",
+          postDelayMs: 1000
+        },
+        {
+          id: "primitive-6",
+          title: "打开阿依娜进货页",
+          type: "open_named_vendor_purchase",
+          targetName: "阿依娜",
+          approachSteps: 2,
+          approachMovePulseMs: 180,
+          interactAttempts: 3,
+          postDelayMs: 1000
+        },
+        {
+          id: "primitive-7",
+          title: "买满墨锭并关闭面板",
+          type: "buy_current_vendor_item",
+          itemName: "墨锭",
+          quantity: 1,
+          postDelayMs: 1000
+        },
+        {
+          id: "primitive-8",
+          title: "打开地图去大街",
+          type: "map_route_to_coordinate",
+          xCoordinate: 670,
+          yCoordinate: 538,
+          postDelayMs: 1000,
+          waitAfterGoMs: 1000
+        },
+        {
+          id: "primitive-9",
+          title: "收起地图准备叫卖",
+          type: "press_key",
+          key: "m",
+          postDelayMs: 1000
+        },
+        {
+          id: "primitive-10",
+          title: "等待籽岷跑到大街",
+          type: "sleep",
+          durationMs: 15000
+        },
+        {
+          id: "primitive-11",
+          title: "下马准备叫卖",
+          type: "press_key",
+          key: "1",
+          postDelayMs: 1000
+        },
+        {
+          id: "primitive-12",
+          title: "矫正视角准备叫卖",
+          type: "press_key",
+          key: "v",
+          postDelayMs: 1000
+        },
+        {
+          id: "primitive-13",
+          title: "打开叫卖界面",
+          type: "press_shortcut",
+          shortcut: "hawking",
+          postDelayMs: 2000
+        },
+        {
+          id: "primitive-14",
+          title: "选中货物并上架",
+          type: "stock_first_hawking_item",
+          postDelayMs: 1000
+        },
+        {
+          id: "primitive-15",
           title: "开始出摊",
           type: "submit_hawking",
           postDelayMs: 1000

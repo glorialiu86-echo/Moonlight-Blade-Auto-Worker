@@ -1,4 +1,11 @@
 export const ACTION_REGISTRY = {
+  sale: {
+    key: "sale",
+    label: "叫卖赚钱",
+    executorType: "primitive_sequence",
+    availability: "ready",
+    note: "我会按整条固定链路执行：开地图、找货商、进货、去大街、上货出摊。"
+  },
   talk: {
     key: "talk",
     label: "搭话",

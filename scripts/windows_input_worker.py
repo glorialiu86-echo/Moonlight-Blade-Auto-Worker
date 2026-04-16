@@ -182,6 +182,12 @@ NPC_STAGE_ROIS = {
     "selected_target": (0.20, 0.18, 0.42, 0.36),
 }
 
+MAP_STAGE_ROIS = {
+    "left_panel": (0.00, 0.05, 0.40, 0.90),
+    "route_panel": (0.60, 0.76, 0.86, 0.96),
+    "keypad_panel": (0.36, 0.50, 0.78, 0.94),
+}
+
 ACTION_POINTS = {
     "view": (0.32, 0.57),
     "talk": (1870 / 2537, 1252 / 1384),
@@ -205,6 +211,9 @@ ACTION_POINTS = {
     # Keep the point calibrated now; do not assume the button is clickable
     # until the text-entry chain is wired in.
     "chat_send": (938 / 2537, 1289 / 1384),
+    "map_coord_y_input": (1270 / 1848, 893 / 1020),
+    "map_coord_x_input": (1383 / 1848, 893 / 1020),
+    "map_go": (1518 / 1848, 891 / 1020),
 }
 
 # Source of truth for the currently configured in-game shortcuts from the
@@ -360,6 +369,7 @@ CHAT_KEYWORDS = ["点击输入聊天", "发送", "第一次见面", "好感度"]
 GIFT_KEYWORDS = ["赠礼", "选择礼物", "赠送", "好感度"]
 TRADE_KEYWORDS = ["交易结果预览", "交易倒计时", "上架", "我的", "总价"]
 CONFIRM_KEYWORDS = ["确认", "闲聊", "取消"]
+MAP_KEYWORDS = ["点击输入坐标寻路", "前往", "灵犀盏追踪目标", "通缉追踪目标"]
 
 
 def emit(payload: dict[str, Any]) -> None:
@@ -670,6 +680,288 @@ def contains_any_keyword(text: str, keywords: list[str]) -> bool:
 def count_keywords(text: str, keywords: list[str]) -> int:
     normalized = str(text or "").replace(" ", "")
     return sum(1 for keyword in keywords if keyword in normalized)
+
+
+def detect_map_screen(hwnd: int) -> dict[str, Any]:
+    stage_texts = {
+        name: ocr_text(capture_window_region(hwnd, roi))
+        for name, roi in MAP_STAGE_ROIS.items()
+    }
+    combined = " ".join(stage_texts.values())
+    return {
+        "visible": contains_any_keyword(combined, MAP_KEYWORDS),
+        "texts": stage_texts,
+    }
+
+
+def ensure_map_screen_open(hwnd: int, title: str, toggle_key: str = "m", timeout_ms: int = 2500) -> dict[str, Any]:
+    focus_window(hwnd)
+    current_state = detect_map_screen(hwnd)
+    if current_state["visible"]:
+        return current_state
+
+    pydirectinput.press(toggle_key)
+    INPUT_GUARD.refresh_baseline()
+    deadline = time.time() + timeout_ms / 1000.0
+
+    while time.time() <= deadline:
+        INPUT_GUARD.guarded_sleep(120, title)
+        current_state = detect_map_screen(hwnd)
+        if current_state["visible"]:
+            return current_state
+
+    raise RuntimeError("Failed to open map screen before timeout")
+
+
+def find_map_keypad_digit_buttons(hwnd: int, sample_count: int = 4, sample_gap_ms: int = 120) -> dict[str, dict[str, Any]]:
+    roi = MAP_STAGE_ROIS["keypad_panel"]
+    digit_map: dict[str, dict[str, Any]] = {}
+    for sample_index in range(max(1, sample_count)):
+        bounds = get_window_bounds(hwnd)
+        image = capture_window_region(hwnd, roi)
+        items = ocr_items(image)
+
+        for item in items:
+            normalized = re.sub(r"\s+", "", str(item["text"] or ""))
+            if not re.fullmatch(r"\d", normalized):
+                continue
+
+            current = digit_map.get(normalized)
+            if current and current["score"] >= item["score"]:
+                continue
+
+            digit_map[normalized] = {
+                "digit": normalized,
+                "score": round(item["score"], 3),
+                "screenX": round(bounds["left"] + bounds["width"] * roi[0] + item["centerX"]),
+                "screenY": round(bounds["top"] + bounds["height"] * roi[1] + item["centerY"]),
+                "minX": item["minX"],
+                "maxX": item["maxX"],
+                "minY": item["minY"],
+                "maxY": item["maxY"],
+            }
+
+        if sample_index < max(1, sample_count) - 1:
+            INPUT_GUARD.guarded_sleep(sample_gap_ms, "find_map_keypad_digit_buttons")
+
+    return digit_map
+
+
+def find_map_route_controls(hwnd: int) -> dict[str, dict[str, Any]]:
+    roi = MAP_STAGE_ROIS["route_panel"]
+    bounds = get_window_bounds(hwnd)
+    image = capture_window_region(hwnd, roi)
+    items = ocr_items(image)
+    controls: dict[str, dict[str, Any]] = {}
+
+    for item in items:
+        normalized = re.sub(r"\s+", "", str(item["text"] or ""))
+        if not normalized:
+            continue
+
+        if "前往" in normalized:
+            controls["go"] = {
+                "screenX": round(bounds["left"] + bounds["width"] * roi[0] + item["centerX"]),
+                "screenY": round(bounds["top"] + bounds["height"] * roi[1] + item["centerY"]),
+            }
+            continue
+
+        if "纵" in normalized or "緃" in normalized:
+            controls["vertical"] = {
+                "screenX": round(bounds["left"] + bounds["width"] * roi[0] + min(item["centerX"] + 56, image.shape[1] - 12)),
+                "screenY": round(bounds["top"] + bounds["height"] * roi[1] + item["centerY"]),
+            }
+            continue
+
+        if "横" in normalized:
+            controls["horizontal"] = {
+                "screenX": round(bounds["left"] + bounds["width"] * roi[0] + min(item["centerX"] + 56, image.shape[1] - 12)),
+                "screenY": round(bounds["top"] + bounds["height"] * roi[1] + item["centerY"]),
+            }
+
+    return controls
+
+
+def click_map_route_control(hwnd: int, control_name: str, fallback_point_name: str) -> dict[str, Any]:
+    controls = find_map_route_controls(hwnd)
+    control = controls.get(control_name)
+    if control:
+        click_state = click_screen_point(hwnd, int(control["screenX"]), int(control["screenY"]), "left")
+        click_state["controlName"] = control_name
+        click_state["locator"] = "ocr"
+        return click_state
+
+    click_state = click_named_point(hwnd, fallback_point_name)
+    click_state["controlName"] = control_name
+    click_state["locator"] = "fallback_ratio"
+    return click_state
+
+
+def derive_map_keypad_layout(digit_buttons: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    def mean_if_any(keys: list[str], axis: str) -> float | None:
+        values = [digit_buttons[key][axis] for key in keys if key in digit_buttons]
+        if not values:
+            return None
+        return float(np.mean(values))
+
+    def resolve_triplet(first: float | None, second: float | None, third: float | None, label: str) -> tuple[float, float, float]:
+        if first is None and second is not None and third is not None:
+            first = second - (third - second)
+        if second is None and first is not None and third is not None:
+            second = (first + third) / 2.0
+        if third is None and first is not None and second is not None:
+            third = second + (second - first)
+        if first is None or second is None or third is None:
+            raise RuntimeError(f"Map keypad OCR could not locate {label}")
+        return first, second, third
+
+    col1, col2, col3 = resolve_triplet(
+        mean_if_any(["1", "4", "7"], "screenX"),
+        mean_if_any(["2", "5", "8"], "screenX"),
+        mean_if_any(["3", "6", "9"], "screenX"),
+        "keypad columns",
+    )
+    row1, row2, row3 = resolve_triplet(
+        mean_if_any(["1", "2", "3"], "screenY"),
+        mean_if_any(["4", "5", "6", "0"], "screenY"),
+        mean_if_any(["7", "8", "9"], "screenY"),
+        "keypad rows",
+    )
+    column_gap = np.mean([col2 - col1, col3 - col2])
+    row_gap = np.mean([row2 - row1, row3 - row2])
+    col4 = col3 + column_gap
+
+    synthesized_positions = {
+        "1": {"screenX": round(col1), "screenY": round(row1)},
+        "2": {"screenX": round(col2), "screenY": round(row1)},
+        "3": {"screenX": round(col3), "screenY": round(row1)},
+        "4": {"screenX": round(col1), "screenY": round(row2)},
+        "5": {"screenX": round(col2), "screenY": round(row2)},
+        "6": {"screenX": round(col3), "screenY": round(row2)},
+        "7": {"screenX": round(col1), "screenY": round(row3)},
+        "8": {"screenX": round(col2), "screenY": round(row3)},
+        "9": {"screenX": round(col3), "screenY": round(row3)},
+        "0": {"screenX": round(col4), "screenY": round(row2)},
+        "delete": {"screenX": round(col4), "screenY": round(row1)},
+        "confirm": {"screenX": round(col4), "screenY": round(row3)},
+    }
+
+    button_map = {
+        key: {
+            **synthesized_positions[key],
+            **({"digit": key, "score": round(digit_buttons[key]["score"], 3)} if key in digit_buttons else {}),
+        }
+        for key in synthesized_positions
+    }
+
+    return {
+        "buttons": button_map,
+        "columnGap": round(float(column_gap), 2),
+        "rowGap": round(float(row_gap), 2),
+    }
+
+
+def clear_map_coordinate_field(hwnd: int, layout: dict[str, Any], repeat: int, title: str) -> None:
+    delete_button = layout["buttons"]["delete"]
+    for _ in range(max(1, repeat)):
+        click_screen_point(hwnd, int(delete_button["screenX"]), int(delete_button["screenY"]), "left")
+        INPUT_GUARD.guarded_sleep(60, title)
+
+
+def input_map_coordinate_field(
+    hwnd: int,
+    point_name: str,
+    control_name: str,
+    coordinate_value: int,
+    field_name: str,
+    title: str,
+) -> dict[str, Any]:
+    activation_attempts: list[dict[str, Any]] = []
+    click_state = None
+    last_error = None
+    layout = None
+
+    for _ in range(3):
+        click_state = click_map_route_control(hwnd, control_name, point_name)
+        activation_attempts.append(click_state)
+        INPUT_GUARD.guarded_sleep(220, title)
+        digit_buttons = find_map_keypad_digit_buttons(hwnd)
+        try:
+            layout = derive_map_keypad_layout(digit_buttons)
+            break
+        except RuntimeError as exc:
+            last_error = str(exc)
+            INPUT_GUARD.guarded_sleep(120, title)
+            continue
+
+    if layout is None or click_state is None:
+        raise RuntimeError(last_error or f"Failed to activate map {field_name} field keypad")
+
+    digits = list(str(int(coordinate_value)))
+
+    clear_map_coordinate_field(hwnd, layout, 4, title)
+
+    typed_digits: list[dict[str, Any]] = []
+    for digit in digits:
+        button = layout["buttons"].get(digit)
+        if not button:
+            raise RuntimeError(f"Map keypad button for digit {digit} was not found")
+        click_screen_point(hwnd, int(button["screenX"]), int(button["screenY"]), "left")
+        INPUT_GUARD.guarded_sleep(80, title)
+        typed_digits.append({
+            "digit": digit,
+            "screenX": int(button["screenX"]),
+            "screenY": int(button["screenY"]),
+        })
+
+    return {
+        "fieldName": field_name,
+        "value": int(coordinate_value),
+        "fieldClick": click_state,
+        "activationAttempts": activation_attempts,
+        "typedDigits": typed_digits,
+        "digitButtons": {
+            key: {
+                "screenX": int(value["screenX"]),
+                "screenY": int(value["screenY"]),
+            }
+            for key, value in layout["buttons"].items()
+            if key in {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "delete", "confirm"}
+        },
+    }
+
+
+def run_map_route_to_coordinate(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "map_route_to_coordinate")
+    x_coordinate = int(action.get("xCoordinate"))
+    y_coordinate = int(action.get("yCoordinate"))
+    wait_after_go_ms = int(action.get("waitAfterGoMs") or 0)
+    toggle_key = str(action.get("toggleKey") or "m").strip().lower()
+
+    map_state = ensure_map_screen_open(hwnd, title, toggle_key=toggle_key)
+    y_input = input_map_coordinate_field(hwnd, "map_coord_y_input", "vertical", y_coordinate, "vertical", title)
+    x_input = input_map_coordinate_field(hwnd, "map_coord_x_input", "horizontal", x_coordinate, "horizontal", title)
+    go_click = click_map_route_control(hwnd, "go", "map_go")
+    INPUT_GUARD.guarded_sleep(max(200, wait_after_go_ms), title)
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Opened map and started routing to ({x_coordinate}, {y_coordinate})",
+        "input": {
+            "mode": "map_route_to_coordinate",
+            "toggleKey": toggle_key,
+            "mapTexts": map_state["texts"],
+            "xCoordinate": x_coordinate,
+            "yCoordinate": y_coordinate,
+            "verticalInput": y_input,
+            "horizontalInput": x_input,
+            "goClick": go_click,
+            "waitAfterGoMs": wait_after_go_ms,
+        },
+    }
 
 
 def detect_dialog(hwnd: int) -> dict[str, Any]:
@@ -2012,6 +2304,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     if action_type == "town_npc_social_loop":
         return run_town_npc_social_loop(hwnd, action)
 
+    if action_type == "map_route_to_coordinate":
+        return run_map_route_to_coordinate(hwnd, action)
+
     if action_type == "move_forward_pulse":
         return run_move_forward_pulse(hwnd, action)
 
@@ -2163,6 +2458,7 @@ def main() -> None:
 
     payload = json.loads(raw)
     window_title_keyword = str(payload.get("windowTitleKeyword") or "天涯明月刀手游").strip()
+    interrupt_on_external_input = bool(payload.get("interruptOnExternalInput", False))
     actions = payload.get("actions") or []
 
     if not actions:

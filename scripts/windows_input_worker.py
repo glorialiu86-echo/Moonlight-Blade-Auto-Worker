@@ -436,17 +436,64 @@ def get_ocr_engine() -> RapidOCR:
     return OCR_ENGINE
 
 
-def find_window(window_title_keyword: str) -> int | None:
-    matches: list[tuple[int, str, int]] = []
-    keyword = window_title_keyword.lower()
+DEFAULT_GAME_WINDOW_HINTS = ["天涯", "明月", "刀", "手游"]
+
+
+DEFAULT_GAME_WINDOW_HINTS = [
+    "\u5929\u6daf",
+    "\u660e\u6708",
+    "\u5200",
+    "\u624b\u6e38",
+]
+GAME_PLAYER_NAME_ANCHORS = [
+    "\u7c7d\u5cb7\u56e2\u961f",
+    "\u56e2\u961f",
+]
+
+def normalize_window_text(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or "")).lower()
+
+
+def build_window_search_terms(window_title_keyword: str) -> list[str]:
+    raw = str(window_title_keyword or "").strip()
+    if not raw:
+        return list(DEFAULT_GAME_WINDOW_HINTS)
+
+    parts = [part.strip() for part in re.split(r"[|,;/\s]+", raw) if part.strip()]
+    if not parts:
+        return list(DEFAULT_GAME_WINDOW_HINTS)
+
+    search_terms: list[str] = []
+    for part in parts:
+        normalized = normalize_window_text(part)
+        if normalized and normalized not in search_terms:
+            search_terms.append(normalized)
+
+    for hint in DEFAULT_GAME_WINDOW_HINTS:
+        normalized_hint = normalize_window_text(hint)
+        if normalized_hint and normalized_hint not in search_terms:
+            search_terms.append(normalized_hint)
+
+    return search_terms
+
+
+def list_window_candidates(window_title_keyword: str) -> list[dict[str, Any]]:
+    search_terms = build_window_search_terms(window_title_keyword)
+    foreground_hwnd = win32gui.GetForegroundWindow()
+    candidates: list[dict[str, Any]] = []
 
     def callback(hwnd: int, _lparam: int) -> bool:
         if not win32gui.IsWindowVisible(hwnd):
             return True
 
         title = win32gui.GetWindowText(hwnd).strip()
-        if not title or keyword not in title.lower():
+        if not title:
             return True
+
+        try:
+            class_name = win32gui.GetClassName(hwnd)
+        except Exception:
+            class_name = ""
 
         try:
             _client_left, _client_top = win32gui.ClientToScreen(hwnd, (0, 0))
@@ -454,19 +501,115 @@ def find_window(window_title_keyword: str) -> int | None:
         except Exception:
             return True
 
-        area = max(0, client_right) * max(0, client_bottom)
+        width = max(0, int(client_right))
+        height = max(0, int(client_bottom))
+        area = width * height
         if area <= 0:
             return True
-        matches.append((hwnd, title, area))
+
+        normalized_title = normalize_window_text(title)
+        matched_terms = [term for term in search_terms if term and term in normalized_title]
+        all_hints_matched = all(normalize_window_text(hint) in normalized_title for hint in DEFAULT_GAME_WINDOW_HINTS)
+
+        score = 0
+        if hwnd == foreground_hwnd:
+            score += 300
+        score += min(area // 5000, 200)
+        score += len(matched_terms) * 120
+        if all_hints_matched:
+            score += 240
+
+        normalized_class = normalize_window_text(class_name)
+        if "chrome_widgetwin" in normalized_class:
+            score -= 120
+        if "visualstudiocode" in normalized_title or "code" == normalized_title:
+            score -= 260
+
+        candidates.append(
+            {
+                "hwnd": hwnd,
+                "title": title,
+                "className": class_name,
+                "width": width,
+                "height": height,
+                "area": area,
+                "isForeground": hwnd == foreground_hwnd,
+                "matchedTerms": matched_terms,
+                "score": score,
+            }
+        )
         return True
 
     win32gui.EnumWindows(callback, 0)
+    candidates.sort(
+        key=lambda item: (
+            int(item["score"]),
+            int(item["isForeground"]),
+            int(item["area"]),
+        ),
+        reverse=True,
+    )
+    return candidates
 
-    if not matches:
+
+def find_window(window_title_keyword: str) -> int | None:
+    candidates = list_window_candidates(window_title_keyword)
+    if not candidates:
         return None
 
-    matches.sort(key=lambda item: item[2], reverse=True)
-    return matches[0][0]
+    best = candidates[0]
+    if best["score"] < 100:
+        return None
+    return int(best["hwnd"])
+
+
+def activate_game_window_by_player_name() -> dict[str, Any] | None:
+    image, monitor = capture_virtual_screen()
+    items = ocr_items(image)
+    items.extend(ocr_items_upscaled(image, 2.0))
+
+    best_match = None
+    best_score = None
+    for item in items:
+        normalized = re.sub(r"\s+", "", str(item["text"] or ""))
+        if not normalized:
+            continue
+        if not any(anchor in normalized for anchor in GAME_PLAYER_NAME_ANCHORS):
+            continue
+
+        score = float(item["score"])
+        if normalized == GAME_PLAYER_NAME_ANCHORS[0]:
+            score += 1.0
+
+        if best_score is None or score > best_score:
+            best_score = score
+            best_match = {
+                "text": normalized,
+                "score": round(float(item["score"]), 4),
+                "screenX": round(monitor["left"] + item["centerX"]),
+                "screenY": round(monitor["top"] + item["centerY"] + 18),
+            }
+
+    if best_match is None:
+        return None
+
+    pydirectinput.click(x=int(best_match["screenX"]), y=int(best_match["screenY"]), button="left")
+    INPUT_GUARD.refresh_baseline()
+    time.sleep(0.25)
+    return best_match
+
+
+def resolve_game_window(window_title_keyword: str) -> tuple[int | None, dict[str, Any] | None]:
+    hwnd = find_window(window_title_keyword)
+    if hwnd:
+        return hwnd, None
+
+    activation = activate_game_window_by_player_name()
+    if not activation:
+        return None, None
+
+    hwnd = find_window(window_title_keyword)
+    return hwnd, activation
 
 
 def get_window_bounds(hwnd: int) -> dict[str, Any]:
@@ -538,6 +681,18 @@ def capture_screen_rect(left: int, top: int, width: int, height: int) -> np.ndar
         )
 
     return frame[:, :, :3]
+
+
+def capture_virtual_screen() -> tuple[np.ndarray, dict[str, int]]:
+    with mss.mss() as screen_capture:
+        monitor = screen_capture.monitors[0]
+        frame = np.array(screen_capture.grab(monitor))
+    return frame[:, :, :3], {
+        "left": int(monitor["left"]),
+        "top": int(monitor["top"]),
+        "width": int(monitor["width"]),
+        "height": int(monitor["height"]),
+    }
 
 
 def save_debug_image(
@@ -3210,5 +3365,76 @@ def main() -> None:
     )
 
 
+def main_v2() -> None:
+    raw = sys.stdin.buffer.read().decode("utf-8")
+    if not raw.strip():
+        emit({"ok": False, "message": "Missing execution payload"})
+        return
+
+    payload = json.loads(raw)
+    window_title_keyword = str(
+        payload.get("windowTitleKeyword")
+        or "\u5929\u6daf\u660e\u6708\u5200\u624b\u6e38"
+    ).strip()
+    interrupt_on_external_input = bool(payload.get("interruptOnExternalInput", False))
+    actions = payload.get("actions") or []
+
+    if not actions:
+        emit({"ok": False, "message": "No actions provided"})
+        return
+
+    hwnd, activation = resolve_game_window(window_title_keyword)
+    if not hwnd:
+        emit(
+            {
+                "ok": False,
+                "message": f"Window containing '{window_title_keyword}' was not found",
+                "errorCode": "WINDOW_NOT_FOUND",
+                "windowCandidates": list_window_candidates(window_title_keyword)[:5],
+            }
+        )
+        return
+
+    INPUT_GUARD.configure(interrupt_on_external_input)
+    results: list[dict[str, Any]] = []
+
+    try:
+        for action in actions:
+            results.append(run_action(hwnd, action))
+    except ActionExecutionError as exc:
+        emit(
+            {
+                "ok": False,
+                "message": str(exc),
+                "errorCode": exc.error_code,
+                "steps": results,
+                "failedStep": exc.failed_step,
+                "activationFallback": activation,
+            }
+        )
+        return
+    except Exception as exc:
+        emit(
+            {
+                "ok": False,
+                "message": str(exc),
+                "errorCode": "INPUT_EXECUTION_FAILED",
+                "steps": results,
+                "activationFallback": activation,
+            }
+        )
+        return
+
+    emit(
+        {
+            "ok": True,
+            "executor": "WindowsInputExecutor",
+            "windowTitleKeyword": window_title_keyword,
+            "activationFallback": activation,
+            "steps": results,
+        }
+    )
+
+
 if __name__ == "__main__":
-    main()
+    main_v2()

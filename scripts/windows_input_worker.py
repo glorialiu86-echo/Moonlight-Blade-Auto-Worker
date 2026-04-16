@@ -204,6 +204,8 @@ ACTION_POINTS = {
     "trade_right_currency_slot": (0.69, 0.57),
     "trade_right_up_shelf": (0.82, 0.82),
     "trade_submit": (0.53, 0.92),
+    "vendor_purchase_plus": (625 / 1848, 550 / 1020),
+    "vendor_purchase_buy": (634 / 1848, 716 / 1020),
     "gift_first_slot": (1721 / 2537, 580 / 1384),
     "gift_plus": (0.82, 0.92),
     "gift_submit": (2289 / 2537, 1216 / 1384),
@@ -371,6 +373,7 @@ GIFT_KEYWORDS = ["赠礼", "选择礼物", "赠送", "好感度"]
 TRADE_KEYWORDS = ["交易结果预览", "交易倒计时", "上架", "我的", "总价"]
 CONFIRM_KEYWORDS = ["确认", "闲聊", "取消"]
 MAP_KEYWORDS = ["点击输入坐标寻路", "前往", "灵犀盏追踪目标", "通缉追踪目标"]
+VENDOR_PURCHASE_KEYWORDS = ["进货", "购买", "购买数量", "每日进货体力消耗上限", "单价", "总价"]
 
 
 def emit(payload: dict[str, Any]) -> None:
@@ -692,6 +695,14 @@ def detect_map_screen(hwnd: int) -> dict[str, Any]:
     return {
         "visible": contains_any_keyword(combined, MAP_KEYWORDS),
         "texts": stage_texts,
+    }
+
+
+def detect_vendor_purchase_screen(hwnd: int) -> dict[str, Any]:
+    panel_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
+    return {
+        "visible": contains_any_keyword(panel_text, VENDOR_PURCHASE_KEYWORDS),
+        "text": panel_text,
     }
 
 
@@ -2041,10 +2052,10 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
     option_click = click_screen_point(hwnd, int(option_button["screenX"]), int(option_button["screenY"]), "left")
     INPUT_GUARD.guarded_sleep(500, title)
 
-    trade_state = detect_npc_interaction_stage(hwnd)
-    if trade_state["stage"] != "trade_screen":
+    purchase_state = detect_vendor_purchase_screen(hwnd)
+    if not purchase_state["visible"]:
         raise RuntimeError(
-            f"Vendor purchase option did not open trade screen. Last stage: {trade_state['stage'] or 'none'}"
+            "Vendor purchase option did not open purchase screen."
         )
 
     return {
@@ -2060,7 +2071,60 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
             "npcClick": click_state,
             "optionButton": option_button,
             "optionClick": option_click,
-            "stage": "trade_screen",
+            "stage": "vendor_purchase_screen",
+            "purchaseText": purchase_state["text"],
+        },
+    }
+
+
+def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "buy_current_vendor_item")
+    quantity = max(1, int(action.get("quantity") or 1))
+
+    purchase_state = detect_vendor_purchase_screen(hwnd)
+    if not purchase_state["visible"]:
+        raise RuntimeError("Current screen is not vendor purchase screen")
+
+    plus_clicks: list[dict[str, Any]] = []
+    for _ in range(max(0, quantity - 1)):
+        plus_click = click_named_point(hwnd, "vendor_purchase_plus")
+        plus_clicks.append(plus_click)
+        INPUT_GUARD.guarded_sleep(120, title)
+
+    buy_click = click_named_point(hwnd, "vendor_purchase_buy")
+    INPUT_GUARD.guarded_sleep(900, title)
+    after_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Bought current vendor item with quantity {quantity}",
+        "input": {
+            "mode": "buy_current_vendor_item",
+            "quantity": quantity,
+            "plusClicks": plus_clicks,
+            "buyClick": buy_click,
+            "beforeText": purchase_state["text"],
+            "afterText": after_text,
+        },
+    }
+
+
+def run_close_vendor_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "close_vendor_panel")
+    click_state = click_named_point(hwnd, "close_panel")
+    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 800), title)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Closed current vendor panel",
+        "input": {
+            "mode": "close_vendor_panel",
+            "click": click_state,
         },
     }
 
@@ -2523,6 +2587,12 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "open_named_vendor_purchase":
         return run_open_named_vendor_purchase(hwnd, action)
+
+    if action_type == "buy_current_vendor_item":
+        return run_buy_current_vendor_item(hwnd, action)
+
+    if action_type == "close_vendor_panel":
+        return run_close_vendor_panel(hwnd, action)
 
     if action_type == "move_forward_pulse":
         return run_move_forward_pulse(hwnd, action)

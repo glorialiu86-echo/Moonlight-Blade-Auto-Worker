@@ -220,7 +220,7 @@ ACTION_POINTS = {
     # until the text-entry chain is wired in.
     "chat_send": (938 / 2537, 1289 / 1384),
     "map_coord_y_input": (1300 / 1870, 843 / 976),
-    "map_coord_x_input": (1421 / 1870, 843 / 976),
+    "map_coord_x_input": (1405 / 1870, 842 / 976),
     "map_go": (1518 / 1870, 841 / 976),
 }
 

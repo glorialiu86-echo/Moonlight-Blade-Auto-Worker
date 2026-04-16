@@ -43,12 +43,21 @@ function createWorkerActions(plan) {
       case "talk":
         return {
           ...baseAction,
-          type: "town_npc_social_loop",
+          type: "talk_social_flow",
+          text: action.text || "",
           timeoutMs: 7000,
           movePulseMs: 160,
           scanIntervalMs: 180
         };
       case "gift":
+        return {
+          ...baseAction,
+          type: "gift_social_flow",
+          giftRounds: 2,
+          timeoutMs: 4500,
+          movePulseMs: 160,
+          scanIntervalMs: 180
+        };
       case "threaten":
       case "steal":
       case "strike":

@@ -222,11 +222,13 @@ ACTION_POINTS = {
     "gift_first_slot": (1721 / 2537, 580 / 1384),
     "gift_plus": (0.82, 0.92),
     "gift_submit": (2289 / 2537, 1216 / 1384),
+    "small_talk_confirm_dialog": (0.581, 0.746),
     "chat_input": (652 / 2537, 1294 / 1384),
     # Send is fixed UI, but it only becomes actionable after valid text input.
     # Keep the point calibrated now; do not assume the button is clickable
     # until the text-entry chain is wired in.
     "chat_send": (938 / 2537, 1289 / 1384),
+    "chat_exit": (0.425, 0.508),
     "map_coord_y_input": (1300 / 1870, 843 / 976),
     "map_coord_x_input": (1971 / 2643, 1213 / 1398),
     "map_go": (0.808551, 0.864807),
@@ -2840,6 +2842,103 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def run_gift_social_flow(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "gift_social_flow")
+    timeout_ms = int(action.get("timeoutMs") or DEFAULT_INTERACT_TIMEOUT_MS)
+    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
+    scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
+    gift_rounds = max(1, int(action.get("giftRounds") or 2))
+
+    menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
+    stage_history = list(menu_state["stageHistory"])
+    gift_clicks: list[dict[str, Any]] = []
+    submit_clicks: list[dict[str, Any]] = []
+
+    click_named_point(hwnd, "gift")
+    INPUT_GUARD.guarded_sleep(300, title)
+    gift_state = detect_npc_interaction_stage(hwnd)
+    stage_history.append(gift_state["stage"])
+    if gift_state["stage"] != "gift_screen":
+        raise RuntimeError(f"Gift flow did not reach gift screen. Last stage: {gift_state['stage'] or 'none'}")
+
+    for _ in range(gift_rounds):
+        gift_click = click_named_point(hwnd, "gift_first_slot")
+        gift_clicks.append(gift_click)
+        INPUT_GUARD.guarded_sleep(150, title)
+        submit_click = click_named_point(hwnd, "gift_submit")
+        submit_clicks.append(submit_click)
+        INPUT_GUARD.guarded_sleep(450, title)
+        gift_state = detect_npc_interaction_stage(hwnd)
+        stage_history.append(gift_state["stage"])
+
+    close_click = click_named_point(hwnd, "close_panel")
+    INPUT_GUARD.guarded_sleep(250, title)
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Completed {gift_rounds} gift rounds and closed the panel",
+        "input": {
+            "mode": "gift_social_flow",
+            "giftRounds": gift_rounds,
+            "stageHistory": stage_history,
+            "giftClicks": gift_clicks,
+            "submitClicks": submit_clicks,
+            "closeClick": close_click,
+        },
+    }
+
+
+def run_talk_social_flow(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "talk_social_flow")
+    timeout_ms = int(action.get("timeoutMs") or DEFAULT_INTERACT_TIMEOUT_MS)
+    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
+    scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
+    text = str(action.get("text") or "").strip()
+    if not text:
+        raise RuntimeError("talk_social_flow action requires text")
+
+    menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
+    stage_history = list(menu_state["stageHistory"])
+
+    talk_click = click_named_point(hwnd, "talk")
+    INPUT_GUARD.guarded_sleep(180, title)
+    small_talk_click = click_named_point(hwnd, "small_talk")
+    INPUT_GUARD.guarded_sleep(180, title)
+    confirm_click = click_named_point(hwnd, "small_talk_confirm_dialog")
+    INPUT_GUARD.guarded_sleep(350, title)
+
+    chat_state = detect_npc_interaction_stage(hwnd)
+    stage_history.append(chat_state["stage"])
+    if chat_state["stage"] != "chat_ready":
+        raise RuntimeError(f"Talk flow did not reach chat screen. Last stage: {chat_state['stage'] or 'none'}")
+
+    send_state = send_chat_message(hwnd, text, False, 0)
+    INPUT_GUARD.guarded_sleep(180, title)
+    exit_click = click_named_point(hwnd, "chat_exit")
+    INPUT_GUARD.guarded_sleep(250, title)
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Opened small talk, sent chat text, and exited chat",
+        "input": {
+            "mode": "talk_social_flow",
+            "stageHistory": stage_history,
+            "talkClick": talk_click,
+            "smallTalkClick": small_talk_click,
+            "confirmClick": confirm_click,
+            "sendState": send_state,
+            "exitClick": exit_click,
+            "text": text,
+        },
+    }
+
+
 def run_stealth_front_arc_strike(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "stealth_front_arc_strike")
@@ -3112,6 +3211,12 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "click_npc_interact":
         return run_click_npc_interact(hwnd, action)
+
+    if action_type == "gift_social_flow":
+        return run_gift_social_flow(hwnd, action)
+
+    if action_type == "talk_social_flow":
+        return run_talk_social_flow(hwnd, action)
 
     if action_type == "stealth_front_arc_strike":
         return run_stealth_front_arc_strike(hwnd, action)

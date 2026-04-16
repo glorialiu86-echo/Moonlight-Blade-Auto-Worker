@@ -206,8 +206,10 @@ ACTION_POINTS = {
     "trade_submit": (0.53, 0.92),
     "vendor_purchase_plus": (625 / 1848, 550 / 1020),
     "vendor_purchase_buy": (634 / 1848, 716 / 1020),
-    "hawking_shelf_first_slot": (0.45, 0.24),
+    "vendor_purchase_option": (1468 / 1870, 154 / 976),
+    "vendor_purchase_item_moding": (1558 / 1870, 379 / 976),
     "hawking_inventory_first_slot": (0.84, 0.20),
+    "hawking_stock_button": (0.615, 0.742),
     "hawking_submit": (0.92, 0.95),
     "gift_first_slot": (1721 / 2537, 580 / 1384),
     "gift_plus": (0.82, 0.92),
@@ -217,9 +219,40 @@ ACTION_POINTS = {
     # Keep the point calibrated now; do not assume the button is clickable
     # until the text-entry chain is wired in.
     "chat_send": (938 / 2537, 1289 / 1384),
-    "map_coord_y_input": (1270 / 1848, 893 / 1020),
-    "map_coord_x_input": (1383 / 1848, 893 / 1020),
-    "map_go": (1518 / 1848, 891 / 1020),
+    "map_coord_y_input": (1300 / 1870, 843 / 976),
+    "map_coord_x_input": (1421 / 1870, 843 / 976),
+    "map_go": (1518 / 1870, 841 / 976),
+}
+
+MAP_KEYPAD_POINTS = {
+    "vertical": {
+        "1": (778 / 1870, 552 / 976),
+        "2": (894 / 1870, 552 / 976),
+        "3": (1011 / 1870, 552 / 976),
+        "4": (778 / 1870, 665 / 976),
+        "5": (894 / 1870, 665 / 976),
+        "6": (1011 / 1870, 665 / 976),
+        "7": (778 / 1870, 777 / 976),
+        "8": (894 / 1870, 777 / 976),
+        "9": (1011 / 1870, 777 / 976),
+        "0": (1127 / 1870, 665 / 976),
+        "delete": (1127 / 1870, 552 / 976),
+        "confirm": (1127 / 1870, 777 / 976),
+    },
+    "horizontal": {
+        "1": (899 / 1870, 553 / 976),
+        "2": (1015 / 1870, 553 / 976),
+        "3": (1131 / 1870, 553 / 976),
+        "4": (899 / 1870, 665 / 976),
+        "5": (1015 / 1870, 665 / 976),
+        "6": (1131 / 1870, 665 / 976),
+        "7": (899 / 1870, 777 / 976),
+        "8": (1015 / 1870, 777 / 976),
+        "9": (1131 / 1870, 777 / 976),
+        "0": (1247 / 1870, 665 / 976),
+        "delete": (1247 / 1870, 553 / 976),
+        "confirm": (1247 / 1870, 777 / 976),
+    },
 }
 
 # Source of truth for the currently configured in-game shortcuts from the
@@ -809,17 +842,9 @@ def find_map_route_controls(hwnd: int) -> dict[str, dict[str, Any]]:
 
 
 def click_map_route_control(hwnd: int, control_name: str, fallback_point_name: str) -> dict[str, Any]:
-    controls = find_map_route_controls(hwnd)
-    control = controls.get(control_name)
-    if control:
-        click_state = click_screen_point(hwnd, int(control["screenX"]), int(control["screenY"]), "left")
-        click_state["controlName"] = control_name
-        click_state["locator"] = "ocr"
-        return click_state
-
     click_state = click_named_point(hwnd, fallback_point_name)
     click_state["controlName"] = control_name
-    click_state["locator"] = "fallback_ratio"
+    click_state["locator"] = "fixed_ratio"
     return click_state
 
 
@@ -902,26 +927,17 @@ def input_map_coordinate_field(
     field_name: str,
     title: str,
 ) -> dict[str, Any]:
-    activation_attempts: list[dict[str, Any]] = []
-    click_state = None
-    last_error = None
-    layout = None
-
-    for _ in range(3):
-        click_state = click_map_route_control(hwnd, control_name, point_name)
-        activation_attempts.append(click_state)
-        INPUT_GUARD.guarded_sleep(220, title)
-        digit_buttons = find_map_keypad_digit_buttons(hwnd)
-        try:
-            layout = derive_map_keypad_layout(digit_buttons)
-            break
-        except RuntimeError as exc:
-            last_error = str(exc)
-            INPUT_GUARD.guarded_sleep(120, title)
-            continue
-
-    if layout is None or click_state is None:
-        raise RuntimeError(last_error or f"Failed to activate map {field_name} field keypad")
+    click_state = click_map_route_control(hwnd, control_name, point_name)
+    INPUT_GUARD.guarded_sleep(220, title)
+    layout = {
+        "buttons": {
+            key: {
+                "screenX": round(get_window_bounds(hwnd)["left"] + get_window_bounds(hwnd)["width"] * value[0]),
+                "screenY": round(get_window_bounds(hwnd)["top"] + get_window_bounds(hwnd)["height"] * value[1]),
+            }
+            for key, value in MAP_KEYPAD_POINTS[field_name].items()
+        }
+    }
 
     digits = list(str(int(coordinate_value)))
 
@@ -944,7 +960,7 @@ def input_map_coordinate_field(
         "fieldName": field_name,
         "value": int(coordinate_value),
         "fieldClick": click_state,
-        "activationAttempts": activation_attempts,
+        "activationAttempts": [click_state],
         "typedDigits": typed_digits,
         "digitButtons": {
             key: {
@@ -2092,13 +2108,7 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
     click_state = click_screen_point(hwnd, int(npc_anchor["screenX"]), int(npc_anchor["screenY"]), "left")
     INPUT_GUARD.guarded_sleep(450, title)
 
-    option_button = find_text_button_in_roi(hwnd, NPC_STAGE_ROIS["confirm_dialog"], option_text)
-    if not option_button:
-        option_button = find_text_button_in_roi(hwnd, NPC_STAGE_ROIS["trade_panel"], option_text)
-    if not option_button:
-        raise RuntimeError(f"Failed to find vendor option after clicking {target_name}: {option_text}")
-
-    option_click = click_screen_point(hwnd, int(option_button["screenX"]), int(option_button["screenY"]), "left")
+    option_click = click_named_point(hwnd, "vendor_purchase_option")
     INPUT_GUARD.guarded_sleep(500, title)
 
     purchase_state = detect_vendor_purchase_screen(hwnd)
@@ -2118,7 +2128,6 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
             "optionText": option_text,
             "npcAnchor": npc_anchor,
             "npcClick": click_state,
-            "optionButton": option_button,
             "optionClick": option_click,
             "stage": "vendor_purchase_screen",
             "purchaseText": purchase_state["text"],
@@ -2136,11 +2145,13 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
     if not purchase_state["visible"]:
         raise RuntimeError("Current screen is not vendor purchase screen")
 
-    item_button = find_vendor_item_button(hwnd, item_name)
-    if not item_button:
-        raise RuntimeError(f"Failed to locate vendor item: {item_name}")
+    item_key = normalize_npc_name(item_name)
+    if item_key == normalize_npc_name("墨锭"):
+        item_button = {"pointName": "vendor_purchase_item_moding"}
+    else:
+        raise RuntimeError(f"Unsupported fixed vendor item: {item_name}")
 
-    item_click = click_screen_point(hwnd, int(item_button["screenX"]), int(item_button["screenY"]), "left")
+    item_click = click_named_point(hwnd, item_button["pointName"])
     INPUT_GUARD.guarded_sleep(300, title)
 
     plus_clicks: list[dict[str, Any]] = []
@@ -2198,19 +2209,19 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
 
     inventory_click = click_named_point(hwnd, "hawking_inventory_first_slot")
     INPUT_GUARD.guarded_sleep(250, title)
-    shelf_click = click_named_point(hwnd, "hawking_shelf_first_slot")
+    stock_click = click_named_point(hwnd, "hawking_stock_button")
     INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 700), title)
 
     return {
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Selected first hawking inventory item and stocked it on the first shelf slot",
+        "detail": "Selected first hawking inventory item and clicked the stock button",
         "input": {
             "mode": "stock_first_hawking_item",
             "beforeText": hawking_state["text"],
             "inventoryClick": inventory_click,
-            "shelfClick": shelf_click,
+            "stockClick": stock_click,
         },
     }
 

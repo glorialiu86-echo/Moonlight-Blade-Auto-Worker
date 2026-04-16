@@ -203,12 +203,13 @@ ACTION_POINTS = {
     "gift": (2404 / 2537, 1141 / 1384),
     "target_close": (1115 / 2537, 691 / 1384),
     "close_panel": (2494 / 2537, 48 / 1384),
-    "trade_left_slot": (0.27, 0.33),
-    "trade_left_up_shelf": (0.38, 0.82),
-    "trade_right_slot": (0.82, 0.20),
-    "trade_right_currency_slot": (0.69, 0.57),
-    "trade_right_up_shelf": (0.82, 0.82),
-    "trade_submit": (0.53, 0.92),
+    "trade_left_item_tab": (0.037, 0.394),
+    "trade_left_item_slot": (0.115, 0.409),
+    "trade_left_up_shelf_button": (0.362, 0.794),
+    "trade_right_money_slot": (0.843, 0.159),
+    "trade_scale_button": (0.744, 0.542),
+    "trade_right_up_shelf_button": (0.639, 0.703),
+    "trade_final_submit_button": (0.510, 0.905),
     "vendor_purchase_plus": (625 / 1848, 550 / 1020),
     "vendor_purchase_buy": (634 / 1848, 716 / 1020),
     "vendor_purchase_max_quantity": (740 / 2048, 597 / 1151),
@@ -1376,6 +1377,40 @@ def click_named_point(hwnd: int, point_name: str) -> dict[str, Any]:
     return click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
 
 
+def execute_fixed_trade_flow(hwnd: int, title: str) -> dict[str, Any]:
+    # After the moving-target selection and the fixed trade entry button,
+    # the rest of the trade UI is owned by one calibrated fixed-click chain.
+    fixed_clicks = [
+        ("trade_left_item_tab", 180),
+        ("trade_left_item_slot", 260),
+        ("trade_left_up_shelf_button", 320),
+        ("trade_right_money_slot", 220),
+        ("trade_scale_button", 220),
+        ("trade_right_up_shelf_button", 320),
+        ("trade_final_submit_button", 380),
+    ]
+    click_results: list[dict[str, Any]] = []
+    stage_history = ["trade_screen"]
+
+    for point_name, delay_ms in fixed_clicks:
+        click_results.append({
+            "point": point_name,
+            "click": click_named_point(hwnd, point_name),
+        })
+        INPUT_GUARD.guarded_sleep(delay_ms, title)
+        stage_state = detect_npc_interaction_stage(hwnd)
+        stage_history.append(stage_state["stage"])
+        if point_name != "trade_final_submit_button" and stage_state["stage"] != "trade_screen":
+            raise RuntimeError(
+                f"Trade flow left trade screen after {point_name}. Last stage: {stage_state['stage'] or 'none'}"
+            )
+
+    return {
+        "clicks": click_results,
+        "stageHistory": stage_history,
+    }
+
+
 def click_screen_point(hwnd: int, screen_x: int, screen_y: int, button: str = "left") -> dict[str, Any]:
     focus_window(hwnd)
     pydirectinput.click(x=screen_x, y=screen_y, button=button)
@@ -2393,6 +2428,40 @@ def run_open_named_npc_trade(hwnd: int, action: dict[str, Any]) -> dict[str, Any
     }
 
 
+def run_named_npc_trade_flow(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "named_npc_trade_flow")
+    target_name = str(action.get("targetName") or "").strip()
+    timeout_ms = int(action.get("timeoutMs") or 5000)
+
+    if not target_name:
+        raise RuntimeError("named_npc_trade_flow action requires targetName")
+
+    open_result = run_open_named_npc_trade(
+        hwnd,
+        {
+            "id": action_id,
+            "title": title,
+            "targetName": target_name,
+            "timeoutMs": timeout_ms,
+        },
+    )
+    trade_result = execute_fixed_trade_flow(hwnd, title)
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Completed fixed trade flow for {target_name}",
+        "input": {
+            "mode": "named_npc_trade_flow",
+            "targetName": target_name,
+            "openTrade": open_result["input"],
+            "tradeFlow": trade_result,
+        },
+    }
+
+
 def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "open_named_vendor_purchase")
@@ -3110,18 +3179,8 @@ def run_town_npc_social_loop(hwnd: int, action: dict[str, Any]) -> dict[str, Any
     stage_history.append(trade_state["stage"])
 
     if trade_state["stage"] == "trade_screen":
-        click_named_point(hwnd, "trade_left_slot")
-        INPUT_GUARD.guarded_sleep(200, "town_npc_social_loop")
-        click_named_point(hwnd, "trade_left_up_shelf")
-        INPUT_GUARD.guarded_sleep(250, "town_npc_social_loop")
-        click_named_point(hwnd, "trade_right_slot")
-        INPUT_GUARD.guarded_sleep(200, "town_npc_social_loop")
-        click_named_point(hwnd, "trade_right_currency_slot")
-        INPUT_GUARD.guarded_sleep(150, "town_npc_social_loop")
-        click_named_point(hwnd, "trade_right_up_shelf")
-        INPUT_GUARD.guarded_sleep(250, "town_npc_social_loop")
-        click_named_point(hwnd, "trade_submit")
-        INPUT_GUARD.guarded_sleep(350, "town_npc_social_loop")
+        trade_flow_result = execute_fixed_trade_flow(hwnd, "town_npc_social_loop")
+        stage_history.extend(trade_flow_result["stageHistory"][1:])
         trade_completed = True
         exit_panel(hwnd)
 
@@ -3246,6 +3305,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "open_named_npc_trade":
         return run_open_named_npc_trade(hwnd, action)
+
+    if action_type == "named_npc_trade_flow":
+        return run_named_npc_trade_flow(hwnd, action)
 
     if action_type == "open_named_vendor_purchase":
         return run_open_named_vendor_purchase(hwnd, action)

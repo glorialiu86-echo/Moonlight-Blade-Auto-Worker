@@ -180,6 +180,7 @@ NPC_STAGE_ROIS = {
     "gift_panel": (0.64, 0.00, 1.00, 1.00),
     "trade_panel": (0.18, 0.00, 1.00, 1.00),
     "selected_target": (0.20, 0.18, 0.42, 0.36),
+    "scene_npc_search": (0.18, 0.14, 0.88, 0.78),
 }
 
 MAP_STAGE_ROIS = {
@@ -1854,6 +1855,216 @@ def find_selected_target_anchor(hwnd: int, target_text: str) -> dict[str, Any] |
     }
 
 
+def find_named_npc_in_scene(hwnd: int, target_text: str) -> dict[str, Any] | None:
+    roi = NPC_STAGE_ROIS["scene_npc_search"]
+    bounds = get_window_bounds(hwnd)
+    image = capture_window_region(hwnd, roi)
+    items = ocr_items(image)
+    keywords = [part for part in re.split(r"\s+", normalize_npc_name(target_text)) if part]
+
+    if not keywords:
+        return None
+
+    best_match = None
+    best_score = None
+    for item in items:
+        normalized = normalize_npc_name(item["text"])
+        if not normalized:
+            continue
+        if not any(keyword in normalized or normalized in keyword for keyword in keywords):
+            continue
+
+        score = float(item["score"])
+        if best_score is None or score > best_score:
+            best_score = score
+            best_match = item
+
+    if best_match is None:
+        return None
+
+    screen_x = round(bounds["left"] + bounds["width"] * roi[0] + best_match["centerX"])
+    screen_y = round(bounds["top"] + bounds["height"] * roi[1] + min(best_match["centerY"] + 86, image.shape[0] - 10))
+    return {
+        "text": best_match["text"],
+        "score": round(best_match["score"], 3),
+        "screenX": screen_x,
+        "screenY": screen_y,
+        "source": "scene_npc_search",
+    }
+
+
+def find_text_button_in_roi(hwnd: int, roi: tuple[float, float, float, float], target_text: str) -> dict[str, Any] | None:
+    bounds = get_window_bounds(hwnd)
+    image = capture_window_region(hwnd, roi)
+    items = ocr_items(image)
+    keywords = [part for part in re.split(r"\s+", normalize_npc_name(target_text)) if part]
+
+    if not keywords:
+        return None
+
+    best_match = None
+    best_score = None
+    for item in items:
+        normalized = normalize_npc_name(item["text"])
+        if not normalized:
+            continue
+        if not any(keyword in normalized or normalized in keyword for keyword in keywords):
+            continue
+        score = float(item["score"])
+        if best_score is None or score > best_score:
+            best_score = score
+            best_match = item
+
+    if best_match is None:
+        return None
+
+    return {
+        "text": best_match["text"],
+        "score": round(best_match["score"], 3),
+        "screenX": round(bounds["left"] + bounds["width"] * roi[0] + best_match["centerX"]),
+        "screenY": round(bounds["top"] + bounds["height"] * roi[1] + best_match["centerY"]),
+        "source": "roi_text_match",
+    }
+
+
+def run_open_named_npc_trade(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "open_named_npc_trade")
+    target_name = str(action.get("targetName") or "").strip()
+    timeout_ms = int(action.get("timeoutMs") or 5000)
+
+    if not target_name:
+        raise RuntimeError("open_named_npc_trade action requires targetName")
+
+    focus_window(hwnd)
+    npc_anchor = find_named_npc_in_scene(hwnd, target_name)
+    if not npc_anchor:
+        raise RuntimeError(f"Failed to locate named NPC in scene: {target_name}")
+
+    click_state = click_screen_point(hwnd, int(npc_anchor["screenX"]), int(npc_anchor["screenY"]), "left")
+    INPUT_GUARD.guarded_sleep(220, title)
+
+    stage_state = detect_npc_interaction_stage(hwnd)
+    stage_history = [stage_state["stage"]]
+    view_attempt = None
+
+    if stage_state["stage"] not in ["npc_action_menu", "small_talk_menu", "trade_screen"]:
+        view_attempt = find_view_button_near_target(hwnd, target_name)
+        if view_attempt:
+            click_screen_point(hwnd, int(view_attempt["screenX"]), int(view_attempt["screenY"]), "left")
+            INPUT_GUARD.guarded_sleep(160, title)
+            quick_menu_state = detect_bottom_right_menu_stage(hwnd)
+            stage_history.append(quick_menu_state["stage"])
+            if quick_menu_state["stage"] in ["npc_action_menu", "small_talk_menu"]:
+                stage_state = {
+                    "stage": quick_menu_state["stage"],
+                    "texts": {
+                        "bottom_right_actions": quick_menu_state["text"],
+                    },
+                }
+
+    if stage_state["stage"] not in ["npc_action_menu", "small_talk_menu", "trade_screen"]:
+        menu_state = ensure_npc_action_menu(hwnd, timeout_ms, DEFAULT_MOVE_PULSE_MS, DEFAULT_SCAN_INTERVAL_MS)
+        stage_history.extend(menu_state["stageHistory"])
+        stage_state = {
+            "stage": menu_state["stage"],
+            "texts": menu_state.get("stageTexts", {}),
+        }
+
+    if stage_state["stage"] == "trade_screen":
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": f"Reached trade screen for {target_name}",
+            "input": {
+                "mode": "open_named_npc_trade",
+                "targetName": target_name,
+                "stage": "trade_screen",
+                "npcAnchor": npc_anchor,
+                "click": click_state,
+                "viewAttempt": view_attempt,
+                "stageHistory": stage_history,
+            },
+        }
+
+    click_named_point(hwnd, "trade")
+    INPUT_GUARD.guarded_sleep(350, title)
+    trade_state = detect_npc_interaction_stage(hwnd)
+    stage_history.append(trade_state["stage"])
+
+    if trade_state["stage"] != "trade_screen":
+        raise RuntimeError(
+            f"Failed to open trade screen for {target_name}. Last stage: {trade_state['stage'] or 'none'}"
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Reached trade screen for {target_name}",
+        "input": {
+            "mode": "open_named_npc_trade",
+            "targetName": target_name,
+            "stage": "trade_screen",
+            "npcAnchor": npc_anchor,
+            "click": click_state,
+            "viewAttempt": view_attempt,
+            "stageHistory": stage_history,
+        },
+    }
+
+
+def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "open_named_vendor_purchase")
+    target_name = str(action.get("targetName") or "").strip()
+    option_text = str(action.get("optionText") or "进些货物").strip()
+
+    if not target_name:
+        raise RuntimeError("open_named_vendor_purchase action requires targetName")
+
+    focus_window(hwnd)
+    npc_anchor = find_named_npc_in_scene(hwnd, target_name)
+    if not npc_anchor:
+        raise RuntimeError(f"Failed to locate named NPC in scene: {target_name}")
+
+    click_state = click_screen_point(hwnd, int(npc_anchor["screenX"]), int(npc_anchor["screenY"]), "left")
+    INPUT_GUARD.guarded_sleep(450, title)
+
+    option_button = find_text_button_in_roi(hwnd, NPC_STAGE_ROIS["confirm_dialog"], option_text)
+    if not option_button:
+        option_button = find_text_button_in_roi(hwnd, NPC_STAGE_ROIS["trade_panel"], option_text)
+    if not option_button:
+        raise RuntimeError(f"Failed to find vendor option after clicking {target_name}: {option_text}")
+
+    option_click = click_screen_point(hwnd, int(option_button["screenX"]), int(option_button["screenY"]), "left")
+    INPUT_GUARD.guarded_sleep(500, title)
+
+    trade_state = detect_npc_interaction_stage(hwnd)
+    if trade_state["stage"] != "trade_screen":
+        raise RuntimeError(
+            f"Vendor purchase option did not open trade screen. Last stage: {trade_state['stage'] or 'none'}"
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Reached vendor purchase screen for {target_name}",
+        "input": {
+            "mode": "open_named_vendor_purchase",
+            "targetName": target_name,
+            "optionText": option_text,
+            "npcAnchor": npc_anchor,
+            "npcClick": click_state,
+            "optionButton": option_button,
+            "optionClick": option_click,
+            "stage": "trade_screen",
+        },
+    }
+
+
 def exit_panel(hwnd: int) -> None:
     click_named_point(hwnd, "close_panel")
     # Closing the chat page is not instantaneous. Wait for the UI transition to
@@ -2306,6 +2517,12 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "map_route_to_coordinate":
         return run_map_route_to_coordinate(hwnd, action)
+
+    if action_type == "open_named_npc_trade":
+        return run_open_named_npc_trade(hwnd, action)
+
+    if action_type == "open_named_vendor_purchase":
+        return run_open_named_vendor_purchase(hwnd, action)
 
     if action_type == "move_forward_pulse":
         return run_move_forward_pulse(hwnd, action)

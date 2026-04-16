@@ -230,6 +230,7 @@ ACTION_POINTS = {
     "map_coord_y_input": (1300 / 1870, 843 / 976),
     "map_coord_x_input": (1971 / 2643, 1213 / 1398),
     "map_go": (0.808551, 0.864807),
+    "teleport_confirm": (0.569, 0.742),
 }
 
 MAP_KEYPAD_POINTS = {
@@ -2959,6 +2960,23 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "stealth_front_arc_strike":
         return run_stealth_front_arc_strike(hwnd, action)
+
+    if action_type == "click_named_point":
+        point_name = str(action.get("pointName") or "").strip()
+        if not point_name:
+            raise RuntimeError("click_named_point action requires pointName")
+        click_state = click_named_point(hwnd, point_name)
+        INPUT_GUARD.guarded_sleep(post_delay_ms, title)
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": f"Clicked fixed point {point_name}",
+            "input": {
+                "pointName": point_name,
+                **click_state,
+            },
+        }
 
     if action_type == "town_npc_social_loop":
         return run_town_npc_social_loop(hwnd, action)

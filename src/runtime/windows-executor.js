@@ -218,37 +218,44 @@ function createStealthPrimitiveActions() {
       xCoordinate: 749,
       yCoordinate: 942,
       postDelayMs: 1000,
-      waitAfterGoMs: 1000
+      waitAfterGoMs: 800
     },
     {
       id: "primitive-2",
+      title: "Confirm Teleport",
+      type: "click_named_point",
+      pointName: "teleport_confirm",
+      postDelayMs: 1000
+    },
+    {
+      id: "primitive-3",
       title: "Close Map Before Stealth",
       type: "press_key",
       key: "m",
       postDelayMs: 1000
     },
     {
-      id: "primitive-3",
+      id: "primitive-4",
       title: "Wait For Auto Route To Finish",
       type: "sleep",
       durationMs: 15000
     },
     {
-      id: "primitive-4",
+      id: "primitive-5",
       title: "Dismount Before Stealth",
       type: "press_key",
       key: "1",
       postDelayMs: 800
     },
     {
-      id: "primitive-5",
+      id: "primitive-6",
       title: "Enter Stealth",
       type: "press_shortcut",
       shortcut: "stealth",
       postDelayMs: 800
     },
     {
-      id: "primitive-6",
+      id: "primitive-7",
       title: "Front Arc Search And Strike",
       type: "stealth_front_arc_strike",
       searchTimeoutMs: 7000,

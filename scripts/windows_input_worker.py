@@ -207,8 +207,10 @@ ACTION_POINTS = {
     "trade_submit": (0.53, 0.92),
     "vendor_purchase_plus": (625 / 1848, 550 / 1020),
     "vendor_purchase_buy": (634 / 1848, 716 / 1020),
+    "vendor_purchase_max_quantity": (740 / 2048, 597 / 1151),
+    "vendor_purchase_close": (1995 / 2048, 79 / 1151),
     "vendor_purchase_option": (2160 / 2643, 221 / 1398),
-    "vendor_purchase_item_moding": (1558 / 1870, 379 / 976),
+    "vendor_purchase_item_moding": (1680 / 2048, 500 / 1151),
     "hawking_inventory_first_slot": (1691 / 2048, 257 / 1151),
     "hawking_max_quantity": (1464 / 2048, 661 / 1151),
     "hawking_stock_button": (1298 / 2048, 843 / 1151),
@@ -2241,29 +2243,28 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
     item_click = click_named_point(hwnd, item_button["pointName"])
     INPUT_GUARD.guarded_sleep(1000, title)
 
-    plus_clicks: list[dict[str, Any]] = []
-    for _ in range(max(0, quantity - 1)):
-        plus_click = click_named_point(hwnd, "vendor_purchase_plus")
-        plus_clicks.append(plus_click)
-        INPUT_GUARD.guarded_sleep(1000, title)
-
+    max_quantity_click = click_named_point(hwnd, "vendor_purchase_max_quantity")
+    INPUT_GUARD.guarded_sleep(1000, title)
     buy_click = click_named_point(hwnd, "vendor_purchase_buy")
     INPUT_GUARD.guarded_sleep(1000, title)
+    close_click = click_named_point(hwnd, "vendor_purchase_close")
+    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 1000), title)
     after_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
 
     return {
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": f"Bought current vendor item with quantity {quantity}",
+        "detail": "Clicked item, maximized quantity, bought it, and closed the purchase panel",
         "input": {
             "mode": "buy_current_vendor_item",
             "itemName": item_name,
             "quantity": quantity,
             "itemButton": item_button,
             "itemClick": item_click,
-            "plusClicks": plus_clicks,
+            "maxQuantityClick": max_quantity_click,
             "buyClick": buy_click,
+            "closeClick": close_click,
             "beforeText": purchase_state["text"],
             "afterText": after_text,
         },

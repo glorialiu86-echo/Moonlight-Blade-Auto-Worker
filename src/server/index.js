@@ -51,6 +51,7 @@ const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 3000;
 const NPC_CHAT_MAX_ROUNDS = 4;
 const NPC_CHAT_POLL_DELAY_MS = 1200;
+const WATCH_COMMENTARY_MIN_INTERVAL_MS = 25000;
 const AUTONOMOUS_OBJECTIVE_POOL = [
   "去找一个看起来最容易闹出后果的 NPC，先试探对方底线。",
   "找一个能把‘一技之长’理解歪掉的切入口，先观察再出手。",
@@ -197,6 +198,111 @@ function perceptionSummaryBySource(perception, source) {
 
   return `已结合最新截图：${perception.sceneLabel || "未判定场景"}。${perception.summary || "暂无视觉总结。"}`
     .trim();
+}
+
+function buildWatchCommentaryFingerprint(perception) {
+  if (!perception) {
+    return "";
+  }
+
+  return JSON.stringify({
+    sceneLabel: perception.sceneLabel || "",
+    summary: perception.summary || "",
+    ocrText: perception.ocrText || "",
+    npcNames: Array.isArray(perception.npcNames) ? perception.npcNames.slice(0, 4) : [],
+    interactiveOptions: Array.isArray(perception.interactiveOptions) ? perception.interactiveOptions.slice(0, 4) : [],
+    alerts: Array.isArray(perception.alerts) ? perception.alerts.slice(0, 4) : []
+  });
+}
+
+async function buildWatchCommentary({ perception, conversationMessages = [] }) {
+  const recentAssistantLines = conversationMessages
+    .filter((message) => message?.role === "assistant")
+    .slice(-3)
+    .map((message) => String(message.text || "").trim())
+    .filter(Boolean)
+    .join("\n");
+
+  const prompt = [
+    "你是籽小刀，现在处于观看模式。",
+    "籽岷正在主玩游戏，你不操作游戏，只根据当前截图识别结果，在旁边像弹幕一样补一句看法。",
+    "只用中文输出一句话，长度控制在12到28个字。",
+    "语气要有主见、带一点邪门歪理、能增加节目效果，但不要提系统、截图、OCR、AI、模型。",
+    "不要复述画面全文，不要下命令，不要拆成多句，不要带引号。",
+    recentAssistantLines ? `最近几句你说过的话：\n${recentAssistantLines}` : "最近还没有说过话。",
+    "当前画面信息：",
+    buildPerceptionContext(perception)
+  ].join("\n");
+
+  const result = await generateText({
+    userPrompt: prompt,
+    maxTokens: 60,
+    temperature: 0.9
+  });
+
+  return String(result.text || "").replace(/\s+/g, " ").trim();
+}
+
+async function maybeRunWatchCommentaryTurn(runtimeState) {
+  const perception = runtimeState.latestPerception;
+
+  if (!perception) {
+    return false;
+  }
+
+  const now = Date.now();
+  const lastCommentaryAt = runtimeState.agent?.lastWatchCommentaryAt
+    ? new Date(runtimeState.agent.lastWatchCommentaryAt).getTime()
+    : 0;
+
+  if (lastCommentaryAt && now - lastCommentaryAt < WATCH_COMMENTARY_MIN_INTERVAL_MS) {
+    return false;
+  }
+
+  const fingerprint = buildWatchCommentaryFingerprint(perception);
+  if (fingerprint && runtimeState.agent?.lastWatchCommentaryFingerprint === fingerprint) {
+    return false;
+  }
+
+  const text = await buildWatchCommentary({
+    perception,
+    conversationMessages: runtimeState.messages
+  });
+
+  if (!text) {
+    return false;
+  }
+
+  appendMessage({
+    role: "assistant",
+    text,
+    thinkingChain: [],
+    perceptionSummary: perceptionSummaryBySource(perception, "agent"),
+    sceneLabel: perception.sceneLabel || "观看模式",
+    riskLevel: perception.alerts?.length ? "medium" : "low",
+    actions: [],
+    decide: ""
+  });
+
+  appendLog("info", "观看模式自动旁白已发送", {
+    text,
+    sceneLabel: perception.sceneLabel || "",
+    alerts: perception.alerts || []
+  });
+
+  updateAgent({
+    mode: "autonomous",
+    phase: "autonomous",
+    currentObjective: "watch",
+    lastTurnSource: "agent",
+    lastTurnAt: new Date().toISOString(),
+    lastAutonomousInstruction: "watch_commentary",
+    lastWatchCommentaryAt: new Date().toISOString(),
+    lastWatchCommentaryFingerprint: fingerprint,
+    autonomousTurnCount: (runtimeState.agent?.autonomousTurnCount || 0) + 1
+  });
+
+  return true;
 }
 
 function ensureAutoCaptureRunning() {
@@ -885,6 +991,11 @@ async function maybeRunAutonomousTurn() {
       phase: "autonomous",
       currentObjective: instruction
     });
+
+    if ((runtimeState.interactionMode || "act") === "watch") {
+      await maybeRunWatchCommentaryTurn(runtimeState);
+      return;
+    }
 
     await runPlannedTurn({
       instruction,

@@ -9,7 +9,9 @@ function createInitialAgentState() {
     lastAutonomousInstruction: null,
     lastTurnSource: null,
     lastTurnAt: null,
-    autonomousTurnCount: 0
+    autonomousTurnCount: 0,
+    lastWatchCommentaryAt: null,
+    lastWatchCommentaryFingerprint: null
   };
 }
 

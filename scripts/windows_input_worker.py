@@ -184,6 +184,10 @@ NPC_STAGE_ROIS = {
     "scene_npc_search": (0.18, 0.14, 0.98, 0.88),
 }
 
+STEALTH_ROIS = {
+    "front_name_band": (0.36, 0.18, 0.64, 0.42),
+}
+
 MAP_STAGE_ROIS = {
     "left_panel": (0.00, 0.05, 0.40, 0.90),
     "route_panel": (0.60, 0.76, 0.86, 0.96),
@@ -757,6 +761,89 @@ def contains_any_keyword(text: str, keywords: list[str]) -> bool:
 def count_keywords(text: str, keywords: list[str]) -> int:
     normalized = str(text or "").replace(" ", "")
     return sum(1 for keyword in keywords if keyword in normalized)
+
+
+def pulse_turn_key(hwnd: int, key: str, duration_ms: int, action_title: str) -> dict[str, Any]:
+    bounds = focus_window(hwnd)
+    pydirectinput.keyDown(key)
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(duration_ms, action_title)
+    pydirectinput.keyUp(key)
+    INPUT_GUARD.refresh_baseline()
+    return {
+        "key": key,
+        "durationMs": duration_ms,
+        "screenX": round(bounds["left"] + bounds["width"] * 0.5),
+        "screenY": round(bounds["top"] + bounds["height"] * 0.5),
+    }
+
+
+def normalize_name_candidate(text: str) -> str:
+    normalized = re.sub(r"\s+", "", str(text or ""))
+    normalized = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9<>团队]", "", normalized)
+    return normalized
+
+
+def is_excluded_stealth_name(text: str) -> bool:
+    normalized = normalize_name_candidate(text)
+    if not normalized:
+        return True
+    if "团队" in normalized:
+        return True
+    return False
+
+
+def looks_like_stealth_target_name(text: str) -> bool:
+    normalized = normalize_name_candidate(text)
+    if not normalized or is_excluded_stealth_name(normalized):
+        return False
+    return bool(re.fullmatch(r"[\u4e00-\u9fff]{2,6}", normalized))
+
+
+def find_stealth_front_target(hwnd: int, roi: tuple[float, float, float, float]) -> dict[str, Any] | None:
+    bounds = get_window_bounds(hwnd)
+    image = capture_window_region(hwnd, roi)
+    items = ocr_items(image)
+    items.extend(ocr_items_upscaled(image, 2.0))
+
+    roi_center_x = image.shape[1] / 2.0
+    roi_center_y = image.shape[0] / 2.0
+    best_match = None
+    best_score = None
+
+    for item in items:
+        normalized = normalize_name_candidate(item["text"])
+        if not looks_like_stealth_target_name(normalized):
+            continue
+
+        dx = abs(float(item["centerX"]) - roi_center_x)
+        dy = abs(float(item["centerY"]) - roi_center_y)
+        distance_penalty = (dx * 1.0) + (dy * 0.6)
+        score = float(item["score"]) * 100.0 - distance_penalty
+
+        if best_score is None or score > best_score:
+            best_score = score
+            best_match = {
+                "text": normalized,
+                "score": round(float(item["score"]), 4),
+                "screenX": round(bounds["left"] + bounds["width"] * roi[0] + item["centerX"]),
+                "screenY": round(bounds["top"] + bounds["height"] * roi[1] + item["centerY"]),
+                "centerX": round(float(item["centerX"]), 1),
+                "centerY": round(float(item["centerY"]), 1),
+            }
+
+    if best_match is None:
+        return None
+
+    return {
+        **best_match,
+        "roi": {
+            "x1": roi[0],
+            "y1": roi[1],
+            "x2": roi[2],
+            "y2": roi[3],
+        },
+    }
 
 
 def detect_map_screen(hwnd: int) -> dict[str, Any]:
@@ -2597,6 +2684,89 @@ def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def run_stealth_front_arc_strike(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_front_arc_strike")
+    search_timeout_ms = int(action.get("searchTimeoutMs") or 7000)
+    turn_pulse_ms = int(action.get("turnPulseMs") or 180)
+    hold_forward_ms = int(action.get("holdForwardMs") or 2200)
+    strike_interval_ms = int(action.get("strikeIntervalMs") or 180)
+    front_roi = action.get("frontRoi") or STEALTH_ROIS["front_name_band"]
+    roi = (
+        float(front_roi[0]),
+        float(front_roi[1]),
+        float(front_roi[2]),
+        float(front_roi[3]),
+    )
+
+    focus_window(hwnd)
+    deadline = time.time() + search_timeout_ms / 1000.0
+    search_pattern = ["left", "left", "right", "right"]
+    search_attempts: list[dict[str, Any]] = []
+    turn_attempts: list[dict[str, Any]] = []
+    target = find_stealth_front_target(hwnd, roi)
+
+    while time.time() <= deadline and target is None:
+        for key in search_pattern:
+            if time.time() > deadline:
+                break
+            INPUT_GUARD.check_or_raise(title)
+            turn_attempts.append(pulse_turn_key(hwnd, key, turn_pulse_ms, title))
+            INPUT_GUARD.guarded_sleep(80, title)
+            target = find_stealth_front_target(hwnd, roi)
+            search_attempts.append(
+                {
+                    "key": key,
+                    "target": target,
+                }
+            )
+            if target is not None:
+                break
+
+    if target is None:
+        raise RuntimeError("Stealth front-arc search timed out before finding a non-team target name")
+
+    pydirectinput.keyDown("w")
+    INPUT_GUARD.refresh_baseline()
+    strike_count = 0
+    started_at = time.time()
+
+    try:
+        while (time.time() - started_at) * 1000 < hold_forward_ms:
+            INPUT_GUARD.check_or_raise(title)
+            pydirectinput.press("3")
+            INPUT_GUARD.refresh_baseline()
+            strike_count += 1
+            INPUT_GUARD.guarded_sleep(strike_interval_ms, title)
+    finally:
+        pydirectinput.keyUp("w")
+        INPUT_GUARD.refresh_baseline()
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Found {target['text']} in the front arc and advanced while striking",
+        "input": {
+            "mode": "stealth_front_arc_strike",
+            "target": target,
+            "searchTimeoutMs": search_timeout_ms,
+            "turnPulseMs": turn_pulse_ms,
+            "holdForwardMs": hold_forward_ms,
+            "strikeIntervalMs": strike_interval_ms,
+            "strikeCount": strike_count,
+            "frontRoi": {
+                "x1": roi[0],
+                "y1": roi[1],
+                "x2": roi[2],
+                "y2": roi[3],
+            },
+            "searchAttempts": search_attempts,
+            "turnAttempts": turn_attempts,
+        },
+    }
+
+
 def run_town_npc_social_loop(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "town_npc_social_loop")
@@ -2786,6 +2956,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "click_npc_interact":
         return run_click_npc_interact(hwnd, action)
+
+    if action_type == "stealth_front_arc_strike":
+        return run_stealth_front_arc_strike(hwnd, action)
 
     if action_type == "town_npc_social_loop":
         return run_town_npc_social_loop(hwnd, action)

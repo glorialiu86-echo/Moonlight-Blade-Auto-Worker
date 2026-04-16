@@ -209,6 +209,58 @@ export async function runWindowsExecution(plan, options = {}) {
   return runWindowsActions(actions, options);
 }
 
+function createStealthPrimitiveActions() {
+  return [
+    {
+      id: "primitive-1",
+      title: "Route To Stealth Point",
+      type: "map_route_to_coordinate",
+      xCoordinate: 749,
+      yCoordinate: 942,
+      postDelayMs: 1000,
+      waitAfterGoMs: 1000
+    },
+    {
+      id: "primitive-2",
+      title: "Close Map Before Stealth",
+      type: "press_key",
+      key: "m",
+      postDelayMs: 1000
+    },
+    {
+      id: "primitive-3",
+      title: "Wait For Auto Route To Finish",
+      type: "sleep",
+      durationMs: 15000
+    },
+    {
+      id: "primitive-4",
+      title: "Dismount Before Stealth",
+      type: "press_key",
+      key: "1",
+      postDelayMs: 800
+    },
+    {
+      id: "primitive-5",
+      title: "Enter Stealth",
+      type: "press_shortcut",
+      shortcut: "stealth",
+      postDelayMs: 800
+    },
+    {
+      id: "primitive-6",
+      title: "Front Arc Search And Strike",
+      type: "stealth_front_arc_strike",
+      searchTimeoutMs: 7000,
+      turnPulseMs: 180,
+      holdForwardMs: 2200,
+      strikeIntervalMs: 180,
+      frontRoi: [0.36, 0.18, 0.64, 0.42],
+      postDelayMs: 600
+    }
+  ];
+}
+
 export function createPrimitiveActions(sequenceName) {
   switch (sequenceName) {
     case "town_movement_smoke":
@@ -424,17 +476,7 @@ export function createPrimitiveActions(sequenceName) {
         }
       ];
     case "stealth":
-      return [
-        {
-          id: "primitive-1",
-          title: "打开地图去潜行点",
-          type: "map_route_to_coordinate",
-          xCoordinate: 950,
-          yCoordinate: 711,
-          postDelayMs: 1000,
-          waitAfterGoMs: 1000
-        }
-      ];
+      return createStealthPrimitiveActions();
     default:
       throw new Error(`Unsupported primitive action sequence: ${sequenceName}`);
   }

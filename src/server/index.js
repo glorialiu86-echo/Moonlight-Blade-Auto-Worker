@@ -94,6 +94,34 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
+function handleExternalInputInterrupted(error, contextLabel) {
+  if (error?.code !== "EXTERNAL_INPUT_INTERRUPTED") {
+    return false;
+  }
+
+  setStatus("paused");
+  autoCaptureService.pause();
+  updateAgent({
+    phase: "waiting"
+  });
+  setLastError(error.message);
+  appendLog("info", `${contextLabel}因外部鼠标或键盘输入已暂停`, {
+    error: error.message,
+    failedStep: error.workerPayload?.failedStep || error.failed_step || null
+  });
+  appendMessage({
+    role: "assistant",
+    text: "检测到你在动鼠标或键盘，我先暂停自动控制。",
+    thinkingChain: [],
+    recoveryLine: "等你准备好了，再让我继续。",
+    perceptionSummary: "本轮因为人工介入被主动打断，自动控制已暂停。",
+    sceneLabel: "人工接管",
+    riskLevel: "low",
+    actions: []
+  });
+  return true;
+}
+
 async function readRequestBody(request) {
   const chunks = [];
 
@@ -1012,6 +1040,9 @@ async function maybeRunAutonomousTurn() {
       externalInputGuardEnabled: runtimeState.externalInputGuardEnabled !== false
     });
   } catch (error) {
+    if (handleExternalInputInterrupted(error, "自主回合")) {
+      return;
+    }
     setLastError(error.message);
     updateAgent({
       phase: "waiting"
@@ -1175,6 +1206,14 @@ async function handleTurn(request, response) {
       state: nextState
     });
   } catch (error) {
+    if (handleExternalInputInterrupted(error, "对话回合")) {
+      return sendJson(response, 409, {
+        ok: false,
+        error: error.message,
+        errorCode: error.code,
+        state: getState()
+      });
+    }
     setLastError(error.message);
     updateAgent({
       phase: "waiting"

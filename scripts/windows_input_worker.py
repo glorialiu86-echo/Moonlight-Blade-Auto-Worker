@@ -29,7 +29,7 @@ DEFAULT_VERIFY_SETTLE_MS = 180
 OCR_ENGINE = None
 TMP_DIR = Path(__file__).resolve().parents[1] / "tmp"
 WORLD_HUD_KEYWORDS = ["感知", "潜行", "微风拂柳", "[Shift]", "[Space]", "叫卖"]
-EXTERNAL_INPUT_MOUSE_DELTA_PX = 4
+EXTERNAL_INPUT_MOUSE_DELTA_PX = 2
 EXTERNAL_INPUT_CHECK_INTERVAL_MS = 40
 EXTERNAL_INPUT_VKS = [
     win32con.VK_LBUTTON,

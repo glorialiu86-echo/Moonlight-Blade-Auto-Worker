@@ -324,6 +324,43 @@ function appendTranscriptToComposer(text) {
     : transcript;
 }
 
+async function submitComposerInstruction({ source = "text" } = {}) {
+  const instruction = elements.instructionInput.value.trim();
+
+  if (!instruction || state.submitting || state.voice.recording || state.voice.transcribing || !isRunningStatus(state.runtimeStatus)) {
+    return false;
+  }
+
+  state.submitting = true;
+  syncUiState();
+  updateVoiceStatus(source === "voice"
+    ? (isWatchMode() ? "我先把这段语音按观看模式接住。" : "我先把这段语音按行动模式往下推。")
+    : (isWatchMode() ? "我先按观看模式把这轮想明白。" : "我先按行动模式把这轮往下推。"));
+
+  try {
+    const payload = await request("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        instruction,
+        interactionMode: state.interactionMode,
+        externalInputGuardEnabled: state.externalInputGuardEnabled
+      })
+    });
+
+    applyPayload(payload);
+    elements.instructionInput.value = "";
+    updateVoiceStatus(source === "voice" ? "这段话我已经替籽岷递进去了。" : "这轮我已经接住了。");
+    return true;
+  } catch (error) {
+    updateVoiceStatus(`我这轮没接稳：${error.message}`);
+    await refresh().catch(() => {});
+    return false;
+  } finally {
+    state.submitting = false;
+    syncUiState();
+  }
+}
+
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -477,7 +514,10 @@ async function stopVoiceRecording() {
     });
 
     appendTranscriptToComposer(payload.text);
-    updateVoiceStatus("我听清了，已经替籽岷写进输入框。");
+    state.voice.transcribing = false;
+    syncUiState();
+    updateVoiceStatus("我听清了，马上替籽岷递出去。");
+    await submitComposerInstruction({ source: "voice" });
   } catch (error) {
     updateVoiceStatus(`我这次没听稳：${error.message}`);
   } finally {
@@ -571,37 +611,7 @@ elements.runToggleButton.addEventListener("click", async () => {
 
 elements.composerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-
-  const instruction = elements.instructionInput.value.trim();
-
-  if (!instruction || state.submitting || state.voice.recording || state.voice.transcribing || !isRunningStatus(state.runtimeStatus)) {
-    return;
-  }
-
-  state.submitting = true;
-  syncUiState();
-  updateVoiceStatus(isWatchMode() ? "我先按观看模式把这轮想明白。" : "我先按行动模式把这轮往下推。");
-
-  try {
-    const payload = await request("/api/chat", {
-      method: "POST",
-      body: JSON.stringify({
-        instruction,
-        interactionMode: state.interactionMode,
-        externalInputGuardEnabled: state.externalInputGuardEnabled
-      })
-    });
-
-    applyPayload(payload);
-    elements.instructionInput.value = "";
-    updateVoiceStatus("这轮我已经接住了。");
-  } catch (error) {
-    updateVoiceStatus(`我这轮没接稳：${error.message}`);
-    await refresh().catch(() => {});
-  } finally {
-    state.submitting = false;
-    syncUiState();
-  }
+  await submitComposerInstruction({ source: "text" });
 });
 
 elements.watchModeButton.addEventListener("click", async () => {

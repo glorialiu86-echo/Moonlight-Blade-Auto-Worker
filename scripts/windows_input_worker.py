@@ -206,6 +206,9 @@ ACTION_POINTS = {
     "trade_submit": (0.53, 0.92),
     "vendor_purchase_plus": (625 / 1848, 550 / 1020),
     "vendor_purchase_buy": (634 / 1848, 716 / 1020),
+    "hawking_shelf_first_slot": (0.45, 0.24),
+    "hawking_inventory_first_slot": (0.84, 0.20),
+    "hawking_submit": (0.92, 0.95),
     "gift_first_slot": (1721 / 2537, 580 / 1384),
     "gift_plus": (0.82, 0.92),
     "gift_submit": (2289 / 2537, 1216 / 1384),
@@ -374,6 +377,9 @@ TRADE_KEYWORDS = ["交易结果预览", "交易倒计时", "上架", "我的", "
 CONFIRM_KEYWORDS = ["确认", "闲聊", "取消"]
 MAP_KEYWORDS = ["点击输入坐标寻路", "前往", "灵犀盏追踪目标", "通缉追踪目标"]
 VENDOR_PURCHASE_KEYWORDS = ["进货", "购买", "购买数量", "每日进货体力消耗上限", "单价", "总价"]
+
+
+HAWKING_SCREEN_KEYWORDS = ["上货", "货架", "库存", "出摊"]
 
 
 def emit(payload: dict[str, Any]) -> None:
@@ -702,6 +708,14 @@ def detect_vendor_purchase_screen(hwnd: int) -> dict[str, Any]:
     panel_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
     return {
         "visible": contains_any_keyword(panel_text, VENDOR_PURCHASE_KEYWORDS),
+        "text": panel_text,
+    }
+
+
+def detect_hawking_screen(hwnd: int) -> dict[str, Any]:
+    panel_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
+    return {
+        "visible": contains_any_keyword(panel_text, HAWKING_SCREEN_KEYWORDS),
         "text": panel_text,
     }
 
@@ -1938,6 +1952,41 @@ def find_text_button_in_roi(hwnd: int, roi: tuple[float, float, float, float], t
     }
 
 
+def find_vendor_item_button(hwnd: int, item_name: str) -> dict[str, Any] | None:
+    roi = NPC_STAGE_ROIS["trade_panel"]
+    bounds = get_window_bounds(hwnd)
+    image = capture_window_region(hwnd, roi)
+    items = ocr_items(image)
+    keywords = [part for part in re.split(r"\s+", normalize_npc_name(item_name)) if part]
+
+    if not keywords:
+        return None
+
+    best_match = None
+    best_score = None
+    for item in items:
+        normalized = normalize_npc_name(item["text"])
+        if not normalized:
+            continue
+        if not any(keyword in normalized or normalized in keyword for keyword in keywords):
+            continue
+        score = float(item["score"])
+        if best_score is None or score > best_score:
+            best_score = score
+            best_match = item
+
+    if best_match is None:
+        return None
+
+    return {
+        "text": best_match["text"],
+        "score": round(best_match["score"], 3),
+        "screenX": round(bounds["left"] + bounds["width"] * roi[0] + best_match["centerX"]),
+        "screenY": round(bounds["top"] + bounds["height"] * roi[1] + max(best_match["centerY"] - 70, 16)),
+        "source": "vendor_item_text",
+    }
+
+
 def run_open_named_npc_trade(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "open_named_npc_trade")
@@ -2081,10 +2130,18 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "buy_current_vendor_item")
     quantity = max(1, int(action.get("quantity") or 1))
+    item_name = str(action.get("itemName") or "墨锭").strip()
 
     purchase_state = detect_vendor_purchase_screen(hwnd)
     if not purchase_state["visible"]:
         raise RuntimeError("Current screen is not vendor purchase screen")
+
+    item_button = find_vendor_item_button(hwnd, item_name)
+    if not item_button:
+        raise RuntimeError(f"Failed to locate vendor item: {item_name}")
+
+    item_click = click_screen_point(hwnd, int(item_button["screenX"]), int(item_button["screenY"]), "left")
+    INPUT_GUARD.guarded_sleep(300, title)
 
     plus_clicks: list[dict[str, Any]] = []
     for _ in range(max(0, quantity - 1)):
@@ -2103,7 +2160,10 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
         "detail": f"Bought current vendor item with quantity {quantity}",
         "input": {
             "mode": "buy_current_vendor_item",
+            "itemName": item_name,
             "quantity": quantity,
+            "itemButton": item_button,
+            "itemClick": item_click,
             "plusClicks": plus_clicks,
             "buyClick": buy_click,
             "beforeText": purchase_state["text"],
@@ -2125,6 +2185,55 @@ def run_close_vendor_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         "input": {
             "mode": "close_vendor_panel",
             "click": click_state,
+        },
+    }
+
+
+def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stock_first_hawking_item")
+    hawking_state = detect_hawking_screen(hwnd)
+    if not hawking_state["visible"]:
+        raise RuntimeError("Current screen is not hawking screen")
+
+    inventory_click = click_named_point(hwnd, "hawking_inventory_first_slot")
+    INPUT_GUARD.guarded_sleep(250, title)
+    shelf_click = click_named_point(hwnd, "hawking_shelf_first_slot")
+    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 700), title)
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Selected first hawking inventory item and stocked it on the first shelf slot",
+        "input": {
+            "mode": "stock_first_hawking_item",
+            "beforeText": hawking_state["text"],
+            "inventoryClick": inventory_click,
+            "shelfClick": shelf_click,
+        },
+    }
+
+
+def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "submit_hawking")
+    hawking_state = detect_hawking_screen(hwnd)
+    if not hawking_state["visible"]:
+        raise RuntimeError("Current screen is not hawking screen")
+
+    submit_click = click_named_point(hwnd, "hawking_submit")
+    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 800), title)
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Submitted current hawking shelf setup",
+        "input": {
+            "mode": "submit_hawking",
+            "beforeText": hawking_state["text"],
+            "submitClick": submit_click,
         },
     }
 
@@ -2593,6 +2702,12 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "close_vendor_panel":
         return run_close_vendor_panel(hwnd, action)
+
+    if action_type == "stock_first_hawking_item":
+        return run_stock_first_hawking_item(hwnd, action)
+
+    if action_type == "submit_hawking":
+        return run_submit_hawking(hwnd, action)
 
     if action_type == "move_forward_pulse":
         return run_move_forward_pulse(hwnd, action)

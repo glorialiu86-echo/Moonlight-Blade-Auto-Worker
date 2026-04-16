@@ -43,16 +43,16 @@ import { runWindowsActions } from "../runtime/windows-executor.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../../public");
 const port = Number(process.env.PORT || 3000);
-const AUTONOMOUS_INTERVAL_MS = 12000;
-const AUTONOMOUS_START_DELAY_MS = 6000;
+const AUTONOMOUS_INTERVAL_MS = 3000;
+const AUTONOMOUS_START_DELAY_MS = 3000;
 const USER_PRIORITY_COOLDOWN_MS = 60000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 3000;
 const NPC_CHAT_MAX_ROUNDS = 4;
 const NPC_CHAT_POLL_DELAY_MS = 1200;
-const WATCH_COMMENTARY_MIN_INTERVAL_MS = 8000;
-const WATCH_MODE_USER_PRIORITY_COOLDOWN_MS = 8000;
+const WATCH_COMMENTARY_MIN_INTERVAL_MS = 3000;
+const WATCH_MODE_USER_PRIORITY_COOLDOWN_MS = 3000;
 const AUTONOMOUS_OBJECTIVE_POOL = [
   "去找一个看起来最容易闹出后果的 NPC，先试探对方底线。",
   "找一个能把‘一技之长’理解歪掉的切入口，先观察再出手。",

@@ -8,6 +8,7 @@ import sys
 import time
 from typing import Any
 
+import cv2
 import mss
 import numpy as np
 import pydirectinput
@@ -180,7 +181,7 @@ NPC_STAGE_ROIS = {
     "gift_panel": (0.64, 0.00, 1.00, 1.00),
     "trade_panel": (0.18, 0.00, 1.00, 1.00),
     "selected_target": (0.20, 0.18, 0.42, 0.36),
-    "scene_npc_search": (0.18, 0.14, 0.88, 0.78),
+    "scene_npc_search": (0.18, 0.14, 0.98, 0.88),
 }
 
 MAP_STAGE_ROIS = {
@@ -206,11 +207,12 @@ ACTION_POINTS = {
     "trade_submit": (0.53, 0.92),
     "vendor_purchase_plus": (625 / 1848, 550 / 1020),
     "vendor_purchase_buy": (634 / 1848, 716 / 1020),
-    "vendor_purchase_option": (1468 / 1870, 154 / 976),
+    "vendor_purchase_option": (2160 / 2643, 221 / 1398),
     "vendor_purchase_item_moding": (1558 / 1870, 379 / 976),
-    "hawking_inventory_first_slot": (0.84, 0.20),
-    "hawking_stock_button": (0.615, 0.742),
-    "hawking_submit": (0.92, 0.95),
+    "hawking_inventory_first_slot": (1691 / 2048, 257 / 1151),
+    "hawking_max_quantity": (1464 / 2048, 661 / 1151),
+    "hawking_stock_button": (1298 / 2048, 843 / 1151),
+    "hawking_submit": (2459 / 2644, 1227 / 1399),
     "gift_first_slot": (1721 / 2537, 580 / 1384),
     "gift_plus": (0.82, 0.92),
     "gift_submit": (2289 / 2537, 1216 / 1384),
@@ -604,6 +606,36 @@ def ocr_items(image: np.ndarray) -> list[dict[str, Any]]:
         )
 
     return items
+
+
+def ocr_items_upscaled(image: np.ndarray, scale: float) -> list[dict[str, Any]]:
+    if scale <= 1.0:
+        return ocr_items(image)
+
+    height, width = image.shape[:2]
+    resized = cv2.resize(
+        image,
+        (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
+        interpolation=cv2.INTER_CUBIC,
+    )
+    items = ocr_items(resized)
+    if not items:
+        return []
+
+    normalized_items: list[dict[str, Any]] = []
+    for item in items:
+        normalized_items.append(
+            {
+                **item,
+                "minX": item["minX"] / scale,
+                "maxX": item["maxX"] / scale,
+                "minY": item["minY"] / scale,
+                "maxY": item["maxY"] / scale,
+                "centerX": item["centerX"] / scale,
+                "centerY": item["centerY"] / scale,
+            }
+        )
+    return normalized_items
 
 
 def capture_verify_frame(hwnd: int) -> np.ndarray:
@@ -1786,6 +1818,21 @@ def names_match(expected_name: str, actual_name: str) -> bool:
     return expected == actual or expected in actual or actual in expected
 
 
+def count_name_overlap(expected_name: str, actual_name: str) -> int:
+    expected = normalize_npc_name(expected_name)
+    actual = normalize_npc_name(actual_name)
+    if not expected or not actual:
+        return 0
+
+    overlap = 0
+    remaining = list(actual)
+    for char in expected:
+        if char in remaining:
+            overlap += 1
+            remaining.remove(char)
+    return overlap
+
+
 def find_click_target_name(
     hwnd: int,
     screen_x: int,
@@ -1905,7 +1952,10 @@ def find_named_npc_in_scene(hwnd: int, target_text: str) -> dict[str, Any] | Non
     bounds = get_window_bounds(hwnd)
     image = capture_window_region(hwnd, roi)
     items = ocr_items(image)
-    keywords = [part for part in re.split(r"\s+", normalize_npc_name(target_text)) if part]
+    items.extend(ocr_items_upscaled(image, 2.0))
+    items.extend(ocr_items_upscaled(image, 3.0))
+    expected_name = normalize_npc_name(target_text)
+    keywords = [part for part in re.split(r"\s+", expected_name) if part]
 
     if not keywords:
         return None
@@ -1916,10 +1966,11 @@ def find_named_npc_in_scene(hwnd: int, target_text: str) -> dict[str, Any] | Non
         normalized = normalize_npc_name(item["text"])
         if not normalized:
             continue
-        if not any(keyword in normalized or normalized in keyword for keyword in keywords):
+        overlap = count_name_overlap(expected_name, normalized)
+        if not any(keyword in normalized or normalized in keyword for keyword in keywords) and overlap < 2:
             continue
 
-        score = float(item["score"])
+        score = float(item["score"]) + overlap * 20.0
         if best_score is None or score > best_score:
             best_score = score
             best_match = item
@@ -2100,26 +2151,56 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
     title = str(action.get("title") or "open_named_vendor_purchase")
     target_name = str(action.get("targetName") or "").strip()
     option_text = str(action.get("optionText") or "进些货物").strip()
+    approach_steps = max(1, min(3, int(action.get("approachSteps") or 2)))
+    approach_move_pulse_ms = max(60, int(action.get("approachMovePulseMs") or 180))
+    interact_attempts = max(1, int(action.get("interactAttempts") or 3))
 
     if not target_name:
         raise RuntimeError("open_named_vendor_purchase action requires targetName")
 
     focus_window(hwnd)
-    npc_anchor = find_named_npc_in_scene(hwnd, target_name)
-    if not npc_anchor:
-        raise RuntimeError(f"Failed to locate named NPC in scene: {target_name}")
-
-    click_state = click_screen_point(hwnd, int(npc_anchor["screenX"]), int(npc_anchor["screenY"]), "left")
-    INPUT_GUARD.guarded_sleep(1000, title)
-
-    option_click = click_named_point(hwnd, "vendor_purchase_option")
-    INPUT_GUARD.guarded_sleep(1000, title)
-
+    approach_moves: list[dict[str, Any]] = []
+    interact_attempt_log: list[dict[str, Any]] = []
+    option_click = None
     purchase_state = detect_vendor_purchase_screen(hwnd)
+
+    for step_index in range(approach_steps):
+        forward_state = pulse_forward(hwnd, approach_move_pulse_ms)
+        approach_moves.append(forward_state)
+        INPUT_GUARD.guarded_sleep(1000, title)
+
+        for interact_index in range(interact_attempts):
+            focus_window(hwnd)
+            pydirectinput.press("f")
+            INPUT_GUARD.refresh_baseline()
+            INPUT_GUARD.guarded_sleep(1000, title)
+
+            quick_menu_state = detect_bottom_right_menu_stage(hwnd)
+            purchase_state = detect_vendor_purchase_screen(hwnd)
+            option_click = None
+            if not purchase_state["visible"] and quick_menu_state["stage"] in {"npc_action_menu", "small_talk_menu"}:
+                option_click = click_named_point(hwnd, "vendor_purchase_option")
+                INPUT_GUARD.guarded_sleep(1000, title)
+                purchase_state = detect_vendor_purchase_screen(hwnd)
+            interact_attempt_log.append(
+                {
+                    "approachStep": step_index + 1,
+                    "interactAttempt": interact_index + 1,
+                    "menuStage": quick_menu_state["stage"],
+                    "menuText": quick_menu_state["text"],
+                    "optionClick": option_click,
+                    "purchaseVisible": bool(purchase_state["visible"]),
+                    "purchaseText": purchase_state["text"],
+                }
+            )
+            if purchase_state["visible"]:
+                break
+
+        if purchase_state["visible"]:
+            break
+
     if not purchase_state["visible"]:
-        raise RuntimeError(
-            "Vendor purchase option did not open purchase screen."
-        )
+        raise RuntimeError("Vendor purchase option did not open purchase screen.")
 
     return {
         "id": action_id,
@@ -2130,8 +2211,10 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
             "mode": "open_named_vendor_purchase",
             "targetName": target_name,
             "optionText": option_text,
-            "npcAnchor": npc_anchor,
-            "npcClick": click_state,
+            "approachSteps": approach_steps,
+            "approachMovePulseMs": approach_move_pulse_ms,
+            "approachMoves": approach_moves,
+            "interactAttempts": interact_attempt_log,
             "optionClick": option_click,
             "stage": "vendor_purchase_screen",
             "purchaseText": purchase_state["text"],
@@ -2213,6 +2296,8 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
 
     inventory_click = click_named_point(hwnd, "hawking_inventory_first_slot")
     INPUT_GUARD.guarded_sleep(1000, title)
+    max_quantity_click = click_named_point(hwnd, "hawking_max_quantity")
+    INPUT_GUARD.guarded_sleep(1000, title)
     stock_click = click_named_point(hwnd, "hawking_stock_button")
     INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 1000), title)
 
@@ -2220,11 +2305,12 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Selected first hawking inventory item and clicked the stock button",
+        "detail": "Selected the first hawking item, maximized quantity, and clicked the stock button",
         "input": {
             "mode": "stock_first_hawking_item",
             "beforeText": hawking_state["text"],
             "inventoryClick": inventory_click,
+            "maxQuantityClick": max_quantity_click,
             "stockClick": stock_click,
         },
     }

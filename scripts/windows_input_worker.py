@@ -220,8 +220,8 @@ ACTION_POINTS = {
     # until the text-entry chain is wired in.
     "chat_send": (938 / 2537, 1289 / 1384),
     "map_coord_y_input": (1300 / 1870, 843 / 976),
-    "map_coord_x_input": (1405 / 1870, 842 / 976),
-    "map_go": (1518 / 1870, 841 / 976),
+    "map_coord_x_input": (1971 / 2643, 1213 / 1398),
+    "map_go": (0.808551, 0.864807),
 }
 
 MAP_KEYPAD_POINTS = {
@@ -240,18 +240,18 @@ MAP_KEYPAD_POINTS = {
         "confirm": (1127 / 1870, 777 / 976),
     },
     "horizontal": {
-        "1": (899 / 1870, 553 / 976),
-        "2": (1015 / 1870, 553 / 976),
-        "3": (1131 / 1870, 553 / 976),
-        "4": (899 / 1870, 665 / 976),
-        "5": (1015 / 1870, 665 / 976),
-        "6": (1131 / 1870, 665 / 976),
-        "7": (899 / 1870, 777 / 976),
-        "8": (1015 / 1870, 777 / 976),
-        "9": (1131 / 1870, 777 / 976),
-        "0": (1247 / 1870, 665 / 976),
-        "delete": (1247 / 1870, 553 / 976),
-        "confirm": (1247 / 1870, 777 / 976),
+        "1": (1267 / 2643, 791 / 1398),
+        "2": (1431 / 2643, 791 / 1398),
+        "3": (1595 / 2643, 791 / 1398),
+        "4": (1267 / 2643, 952 / 1398),
+        "5": (1431 / 2643, 952 / 1398),
+        "6": (1595 / 2643, 952 / 1398),
+        "7": (1267 / 2643, 1113 / 1398),
+        "8": (1431 / 2643, 1113 / 1398),
+        "9": (1595 / 2643, 1113 / 1398),
+        "0": (1758 / 2643, 952 / 1398),
+        "delete": (1758 / 2643, 791 / 1398),
+        "confirm": (1758 / 2643, 1113 / 1398),
     },
 }
 
@@ -912,13 +912,6 @@ def derive_map_keypad_layout(digit_buttons: dict[str, dict[str, Any]]) -> dict[s
     }
 
 
-def clear_map_coordinate_field(hwnd: int, layout: dict[str, Any], repeat: int, title: str) -> None:
-    delete_button = layout["buttons"]["delete"]
-    for _ in range(max(1, repeat)):
-        click_screen_point(hwnd, int(delete_button["screenX"]), int(delete_button["screenY"]), "left")
-        INPUT_GUARD.guarded_sleep(60, title)
-
-
 def input_map_coordinate_field(
     hwnd: int,
     point_name: str,
@@ -928,7 +921,7 @@ def input_map_coordinate_field(
     title: str,
 ) -> dict[str, Any]:
     click_state = click_map_route_control(hwnd, control_name, point_name)
-    INPUT_GUARD.guarded_sleep(220, title)
+    INPUT_GUARD.guarded_sleep(1000, title)
     layout = {
         "buttons": {
             key: {
@@ -941,20 +934,30 @@ def input_map_coordinate_field(
 
     digits = list(str(int(coordinate_value)))
 
-    clear_map_coordinate_field(hwnd, layout, 4, title)
-
     typed_digits: list[dict[str, Any]] = []
     for digit in digits:
         button = layout["buttons"].get(digit)
         if not button:
             raise RuntimeError(f"Map keypad button for digit {digit} was not found")
         click_screen_point(hwnd, int(button["screenX"]), int(button["screenY"]), "left")
-        INPUT_GUARD.guarded_sleep(80, title)
+        INPUT_GUARD.guarded_sleep(1000, title)
         typed_digits.append({
             "digit": digit,
             "screenX": int(button["screenX"]),
             "screenY": int(button["screenY"]),
         })
+
+    confirm_click = None
+    if field_name == "vertical":
+        confirm_button = layout["buttons"].get("confirm")
+        if not confirm_button:
+            raise RuntimeError("Map keypad confirm button for vertical field was not found")
+        click_screen_point(hwnd, int(confirm_button["screenX"]), int(confirm_button["screenY"]), "left")
+        INPUT_GUARD.guarded_sleep(1000, title)
+        confirm_click = {
+            "screenX": int(confirm_button["screenX"]),
+            "screenY": int(confirm_button["screenY"]),
+        }
 
     return {
         "fieldName": field_name,
@@ -962,6 +965,7 @@ def input_map_coordinate_field(
         "fieldClick": click_state,
         "activationAttempts": [click_state],
         "typedDigits": typed_digits,
+        "confirmClick": confirm_click,
         "digitButtons": {
             key: {
                 "screenX": int(value["screenX"]),
@@ -985,7 +989,7 @@ def run_map_route_to_coordinate(hwnd: int, action: dict[str, Any]) -> dict[str, 
     y_input = input_map_coordinate_field(hwnd, "map_coord_y_input", "vertical", y_coordinate, "vertical", title)
     x_input = input_map_coordinate_field(hwnd, "map_coord_x_input", "horizontal", x_coordinate, "horizontal", title)
     go_click = click_map_route_control(hwnd, "go", "map_go")
-    INPUT_GUARD.guarded_sleep(max(200, wait_after_go_ms), title)
+    INPUT_GUARD.guarded_sleep(max(1000, wait_after_go_ms), title)
 
     return {
         "id": action_id,
@@ -2106,10 +2110,10 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
         raise RuntimeError(f"Failed to locate named NPC in scene: {target_name}")
 
     click_state = click_screen_point(hwnd, int(npc_anchor["screenX"]), int(npc_anchor["screenY"]), "left")
-    INPUT_GUARD.guarded_sleep(450, title)
+    INPUT_GUARD.guarded_sleep(1000, title)
 
     option_click = click_named_point(hwnd, "vendor_purchase_option")
-    INPUT_GUARD.guarded_sleep(500, title)
+    INPUT_GUARD.guarded_sleep(1000, title)
 
     purchase_state = detect_vendor_purchase_screen(hwnd)
     if not purchase_state["visible"]:
@@ -2152,16 +2156,16 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
         raise RuntimeError(f"Unsupported fixed vendor item: {item_name}")
 
     item_click = click_named_point(hwnd, item_button["pointName"])
-    INPUT_GUARD.guarded_sleep(300, title)
+    INPUT_GUARD.guarded_sleep(1000, title)
 
     plus_clicks: list[dict[str, Any]] = []
     for _ in range(max(0, quantity - 1)):
         plus_click = click_named_point(hwnd, "vendor_purchase_plus")
         plus_clicks.append(plus_click)
-        INPUT_GUARD.guarded_sleep(120, title)
+        INPUT_GUARD.guarded_sleep(1000, title)
 
     buy_click = click_named_point(hwnd, "vendor_purchase_buy")
-    INPUT_GUARD.guarded_sleep(900, title)
+    INPUT_GUARD.guarded_sleep(1000, title)
     after_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
 
     return {
@@ -2187,7 +2191,7 @@ def run_close_vendor_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "close_vendor_panel")
     click_state = click_named_point(hwnd, "close_panel")
-    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 800), title)
+    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 1000), title)
     return {
         "id": action_id,
         "title": title,
@@ -2208,9 +2212,9 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
         raise RuntimeError("Current screen is not hawking screen")
 
     inventory_click = click_named_point(hwnd, "hawking_inventory_first_slot")
-    INPUT_GUARD.guarded_sleep(250, title)
+    INPUT_GUARD.guarded_sleep(1000, title)
     stock_click = click_named_point(hwnd, "hawking_stock_button")
-    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 700), title)
+    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 1000), title)
 
     return {
         "id": action_id,
@@ -2234,7 +2238,7 @@ def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("Current screen is not hawking screen")
 
     submit_click = click_named_point(hwnd, "hawking_submit")
-    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 800), title)
+    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 1000), title)
 
     return {
         "id": action_id,

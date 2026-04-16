@@ -51,7 +51,7 @@ SELECTED_PANEL_ROI = (0.20, 0.10, 0.42, 0.26)
 SELECTED_NAME_ROI = (0.26, 0.12, 0.36, 0.20)
 SELECTED_HP_ROI = (0.26, 0.19, 0.39, 0.23)
 DETAIL_EXIT_ROI = (0.82, 0.66, 0.99, 0.80)
-RANDOM_NAME_SEARCH_ROI = (0.15, 0.18, 0.84, 0.74)
+RANDOM_NAME_SEARCH_ROI = (0.28, 0.24, 0.72, 0.60)
 IGNORED_WORLD_TEXTS = {
     "查看",
     "退出",
@@ -424,13 +424,15 @@ def build_target_click_from_bbox(hwnd: int, target: dict) -> dict:
     }
 
 
-def find_random_npc_target(hwnd: int, iteration: int) -> dict | None:
+def find_random_npc_target(hwnd: int, iteration: int, preferred_side: str | None = None) -> dict | None:
     bounds = get_window_bounds(hwnd)
     full_image = capture_full_client(hwnd)
     roi_left = int(bounds["width"] * RANDOM_NAME_SEARCH_ROI[0])
     roi_top = int(bounds["height"] * RANDOM_NAME_SEARCH_ROI[1])
     roi_image = crop_roi(full_image, RANDOM_NAME_SEARCH_ROI)
     candidates = []
+    player_center_x = bounds["width"] * 0.5
+    side_margin = max(60, round(bounds["width"] * 0.04))
 
     for item in input_worker.ocr_items(roi_image):
         text = normalize_name(item["text"])
@@ -444,6 +446,10 @@ def find_random_npc_target(hwnd: int, iteration: int) -> dict | None:
             continue
         center_x = roi_left + int(item["centerX"])
         center_y = roi_top + int(item["centerY"])
+        if preferred_side == "left" and center_x >= player_center_x - side_margin:
+            continue
+        if preferred_side == "right" and center_x <= player_center_x + side_margin:
+            continue
         distance_penalty = abs(center_x - bounds["width"] * 0.5) + abs(center_y - bounds["height"] * 0.5) * 0.5
         candidates.append(
             {

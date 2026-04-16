@@ -215,8 +215,8 @@ function createStealthPrimitiveActions() {
       id: "primitive-1",
       title: "Route To Stealth Point",
       type: "map_route_to_coordinate",
-      xCoordinate: 749,
-      yCoordinate: 942,
+      xCoordinate: 740,
+      yCoordinate: 944,
       postDelayMs: 1000,
       waitAfterGoMs: 800
     },

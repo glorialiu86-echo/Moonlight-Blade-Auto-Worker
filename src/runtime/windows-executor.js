@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getActionDefinition } from "./action-registry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
@@ -19,9 +20,10 @@ function resolvePythonPath() {
 
 function createWorkerActions(plan) {
   return plan.actions.map((action, index) => {
+    const actionDefinition = getActionDefinition(action.type);
     const baseAction = {
       id: `input-${index + 1}`,
-      title: action.title,
+      title: action.title || actionDefinition?.label || action.type,
       sourceType: action.type
     };
 

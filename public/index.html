@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>天涯明月刀 · 籽岷控制台</title>
+    <title>天涯明月刀 · 籽小刀</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="host-page">
@@ -12,39 +12,68 @@
         <div class="host-brand">
           <img class="brand-logo" src="/zimin-team-logo.svg" alt="籽岷团队 logo" />
           <div>
-            <p class="host-eyebrow">Zi Min Custom Console</p>
-            <h1>籽岷对话窗口</h1>
-            <p class="host-subtitle">籽岷只需要下达任务、观察籽小刀回复，并通过主按钮控制整套本地程序的启停。</p>
+            <p class="host-eyebrow">Zi Xiao Dao Console</p>
+            <h1>籽小刀在这儿</h1>
+            <p class="host-subtitle">籽岷把话递给我，我来盯画面、理思路，能动手的时候我就往下推。</p>
           </div>
         </div>
-        <a class="debug-link" href="/debug">打开调试页</a>
+        <a class="debug-link" href="/debug">我去看调试页</a>
       </header>
 
       <section class="run-panel">
         <div class="run-status">
-          <p class="run-label">系统状态</p>
-          <p id="runStatusText" class="run-value">待机</p>
-          <p id="runStatusHint" class="run-hint">当前还没有开始执行任务。</p>
+          <p class="run-label">籽小刀状态</p>
+          <p id="runStatusText" class="run-value">我在待命</p>
+          <p id="runStatusHint" class="run-hint">我先稳着，等籽岷把这一轮的话递给我。</p>
         </div>
         <div class="run-panel-actions">
           <div class="mode-switch" role="group" aria-label="交互模式">
-            <button id="watchModeButton" class="mode-button" type="button">观看</button>
-            <button id="actModeButton" class="mode-button" type="button">行动</button>
+            <button id="watchModeButton" class="mode-button" type="button">我只看</button>
+            <button id="actModeButton" class="mode-button" type="button">我动手</button>
           </div>
-          <button id="externalInputGuardButton" class="guard-button" type="button">人一碰就停：开</button>
-          <button id="runToggleButton" class="run-toggle" type="button">开始执行任务</button>
+          <button id="externalInputGuardButton" class="guard-button" type="button">人一碰我就停：开</button>
+          <button id="runToggleButton" class="run-toggle" type="button">让我开工</button>
         </div>
       </section>
 
       <main class="chat-panel">
+        <section class="assistant-status-panel">
+          <div class="assistant-status-head">
+            <p class="run-label">籽小刀现在</p>
+            <p id="assistantStatusSummary" class="assistant-status-summary">我先稳着，等籽岷一句话。</p>
+          </div>
+          <div class="assistant-status-grid">
+            <article class="assistant-status-card">
+              <p class="assistant-status-label">我的模式</p>
+              <p id="assistantModeText" class="assistant-status-value">我现在在行动</p>
+            </article>
+            <article class="assistant-status-card">
+              <p class="assistant-status-label">我的护手</p>
+              <p id="assistantGuardText" class="assistant-status-value">籽岷一碰我就停手。</p>
+            </article>
+            <article class="assistant-status-card assistant-status-card-wide">
+              <p class="assistant-status-label">我盯着什么</p>
+              <p id="assistantObjectiveText" class="assistant-status-value">我还没接到这一轮的目标。</p>
+            </article>
+            <article class="assistant-status-card assistant-status-card-wide">
+              <p class="assistant-status-label">我准备怎么走</p>
+              <p id="assistantActionChainText" class="assistant-status-value">我手里还没落下动作链。</p>
+            </article>
+          </div>
+          <div class="assistant-action-catalog">
+            <p class="assistant-status-label">我手里现成的动作</p>
+            <div id="assistantActionCatalog" class="assistant-action-list"></div>
+          </div>
+        </section>
+
         <section id="messageList" class="chat-list" aria-live="polite"></section>
 
         <form id="composerForm" class="chat-composer">
           <div class="composer-tools">
             <div class="tool-row">
-              <button id="voiceStartButton" type="button">开始语音</button>
-              <button id="voiceStopButton" type="button" disabled>停止语音</button>
-              <p id="voiceStatus" class="tool-status">语音输入未启动。</p>
+              <button id="voiceStartButton" type="button">我先听你说</button>
+              <button id="voiceStopButton" type="button" disabled>我先收声</button>
+              <p id="voiceStatus" class="tool-status">我的耳朵还没开。</p>
             </div>
           </div>
 
@@ -53,12 +82,12 @@
               id="instructionInput"
               name="instruction"
               rows="4"
-              placeholder="例如：先观察一下附近，再决定下一步。"
+              placeholder="籽岷，你直接吩咐我这一轮想干什么。"
             ></textarea>
           </label>
 
           <div class="chat-actions">
-            <button type="submit" class="primary">发送任务</button>
+            <button type="submit" class="primary">把这句话递给我</button>
           </div>
         </form>
       </main>

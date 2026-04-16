@@ -4,6 +4,7 @@ const state = {
   runtimeStatus: "idle",
   interactionMode: "act",
   externalInputGuardEnabled: true,
+  actionCatalog: [],
   voice: {
     recording: false,
     transcribing: false,
@@ -26,6 +27,12 @@ const elements = {
   watchModeButton: document.querySelector("#watchModeButton"),
   actModeButton: document.querySelector("#actModeButton"),
   externalInputGuardButton: document.querySelector("#externalInputGuardButton"),
+  assistantStatusSummary: document.querySelector("#assistantStatusSummary"),
+  assistantModeText: document.querySelector("#assistantModeText"),
+  assistantGuardText: document.querySelector("#assistantGuardText"),
+  assistantObjectiveText: document.querySelector("#assistantObjectiveText"),
+  assistantActionChainText: document.querySelector("#assistantActionChainText"),
+  assistantActionCatalog: document.querySelector("#assistantActionCatalog"),
   voiceStartButton: document.querySelector("#voiceStartButton"),
   voiceStopButton: document.querySelector("#voiceStopButton"),
   voiceStatus: document.querySelector("#voiceStatus"),
@@ -43,7 +50,7 @@ async function request(path, options = {}) {
   const payload = await response.json();
 
   if (!response.ok || payload.ok === false) {
-    throw new Error(payload.error || "请求失败");
+    throw new Error(payload.error || "我这边没接稳。");
   }
 
   return payload;
@@ -81,8 +88,8 @@ function syncUiState() {
   elements.watchModeButton.classList.toggle("is-active", isWatchMode());
   elements.actModeButton.classList.toggle("is-active", !isWatchMode());
   elements.externalInputGuardButton.classList.toggle("is-active", isExternalInputGuardEnabled());
-  elements.externalInputGuardButton.textContent = `人一碰就停：${isExternalInputGuardEnabled() ? "开" : "关"}`;
-  elements.runToggleButton.textContent = running ? "停止执行任务" : "开始执行任务";
+  elements.externalInputGuardButton.textContent = `人一碰我就停：${isExternalInputGuardEnabled() ? "开" : "关"}`;
+  elements.runToggleButton.textContent = running ? "先让我停手" : "让我开工";
 }
 
 function scrollMessagesToBottom() {
@@ -91,14 +98,14 @@ function scrollMessagesToBottom() {
 
 function renderEmptyState() {
   const modeText = isWatchMode()
-    ? "切到观看模式后，籽小刀会只根据屏幕内容和籽岷互动。"
-    : "点“开始执行任务”后，籽岷就可以直接给籽小刀下任务了。";
+    ? "我现在只看局面，先陪籽岷盯画面，不乱动手。"
+    : "只要籽岷一句话，我就能按行动模式往下推。";
 
   elements.messageList.innerHTML = `
     <article class="chat-message chat-message-assistant chat-empty">
       <div class="chat-role">籽小刀</div>
       <p class="chat-text">${modeText}</p>
-      <p class="chat-meta">更完整的思考链和调试信息可以在 \`/debug\` 页面里看。</p>
+      <p class="chat-meta">我要是说得还不够细，可以去 \`/debug\` 看我更完整的链路。</p>
     </article>
   `;
 }
@@ -135,8 +142,92 @@ function buildAssistantText(message) {
 function renderAssistantMessage(message) {
   const node = elements.assistantMessageTemplate.content.firstElementChild.cloneNode(true);
   node.querySelector(".chat-text").textContent = buildAssistantText(message);
-  node.querySelector(".chat-meta").textContent = message.perceptionSummary || `风险：${message.riskLevel || "-"}`;
+  node.querySelector(".chat-meta").textContent = message.perceptionSummary || `我这轮判断的风险是：${message.riskLevel || "-"}`;
   return node;
+}
+
+function buildObjectiveText(runtimeState) {
+  const currentTurn = runtimeState.currentTurn || null;
+  const currentObjective = runtimeState.agent?.currentObjective || "";
+
+  if (currentTurn?.instruction) {
+    return `我这轮盯着的是：${currentTurn.instruction}`;
+  }
+
+  if (currentObjective) {
+    return `我现在挂着的目标是：${currentObjective}`;
+  }
+
+  return "我还没接到这一轮的目标。";
+}
+
+function buildActionChainText(runtimeState) {
+  const actions = Array.isArray(runtimeState.currentTurn?.plan?.actions)
+    ? runtimeState.currentTurn.plan.actions
+    : [];
+
+  if (actions.length === 0) {
+    return isWatchMode()
+      ? "我现在只看局面，不往下落动作。"
+      : "我手里还没落下动作链。";
+  }
+
+  const labels = actions.map((actionKey) => {
+    const definition = state.actionCatalog.find((item) => item.key === actionKey);
+    return definition?.label || actionKey;
+  });
+
+  return `我准备按这条顺序往下走：${labels.join(" -> ")}`;
+}
+
+function buildStatusSummary(runtimeState) {
+  if (runtimeState.status !== "running") {
+    return "我先稳着，等籽岷一句话。";
+  }
+
+  if (isWatchMode()) {
+    return "我现在只盯屏幕和局面，先陪籽岷看，不乱动手。";
+  }
+
+  if (runtimeState.lastError) {
+    return `我刚刚这轮没接稳：${runtimeState.lastError}`;
+  }
+
+  if (runtimeState.currentTurn?.execution?.outcome) {
+    return `我刚落完一轮动作：${runtimeState.currentTurn.execution.outcome}`;
+  }
+
+  return isExternalInputGuardEnabled()
+    ? "我现在能动手，但籽岷一碰鼠标键盘，我就立刻让手。"
+    : "我现在能动手，会顺着动作链继续往下推。";
+}
+
+function renderActionCatalog() {
+  elements.assistantActionCatalog.innerHTML = "";
+
+  state.actionCatalog.forEach((action) => {
+    const item = document.createElement("article");
+    item.className = "assistant-action-item";
+    item.dataset.availability = action.availability || "partial";
+    item.innerHTML = `
+      <p class="assistant-action-name">${action.label}</p>
+      <p class="assistant-action-note">${action.note}</p>
+    `;
+    elements.assistantActionCatalog.appendChild(item);
+  });
+}
+
+function renderAssistantStatus(runtimeState) {
+  elements.assistantStatusSummary.textContent = buildStatusSummary(runtimeState);
+  elements.assistantModeText.textContent = isWatchMode() ? "我现在在观看" : "我现在在行动";
+  elements.assistantGuardText.textContent = isWatchMode()
+    ? "我现在不动手，所以不用护手。"
+    : (isExternalInputGuardEnabled()
+      ? "籽岷一碰我就停手。"
+      : "现在是直推，我不会因外界输入自动停手。");
+  elements.assistantObjectiveText.textContent = buildObjectiveText(runtimeState);
+  elements.assistantActionChainText.textContent = buildActionChainText(runtimeState);
+  renderActionCatalog();
 }
 
 function renderMessages(messages) {
@@ -167,27 +258,33 @@ function renderRunState(runtimeState) {
   const running = isRunningStatus(state.runtimeStatus);
 
   elements.runStatusText.textContent = running
-    ? "执行中"
+    ? "我已开工"
     : state.runtimeStatus === "paused"
-      ? "已暂停"
-      : "待机";
+      ? "我先停着"
+      : "我在待命";
 
   elements.runStatusHint.textContent = running
     ? (isWatchMode()
-      ? "当前是观看模式：籽小刀只看屏幕并和籽岷互动，不执行动作。"
-      : `当前是行动模式：籽小刀会按规划链路执行动作。${isExternalInputGuardEnabled() ? " 检测到籽岷动鼠标或键盘时会自动停手。" : ""}`)
-    : "当前整套本地程序处于停止或待机状态。";
+      ? "我现在只看屏幕和局面，先陪籽岷看，不往下动手。"
+      : `我现在会顺着动作链往下推。${isExternalInputGuardEnabled() ? " 籽岷一碰鼠标或键盘，我就立刻停手。" : ""}`)
+    : "我现在还没往下动，只在前面等籽岷发话。";
 }
 
 function renderRuntimeState(runtimeState) {
   renderRunState(runtimeState);
+  renderAssistantStatus(runtimeState);
   renderMessages(runtimeState.messages);
   syncUiState();
 }
 
+function applyPayload(payload) {
+  state.actionCatalog = Array.isArray(payload.actionCatalog) ? payload.actionCatalog : state.actionCatalog;
+  renderRuntimeState(payload.state);
+}
+
 async function refresh() {
   const payload = await request("/api/state");
-  renderRuntimeState(payload.state);
+  applyPayload(payload);
 }
 
 async function sendControlAction(action) {
@@ -195,7 +292,7 @@ async function sendControlAction(action) {
     method: "POST",
     body: JSON.stringify({ action })
   });
-  renderRuntimeState(payload.state);
+  applyPayload(payload);
 }
 
 async function setInteractionMode(mode) {
@@ -203,7 +300,7 @@ async function setInteractionMode(mode) {
     method: "POST",
     body: JSON.stringify({ interactionMode: mode })
   });
-  renderRuntimeState(payload.state);
+  applyPayload(payload);
 }
 
 async function setExternalInputGuardEnabled(enabled) {
@@ -211,7 +308,7 @@ async function setExternalInputGuardEnabled(enabled) {
     method: "POST",
     body: JSON.stringify({ externalInputGuardEnabled: enabled })
   });
-  renderRuntimeState(payload.state);
+  applyPayload(payload);
 }
 
 function appendTranscriptToComposer(text) {
@@ -231,7 +328,7 @@ function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("文件读取失败"));
+    reader.onerror = () => reject(new Error("我这边没读出这段音频。"));
     reader.readAsDataURL(blob);
   });
 }
@@ -358,7 +455,7 @@ async function stopVoiceRecording() {
   state.voice.recording = false;
   state.voice.transcribing = true;
   syncUiState();
-  updateVoiceStatus("录音结束，正在转写。");
+  updateVoiceStatus("我先把这段声音听完，马上转成字。");
 
   try {
     const pcmChunks = [...state.voice.pcmChunks];
@@ -367,7 +464,7 @@ async function stopVoiceRecording() {
     state.voice.pcmChunks = [];
 
     if (pcmChunks.length === 0) {
-      throw new Error("没有采集到有效语音，请重试。");
+      throw new Error("我还没听到能用的声音。");
     }
 
     const merged = mergeFloat32Chunks(pcmChunks);
@@ -380,9 +477,9 @@ async function stopVoiceRecording() {
     });
 
     appendTranscriptToComposer(payload.text);
-    updateVoiceStatus("语音转写完成，结果已写入输入框。");
+    updateVoiceStatus("我听清了，已经替籽岷写进输入框。");
   } catch (error) {
-    updateVoiceStatus(`语音转写失败：${error.message}`);
+    updateVoiceStatus(`我这次没听稳：${error.message}`);
   } finally {
     state.voice.transcribing = false;
     syncUiState();
@@ -429,14 +526,14 @@ async function startVoiceRecording() {
     sourceNode.connect(processorNode);
     processorNode.connect(audioContext.destination);
 
-    updateVoiceStatus("录音中。点“停止语音”后会自动转写到输入框。");
+    updateVoiceStatus("我在听，籽岷说完就点一下“我先收声”。");
     syncUiState();
   } catch (error) {
     await releaseVoiceCapture();
     state.voice.recording = false;
     state.voice.pcmChunks = [];
     syncUiState();
-    updateVoiceStatus(`无法开始录音：${error.message}`);
+    updateVoiceStatus(`我这边没把耳朵打开：${error.message}`);
   }
 }
 
@@ -445,13 +542,13 @@ function initVoiceInput() {
   const mediaDevices = navigator.mediaDevices;
 
   if (!AudioContextClass || !mediaDevices?.getUserMedia) {
-    updateVoiceStatus("当前浏览器不支持语音输入。");
+    updateVoiceStatus("这会儿我的耳朵还接不上。");
     syncUiState();
     return;
   }
 
   state.voiceSupported = true;
-  updateVoiceStatus("语音输入已接入。");
+  updateVoiceStatus("我的耳朵已经开了，籽岷可以直接说。");
   syncUiState();
 }
 
@@ -462,10 +559,10 @@ elements.runToggleButton.addEventListener("click", async () => {
 
   try {
     await sendControlAction(running ? "stop" : "start");
-    updateVoiceStatus(running ? "系统已停止。" : "系统已启动，可以开始下达任务。");
+    updateVoiceStatus(running ? "我先把手收住了。" : "我已经开工，籽岷可以直接吩咐我。");
     await refresh();
   } catch (error) {
-    updateVoiceStatus(`切换运行状态失败：${error.message}`);
+    updateVoiceStatus(`我这次没切稳状态：${error.message}`);
   } finally {
     state.submitting = false;
     syncUiState();
@@ -483,7 +580,7 @@ elements.composerForm.addEventListener("submit", async (event) => {
 
   state.submitting = true;
   syncUiState();
-  updateVoiceStatus(isWatchMode() ? "正在按观看模式生成回复。" : "正在按行动模式执行这一轮任务。");
+  updateVoiceStatus(isWatchMode() ? "我先按观看模式把这轮想明白。" : "我先按行动模式把这轮往下推。");
 
   try {
     const payload = await request("/api/chat", {
@@ -495,11 +592,11 @@ elements.composerForm.addEventListener("submit", async (event) => {
       })
     });
 
+    applyPayload(payload);
     elements.instructionInput.value = "";
-    renderRuntimeState(payload.state);
-    updateVoiceStatus("本轮任务完成。");
+    updateVoiceStatus("这轮我已经接住了。");
   } catch (error) {
-    updateVoiceStatus(`本轮处理失败：${error.message}`);
+    updateVoiceStatus(`我这轮没接稳：${error.message}`);
     await refresh().catch(() => {});
   } finally {
     state.submitting = false;
@@ -517,9 +614,9 @@ elements.watchModeButton.addEventListener("click", async () => {
 
   try {
     await setInteractionMode("watch");
-    updateVoiceStatus("已切到观看模式，当前只观察和回复。");
+    updateVoiceStatus("我先切到观看，只陪籽岷盯局面。");
   } catch (error) {
-    updateVoiceStatus(`切换观看模式失败：${error.message}`);
+    updateVoiceStatus(`我这次没切到观看：${error.message}`);
   } finally {
     state.submitting = false;
     syncUiState();
@@ -536,9 +633,9 @@ elements.actModeButton.addEventListener("click", async () => {
 
   try {
     await setInteractionMode("act");
-    updateVoiceStatus("已切到行动模式，后续会执行动作。");
+    updateVoiceStatus("我切回行动了，后面可以直接往下动手。");
   } catch (error) {
-    updateVoiceStatus(`切换行动模式失败：${error.message}`);
+    updateVoiceStatus(`我这次没切回行动：${error.message}`);
   } finally {
     state.submitting = false;
     syncUiState();
@@ -557,10 +654,10 @@ elements.externalInputGuardButton.addEventListener("click", async () => {
     const nextEnabled = !isExternalInputGuardEnabled();
     await setExternalInputGuardEnabled(nextEnabled);
     updateVoiceStatus(nextEnabled
-      ? "已开启人类介入保护，籽岷一动鼠标或键盘就会停掉行动。"
-      : "已关闭人类介入保护，行动模式下不会因外界输入自动停止。");
+      ? "我把护手抬起来了，籽岷一碰我就停。"
+      : "我把护手放下了，这会儿不会自动让手。");
   } catch (error) {
-    updateVoiceStatus(`切换人类介入保护失败：${error.message}`);
+    updateVoiceStatus(`我这次没切稳护手：${error.message}`);
   } finally {
     state.submitting = false;
     syncUiState();
@@ -578,7 +675,7 @@ elements.voiceStopButton.addEventListener("click", async () => {
 initVoiceInput();
 
 refresh().catch((error) => {
-  updateVoiceStatus(`初始化失败：${error.message}`);
+  updateVoiceStatus(`我这边刚起身就绊了一下：${error.message}`);
 });
 
 window.setInterval(() => {

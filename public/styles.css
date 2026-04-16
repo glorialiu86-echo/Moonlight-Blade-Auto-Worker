@@ -259,6 +259,105 @@ textarea:focus {
   gap: 14px;
 }
 
+.assistant-status-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(66, 46, 32, 0.12);
+  background: rgba(255, 252, 247, 0.82);
+}
+
+.assistant-status-head {
+  display: grid;
+  gap: 8px;
+}
+
+.assistant-status-summary {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.7;
+  font-weight: 600;
+}
+
+.assistant-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.assistant-status-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(66, 46, 32, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.assistant-status-card-wide {
+  grid-column: span 2;
+}
+
+.assistant-status-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.assistant-status-value {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.assistant-action-catalog {
+  display: grid;
+  gap: 10px;
+}
+
+.assistant-action-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.assistant-action-item {
+  min-width: 160px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(66, 46, 32, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.assistant-action-item[data-availability="ready"] {
+  background: rgba(255, 248, 236, 0.92);
+}
+
+.assistant-action-item[data-availability="partial"] {
+  background: rgba(247, 240, 233, 0.92);
+}
+
+.assistant-action-name,
+.assistant-action-note {
+  margin: 0;
+}
+
+.assistant-action-name {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.assistant-action-note {
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 13px;
+}
+
 .chat-list,
 .message-list {
   min-height: 54vh;
@@ -611,6 +710,14 @@ textarea:focus {
   .message-list {
     min-height: 46vh;
     max-height: none;
+  }
+
+  .assistant-status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .assistant-status-card-wide {
+    grid-column: span 1;
   }
 
   .chat-message-user,

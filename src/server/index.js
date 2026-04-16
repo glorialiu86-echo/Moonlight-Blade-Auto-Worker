@@ -10,6 +10,7 @@ import { captureGameWindow } from "../capture/windows-game-window.js";
 import { generateText } from "../llm/qwen.js";
 import { createTurnPlan } from "../llm/planner.js";
 import { analyzeScreenshot } from "../perception/analyzer.js";
+import { buildActionCatalog } from "../runtime/action-registry.js";
 import {
   appendInteractionSample,
   buildInteractionSample,
@@ -156,7 +157,11 @@ async function writeTempAudioFile(audioDataUrl) {
 }
 
 function statePayload() {
-  return { ok: true, state: getState() };
+  return {
+    ok: true,
+    state: getState(),
+    actionCatalog: buildActionCatalog()
+  };
 }
 
 function sleep(ms) {
@@ -914,7 +919,7 @@ async function handleTurn(request, response) {
     });
 
     return sendJson(response, 200, {
-      ok: true,
+      ...statePayload(),
       state: nextState
     });
   } catch (error) {
@@ -1084,10 +1089,7 @@ async function handleChat(request, response) {
         actions: directReply.execution.steps
       });
 
-      return sendJson(response, 200, {
-        ok: true,
-        state: getState()
-      });
+      return sendJson(response, 200, statePayload());
     }
 
     const state = getState();
@@ -1105,7 +1107,7 @@ async function handleChat(request, response) {
     });
 
     return sendJson(response, 200, {
-      ok: true,
+      ...statePayload(),
       state: nextState
     });
   } catch (error) {

@@ -1,17 +1,6 @@
 import { generateText } from "./qwen.js";
 import { extractJsonObject } from "../lib/json.js";
-
-const allowedActions = [
-  "talk",
-  "gift",
-  "inspect",
-  "trade",
-  "threaten",
-  "steal",
-  "strike",
-  "escape",
-  "wait"
-];
+import { ALLOWED_ACTIONS } from "../runtime/action-registry.js";
 
 // Note: the current actions whitelist is still incomplete.
 // We still need to expand and refine the behavior paths behind these actions.
@@ -39,7 +28,7 @@ const plannerSystemPrompt = `
 - 拉近关系
 
 actions 只能从这个集合里选：
-${allowedActions.join(", ")}
+${ALLOWED_ACTIONS.join(", ")}
 
 可以选一个，也可以选多个。
 如果是多步动作，按执行顺序输出。
@@ -385,7 +374,7 @@ function sanitizePlan(rawPlan) {
   const goalType = classifyGoal(rawPlan.instructionHint || "", rawPlan.actions || []);
   const normalizedActions = rawPlan.actions
     .map((action) => String(action || "").trim())
-    .filter((action) => allowedActions.includes(action));
+    .filter((action) => ALLOWED_ACTIONS.includes(action));
 
   if (normalizedActions.length === 0) {
     throw new Error("No whitelisted action returned by planner");

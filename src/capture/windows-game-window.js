@@ -1,26 +1,12 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
-import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, "../../");
-const scriptPath = path.resolve(projectRoot, "scripts/capture_game_window.py");
+const scriptPath = path.resolve(__dirname, "../../scripts/capture-game-window.ps1");
 const DEFAULT_WINDOW_TITLE_KEYWORD = "\u5929\u6daf\u660e\u6708\u5200\u624b\u6e38";
-
-function defaultPythonCandidates() {
-  return [
-    path.resolve(projectRoot, ".venv/Scripts/python.exe"),
-    "py",
-    "python"
-  ];
-}
-
-function resolvePythonPath() {
-  return defaultPythonCandidates().find((candidate) => ["py", "python"].includes(candidate) || existsSync(candidate)) || "python";
-}
 
 function normalizeBounds(bounds) {
   if (!bounds || typeof bounds !== "object") {
@@ -43,19 +29,20 @@ export async function captureGameWindow(options = {}) {
   } = options;
 
   const args = [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
     scriptPath,
-    "--window-title-keyword",
+    "-WindowTitleKeyword",
     windowTitleKeyword,
-    "--min-width",
+    "-MinWidth",
     String(minWidth),
-    "--min-height",
+    "-MinHeight",
     String(minHeight)
   ];
 
-  const pythonPath = resolvePythonPath();
-  const pythonArgs = pythonPath === "py" ? ["-3", ...args] : args;
-
-  const { stdout, stderr } = await execFileAsync(pythonPath, pythonArgs, {
+  const { stdout, stderr } = await execFileAsync("powershell.exe", args, {
     windowsHide: true,
     maxBuffer: 12 * 1024 * 1024
   });

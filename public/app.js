@@ -17,6 +17,9 @@ const state = {
     queueProcessing: false,
     flushTimerId: null,
     streamStartedAt: 0,
+    chunkFrameCount: 0,
+    activeFrameCount: 0,
+    maxChunkRms: 0,
     baseDraft: "",
     transcriptSegments: []
   }
@@ -24,6 +27,9 @@ const state = {
 
 const VOICE_STREAM_CHUNK_MS = 1200;
 const VOICE_MIN_CHUNK_MS = 350;
+const VOICE_ACTIVITY_RMS_THRESHOLD = 0.009;
+const VOICE_MIN_ACTIVE_FRAMES = 3;
+const VOICE_MIN_ACTIVE_RATIO = 0.2;
 
 const elements = {
   composerForm: document.querySelector("#composerForm"),
@@ -293,6 +299,19 @@ function downsampleBuffer(buffer, inputSampleRate, outputSampleRate) {
   return result;
 }
 
+function computeRms(samples) {
+  if (!samples?.length) {
+    return 0;
+  }
+
+  let sum = 0;
+  for (let index = 0; index < samples.length; index += 1) {
+    sum += samples[index] * samples[index];
+  }
+
+  return Math.sqrt(sum / samples.length);
+}
+
 function encodeWav(samples, sampleRate) {
   const bytesPerSample = 2;
   const blockAlign = bytesPerSample;
@@ -377,11 +396,14 @@ function clearVoiceFlushTimer() {
 function resetVoiceStreamState() {
   state.voice.pcmChunks = [];
   state.voice.streamStartedAt = 0;
+  state.voice.chunkFrameCount = 0;
+  state.voice.activeFrameCount = 0;
+  state.voice.maxChunkRms = 0;
   state.voice.baseDraft = "";
   state.voice.transcriptSegments = [];
 }
 
-function queueVoiceSegment(chunks, inputSampleRate, durationMs) {
+function queueVoiceSegment(chunks, inputSampleRate, durationMs, analysis) {
   if (!Array.isArray(chunks) || chunks.length === 0) {
     return;
   }
@@ -389,7 +411,8 @@ function queueVoiceSegment(chunks, inputSampleRate, durationMs) {
   state.voice.queue.push({
     chunks,
     inputSampleRate,
-    durationMs
+    durationMs,
+    analysis
   });
 }
 
@@ -403,14 +426,37 @@ function flushVoiceSegment({ force = false } = {}) {
     return false;
   }
 
+  const activeRatio = state.voice.chunkFrameCount > 0
+    ? state.voice.activeFrameCount / state.voice.chunkFrameCount
+    : 0;
+  const hasSpeech = state.voice.activeFrameCount >= VOICE_MIN_ACTIVE_FRAMES
+    && activeRatio >= VOICE_MIN_ACTIVE_RATIO
+    && state.voice.maxChunkRms >= VOICE_ACTIVITY_RMS_THRESHOLD;
+
+  if (!hasSpeech) {
+    state.voice.pcmChunks = [];
+    state.voice.streamStartedAt = 0;
+    state.voice.chunkFrameCount = 0;
+    state.voice.activeFrameCount = 0;
+    state.voice.maxChunkRms = 0;
+    return false;
+  }
+
   queueVoiceSegment(
     state.voice.pcmChunks.map((chunk) => new Float32Array(chunk)),
     state.voice.inputSampleRate,
-    segmentDuration
+    segmentDuration,
+    {
+      activeRatio,
+      maxRms: state.voice.maxChunkRms
+    }
   );
 
   state.voice.pcmChunks = [];
   state.voice.streamStartedAt = 0;
+  state.voice.chunkFrameCount = 0;
+  state.voice.activeFrameCount = 0;
+  state.voice.maxChunkRms = 0;
   return true;
 }
 
@@ -519,6 +565,14 @@ async function startVoiceRecording() {
       }
 
       const samples = new Float32Array(event.inputBuffer.getChannelData(0));
+      const rms = computeRms(samples);
+      state.voice.chunkFrameCount += 1;
+      if (rms >= VOICE_ACTIVITY_RMS_THRESHOLD) {
+        state.voice.activeFrameCount += 1;
+      }
+      if (rms > state.voice.maxChunkRms) {
+        state.voice.maxChunkRms = rms;
+      }
       state.voice.pcmChunks.push(samples);
     };
 
@@ -533,10 +587,12 @@ async function startVoiceRecording() {
       const flushed = flushVoiceSegment();
       if (flushed) {
         processVoiceQueue().catch(() => {});
+      } else if (!state.voice.transcribing) {
+        updateVoiceStatus("实时监听中，等待你说话...");
       }
     }, VOICE_STREAM_CHUNK_MS);
 
-    updateVoiceStatus("实时语音已开始，转写会持续写入输入框");
+    updateVoiceStatus("实时监听已开始，检测到说话后才会写入输入框");
     syncUiState();
   } catch (error) {
     await releaseVoiceCapture();

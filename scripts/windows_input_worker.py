@@ -251,6 +251,12 @@ ACTION_POINTS = {
     "map_coord_x_input": (1971 / 2643, 1213 / 1398),
     "map_go": (0.808551, 0.864807),
     "teleport_confirm": (0.569, 0.742),
+    "drop_carried_target": (0.706, 0.553),
+    "loot_item_1": (0.717, 0.356),
+    "loot_item_2": (0.788, 0.356),
+    "loot_item_3": (0.860, 0.356),
+    "loot_put_in": (0.543, 0.634),
+    "loot_submit": (0.862, 0.885),
 }
 
 MAP_KEYPAD_POINTS = {
@@ -446,6 +452,10 @@ VENDOR_PURCHASE_KEYWORDS = ["进货", "购买", "购买数量", "每日进货体
 
 
 HAWKING_SCREEN_KEYWORDS = ["上货", "货架", "库存", "出摊"]
+
+
+KNOCKOUT_CONTEXT_KEYWORDS = ["扛走", "妙取", "搜刮"]
+LOOT_SCREEN_KEYWORDS = ["搜刮", "放入", "今日搜刮次数"]
 
 
 def emit(payload: dict[str, Any]) -> None:
@@ -1058,6 +1068,22 @@ def detect_steal_screen(hwnd: int) -> dict[str, Any]:
     panel_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
     return {
         "visible": count_keywords(panel_text, STEAL_KEYWORDS) >= 2,
+        "text": panel_text,
+    }
+
+
+def detect_knockout_context(hwnd: int) -> dict[str, Any]:
+    action_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["bottom_right_actions"]))
+    return {
+        "visible": count_keywords(action_text, KNOCKOUT_CONTEXT_KEYWORDS) >= 2,
+        "text": action_text,
+    }
+
+
+def detect_loot_screen(hwnd: int) -> dict[str, Any]:
+    panel_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
+    return {
+        "visible": count_keywords(panel_text, LOOT_SCREEN_KEYWORDS) >= 2,
         "text": panel_text,
     }
 
@@ -3579,6 +3605,154 @@ def run_stealth_front_arc_strike(hwnd: int, action: dict[str, Any]) -> dict[str,
     }
 
 
+def run_stealth_knock_loot_flow(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_knock_loot_flow")
+    search_timeout_ms = int(action.get("searchTimeoutMs") or 7000)
+    knockout_timeout_ms = int(action.get("knockoutTimeoutMs") or 5000)
+    turn_pulse_ms = int(action.get("turnPulseMs") or 180)
+    strike_interval_ms = int(action.get("strikeIntervalMs") or 120)
+    move_settle_ms = int(action.get("moveSettleMs") or 80)
+    carry_settle_ms = int(action.get("carrySettleMs") or 220)
+    backstep_ms = int(action.get("backstepMs") or 3000)
+    drop_settle_ms = int(action.get("dropSettleMs") or 220)
+    loot_open_timeout_ms = int(action.get("lootOpenTimeoutMs") or 1600)
+    loot_settle_ms = int(action.get("lootSettleMs") or 160)
+    front_roi = action.get("frontRoi") or STEALTH_ROIS["front_name_band"]
+    roi = (
+        float(front_roi[0]),
+        float(front_roi[1]),
+        float(front_roi[2]),
+        float(front_roi[3]),
+    )
+
+    focus_window(hwnd)
+    deadline = time.time() + search_timeout_ms / 1000.0
+    search_pattern = ["left", "left", "right", "right"]
+    search_attempts: list[dict[str, Any]] = []
+    turn_attempts: list[dict[str, Any]] = []
+    target = find_stealth_front_target(hwnd, roi)
+
+    while time.time() <= deadline and target is None:
+        for key in search_pattern:
+            if time.time() > deadline:
+                break
+            INPUT_GUARD.check_or_raise(title)
+            turn_attempts.append(pulse_turn_key(hwnd, key, turn_pulse_ms, title))
+            INPUT_GUARD.guarded_sleep(move_settle_ms, title)
+            target = find_stealth_front_target(hwnd, roi)
+            search_attempts.append({"key": key, "target": target})
+            if target is not None:
+                break
+
+    if target is None:
+        raise RuntimeError("Stealth knock-loot flow timed out before finding a front target")
+
+    target_click = click_screen_point(hwnd, int(target["screenX"]), int(target["screenY"]), "left")
+    INPUT_GUARD.guarded_sleep(90, title)
+
+    knockout_state = detect_knockout_context(hwnd)
+    strike_count = 0
+    knockout_started_at = time.time()
+    pydirectinput.keyDown("w")
+    INPUT_GUARD.refresh_baseline()
+
+    try:
+        while (time.time() - knockout_started_at) * 1000 < knockout_timeout_ms:
+            INPUT_GUARD.check_or_raise(title)
+            pydirectinput.press("3")
+            INPUT_GUARD.refresh_baseline()
+            strike_count += 1
+            INPUT_GUARD.guarded_sleep(strike_interval_ms, title)
+            knockout_state = detect_knockout_context(hwnd)
+            if knockout_state["visible"]:
+                break
+    finally:
+        pydirectinput.keyUp("w")
+        INPUT_GUARD.refresh_baseline()
+
+    if not knockout_state["visible"]:
+        raise RuntimeError("Did not reach knockout context before timeout")
+
+    pydirectinput.press("2")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(carry_settle_ms, title)
+
+    pydirectinput.keyDown("s")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(backstep_ms, title)
+    pydirectinput.keyUp("s")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(move_settle_ms, title)
+
+    drop_click = click_named_point(hwnd, "drop_carried_target")
+    INPUT_GUARD.guarded_sleep(drop_settle_ms, title)
+
+    pydirectinput.press("4")
+    INPUT_GUARD.refresh_baseline()
+
+    loot_state = detect_loot_screen(hwnd)
+    loot_deadline = time.time() + loot_open_timeout_ms / 1000.0
+    while time.time() <= loot_deadline and not loot_state["visible"]:
+        INPUT_GUARD.guarded_sleep(80, title)
+        loot_state = detect_loot_screen(hwnd)
+
+    if not loot_state["visible"]:
+        raise RuntimeError("Loot panel did not appear after pressing 4")
+
+    loot_clicks: list[dict[str, Any]] = []
+    for _ in range(8):
+        loot_clicks.append({
+            "point": "loot_item_1",
+            "click": click_named_point(hwnd, "loot_item_1"),
+        })
+        INPUT_GUARD.guarded_sleep(loot_settle_ms, title)
+        loot_clicks.append({
+            "point": "loot_put_in",
+            "click": click_named_point(hwnd, "loot_put_in"),
+        })
+        INPUT_GUARD.guarded_sleep(loot_settle_ms, title)
+
+    final_loot_click = click_named_point(hwnd, "loot_submit")
+    INPUT_GUARD.guarded_sleep(max(220, loot_settle_ms), title)
+    pydirectinput.keyDown("w")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(5000, title)
+    pydirectinput.keyUp("w")
+    INPUT_GUARD.refresh_baseline()
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Knocked down {target['text']}, carried back, dropped, and looted three items fast",
+        "input": {
+            "mode": "stealth_knock_loot_flow",
+            "target": target,
+            "targetClick": target_click,
+            "searchTimeoutMs": search_timeout_ms,
+            "knockoutTimeoutMs": knockout_timeout_ms,
+            "turnPulseMs": turn_pulse_ms,
+            "strikeIntervalMs": strike_interval_ms,
+            "strikeCount": strike_count,
+            "backstepMs": backstep_ms,
+            "frontRoi": {
+                "x1": roi[0],
+                "y1": roi[1],
+                "x2": roi[2],
+                "y2": roi[3],
+            },
+            "knockoutText": knockout_state["text"],
+            "lootText": loot_state["text"],
+            "dropClick": drop_click,
+            "lootClicks": loot_clicks,
+            "finalLootClick": final_loot_click,
+            "searchAttempts": search_attempts,
+            "turnAttempts": turn_attempts,
+        },
+    }
+
+
 
 
 def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
@@ -3627,6 +3801,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "stealth_front_arc_strike":
         return run_stealth_front_arc_strike(hwnd, action)
+
+    if action_type == "stealth_knock_loot_flow":
+        return run_stealth_knock_loot_flow(hwnd, action)
 
     if action_type == "click_named_point":
         point_name = str(action.get("pointName") or "").strip()

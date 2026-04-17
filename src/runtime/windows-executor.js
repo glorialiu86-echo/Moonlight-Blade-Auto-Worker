@@ -191,8 +191,82 @@ function createNpcStealActions(baseAction, options = {}) {
   ]);
 }
 
+function createKnockLootActions(baseAction) {
+  return [
+    {
+      id: `${baseAction.id}-primitive-1`,
+      title: "Route To Stealth Point",
+      type: "map_route_to_coordinate",
+      sourceType: baseAction.sourceType,
+      xCoordinate: 740,
+      yCoordinate: 944,
+      postDelayMs: 1000,
+      waitAfterGoMs: 800
+    },
+    {
+      id: `${baseAction.id}-primitive-2`,
+      title: "Confirm Teleport",
+      type: "click_named_point",
+      sourceType: baseAction.sourceType,
+      pointName: "teleport_confirm",
+      postDelayMs: 1000
+    },
+    {
+      id: `${baseAction.id}-primitive-3`,
+      title: "Close Map Before Stealth",
+      type: "press_key",
+      sourceType: baseAction.sourceType,
+      key: "m",
+      postDelayMs: 1000
+    },
+    {
+      id: `${baseAction.id}-primitive-4`,
+      title: "Wait For Auto Route To Finish",
+      type: "sleep",
+      sourceType: baseAction.sourceType,
+      durationMs: 15000
+    },
+    {
+      id: `${baseAction.id}-primitive-5`,
+      title: "Dismount Before Stealth",
+      type: "press_key",
+      sourceType: baseAction.sourceType,
+      key: "1",
+      postDelayMs: 800
+    },
+    {
+      id: `${baseAction.id}-primitive-6`,
+      title: "Enter Stealth",
+      type: "press_shortcut",
+      sourceType: baseAction.sourceType,
+      shortcut: "stealth",
+      postDelayMs: 500
+    },
+    {
+      id: `${baseAction.id}-primitive-7`,
+      title: "Stealth Knock And Loot",
+      type: "stealth_knock_loot_flow",
+      sourceType: baseAction.sourceType,
+      searchTimeoutMs: 7000,
+      knockoutTimeoutMs: 5000,
+      turnPulseMs: 180,
+      strikeIntervalMs: 120,
+      moveSettleMs: 80,
+      carrySettleMs: 220,
+      backstepMs: 3000,
+      dropSettleMs: 220,
+      lootOpenTimeoutMs: 1600,
+      lootSettleMs: 160,
+      frontRoi: [0.36, 0.18, 0.64, 0.42]
+    }
+  ];
+}
+
 function createWorkerActions(plan) {
-  return plan.actions.flatMap((action, index) => {
+  const workerActions = [];
+
+  for (let index = 0; index < plan.actions.length; index += 1) {
+    const action = plan.actions[index];
     const actionDefinition = getActionDefinition(action.type);
     const baseAction = {
       id: `input-${index + 1}`,
@@ -200,73 +274,97 @@ function createWorkerActions(plan) {
       sourceType: action.type
     };
 
+    const nextAction = plan.actions[index + 1];
+    const nextNextAction = plan.actions[index + 2];
+    if (
+      action.type === "stealth"
+      && nextAction?.type === "strike"
+      && nextNextAction?.type === "steal"
+    ) {
+      workerActions.push(...createKnockLootActions(baseAction));
+      index += 2;
+      continue;
+    }
+
     switch (action.type) {
       case "sale":
-        return createPrimitiveActions("sale").map((primitiveAction, primitiveIndex) => ({
+        workerActions.push(...createPrimitiveActions("sale").map((primitiveAction, primitiveIndex) => ({
           ...primitiveAction,
           id: `${baseAction.id}-primitive-${primitiveIndex + 1}`,
           sourceType: action.type
-        }));
+        })));
+        break;
       case "stealth":
-        return createPrimitiveActions("stealth").map((primitiveAction, primitiveIndex) => ({
+        workerActions.push(...createPrimitiveActions("stealth").map((primitiveAction, primitiveIndex) => ({
           ...primitiveAction,
           id: `${baseAction.id}-primitive-${primitiveIndex + 1}`,
           sourceType: action.type
-        }));
+        })));
+        break;
       case "talk":
-        return createNpcChatEntryActions(baseAction, {
+        workerActions.push(...createNpcChatEntryActions(baseAction, {
           timeoutMs: 7000,
           movePulseMs: 160,
           scanIntervalMs: 180
-        });
+        }));
+        break;
       case "gift":
-        return createNpcGiftActions(baseAction, {
+        workerActions.push(...createNpcGiftActions(baseAction, {
           giftRounds: 2,
           timeoutMs: 4500,
           movePulseMs: 160,
           scanIntervalMs: 180
-        });
+        }));
+        break;
       case "trade":
-        return createNpcTradeActions(baseAction, {
+        workerActions.push(...createNpcTradeActions(baseAction, {
           timeoutMs: 5000,
           movePulseMs: 180,
           scanIntervalMs: 180
-        });
+        }));
+        break;
       case "threaten":
       case "strike":
-        return createNpcChatEntryActions(baseAction, {
+        workerActions.push(...createNpcChatEntryActions(baseAction, {
           timeoutMs: 4500,
           movePulseMs: 160,
           scanIntervalMs: 180
-        });
+        }));
+        break;
       case "steal":
-        return createNpcStealActions(baseAction, {
+        workerActions.push(...createNpcStealActions(baseAction, {
           triggerDelayMs: 700,
           clickDelayMs: 500,
           buttonIndex: 1
-        });
+        }));
+        break;
       case "escape":
-        return {
+        workerActions.push({
           ...baseAction,
           type: "press_key",
           key: "esc",
           postDelayMs: 500
-        };
+        });
+        break;
       case "wait":
-        return {
+        workerActions.push({
           ...baseAction,
           type: "sleep",
           durationMs: 1200
-        };
+        });
+        break;
       case "inspect":
       default:
-        return {
+        workerActions.push({
           ...baseAction,
           type: "focus_window",
           postDelayMs: 200
-        };
+        });
+        break;
     }
-  });
+  }
+
+  return workerActions;
 }
 
 function parseWorkerResponse(rawStdout, rawStderr, exitCode) {

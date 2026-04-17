@@ -56,6 +56,39 @@ const NPC_CHAT_POLL_DELAY_MS = 1200;
 const WATCH_COMMENTARY_MIN_INTERVAL_MS = 10000;
 const WATCH_COMMENTARY_MAX_SILENCE_MS = 10000;
 const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
+const FIXED_LINES = {
+  triggerAck: "行，你去播你的，我先把这摊事记下，等会儿替你动手。",
+  runStart: "行，籽岷不在场了，我现在按刚才那套安排开始折腾。",
+  completion: [
+    "这套安排我替你跑完了，剩下的你回来自己接盘。",
+    "能薅的我都先薅了一遍，你回来别装没看见。",
+    "先做到这儿，后面的锅等你下播回来一起背。"
+  ],
+  failure: [
+    "我刚在「{step}」这儿滑了一跤，脸先丢这儿了。",
+    "这步卡得挺有脾气，我在「{step}」这儿先翻车了。",
+    "我本来想装得很稳，结果在「{step}」这步露馅了。",
+    "这一下没按住，我在「{step}」这儿先栽了个跟头。"
+  ]
+};
+
+function rotateOption(options = [], index = 0, fallback = "") {
+  if (!Array.isArray(options) || options.length === 0) {
+    return fallback;
+  }
+
+  return String(options[index % options.length] || fallback || "").trim();
+}
+
+function selectRoundScript(stage, roundNumber) {
+  if (!Array.isArray(stage?.roundScripts) || stage.roundScripts.length === 0) {
+    return null;
+  }
+
+  const normalizedIndex = Math.max(0, Math.min(stage.roundScripts.length - 1, Number(roundNumber || 1) - 1));
+  return stage.roundScripts[normalizedIndex] || null;
+}
+
 const FIXED_SCRIPT_STAGES = [
   {
     key: "sell_loop",
@@ -63,41 +96,96 @@ const FIXED_SCRIPT_STAGES = [
     instructionLabel: "先走正路买货叫卖，看看这条钱路能不能撑起来。",
     riskLevel: "low",
     actionTypes: ["sale"],
-    thinkingFactory: () => ([
-      "先别急着翻脸，正路还能再榨一轮。",
-      "买货叫卖虽然笨，但至少还能看见进账。",
-      "要是这条路都撑不住，后面再换更歪的法子。"
-    ]),
-    decideFactory: () => "我先去买货，再把摊子顶起来试三轮。",
-    personaFactory: () => "先按老实财路做一遍。"
+    roundScripts: [
+      {
+        persona: "先按老实财路抡第一圈，别上来就把自己演成土匪。",
+        thinking: [
+          "先去货商那边把货摸回来，别空着手就想发财。",
+          "叫卖这条路是笨了点，好歹看得见银子往哪儿流。",
+          "先卖完这一轮再说，别刚开张就急着嫌命苦。"
+        ],
+        decide: "我先去买货，再把摊子支起来吆喝一轮。",
+        resultLead: "这一轮是有点进账，可这点钱还不够我吹口气。"
+      },
+      {
+        persona: "再跑一圈正路试试，我就不信这摊子真只配挣辛苦钱。",
+        thinking: [
+          "刚才那点进账也就够听个响，还远远没到能装阔的时候。",
+          "再去补一轮货，把嗓子再喊哑一点，看看能不能挤出点像样的数。",
+          "这回再不长脸，我就得承认老实挣钱是真的磨人。"
+        ],
+        decide: "我再去买一轮货，把第二摊继续顶起来。",
+        resultLead: "又跑完一圈，还是只够糊口，看着就让人牙痒。"
+      },
+      {
+        persona: "最后再抡一圈，抡完还不行我就不陪这条穷路耗了。",
+        thinking: [
+          "第三轮还得继续买货叫卖，纯靠耐心硬熬，听着都寒酸。",
+          "钱来得慢就算了，体力还在旁边卡脖子，这路子越看越抠门。",
+          "这回卖完要还是这么点动静，我就先去打探消息，不在这儿傻耗了。"
+        ],
+        decide: "我把第三轮也跑完，跑完就准备换条更值钱的路。",
+        resultLead: "行了，正路榨到头也就这样，钱慢得离谱，我先去摸摸别的门道。"
+      }
+    ]
   },
   {
     key: "social_warm",
     rounds: 2,
     instructionLabel: "先装得正常点，买礼、送礼、聊天，顺手把话套出来。",
     riskLevel: "low",
-    actionTypes: ["trade", "gift", "talk"],
-    thinkingFactory: () => ([
-      "硬抢太早了，先拿人情把嘴撬开。",
-      "买礼送礼不算吃亏，关键是能换到对方松口。",
-      "只要他愿意多说两句，后面的路就好掏了。"
-    ]),
-    decideFactory: () => "我先拿礼数开门，再顺着话头把路子套出来。",
-    personaFactory: () => "先装好人，把门路哄出来。"
+    actionTypesFactory: ({ roundNumber }) => (roundNumber === 1 ? ["trade", "gift", "talk"] : ["gift", "talk"]),
+    roundScripts: [
+      {
+        persona: "先找个顺眼的路人把关系垫起来，礼得到位，嘴才会松。",
+        thinking: [
+          "我要找个 NPC 去套话，空着手上去问，人家只会把我当空气。",
+          "先去交易那边把礼物一口气备够，省得后面每聊一次都来回折腾。",
+          "好感一垫起来，后面的交谈和套话才有地方下嘴。"
+        ],
+        decide: "我先去买礼物，再送一轮把关系垫起来，然后顺着话头套消息。",
+        resultLead: "礼是送出去了，人也聊上了，可真有用的东西还没吐出来。"
+      },
+      {
+        persona: "刚才那位嘴太紧了，我换个人再问一轮，别在一棵树上耗着。",
+        thinking: [
+          "他刚才那套话听着热闹，真拎出来一看，全是没用的边角料。",
+          "礼物前面已经备过一批了，这回直接换个人送，省得再跑一趟交易。",
+          "换个嘴松点的再试一次，说不定下一口就能咬到点像样的东西。"
+        ],
+        decide: "我换个人送礼接话，再套一轮，看能不能挖出点正经消息。",
+        resultLead: "这轮换人再问，场子是续上了，值钱的话还得继续往外逼。"
+      }
+    ]
   },
   {
     key: "social_dark",
     rounds: 2,
     instructionLabel: "继续买礼送礼和聊天，但说话开始阴一点，边套话边压低好感。",
     riskLevel: "medium",
-    actionTypes: ["trade", "gift", "talk"],
-    thinkingFactory: () => ([
-      "光靠装热络太慢了，该往话里掺点刺。",
-      "先把礼递过去，再拿阴话试对方底线。",
-      "他越不舒服，越容易露出真东西。"
-    ]),
-    decideFactory: () => "我继续装熟，但这回套话的时候顺手给他添点堵。",
-    personaFactory: () => "该把笑脸里那点坏心思露出来了。"
+    actionTypes: ["gift", "talk"],
+    roundScripts: [
+      {
+        persona: "这些人都不肯说正经内幕，那我就不陪他们继续客气了。",
+        thinking: [
+          "送礼送到这份上还全是废话，白天这套热络路数看着是真不顶用。",
+          "既然好声好气换不来内幕，那就边送边把话锋压阴一点，试试他的胆子。",
+          "人一紧张，嘴就容易跑偏，说不定真东西反倒自己漏出来。"
+        ],
+        decide: "我换个人继续送礼聊天，这回不装那么软，边问边压他一句。",
+        resultLead: "这轮开始发阴了，可他嘴里还是没掉出像样的内幕。"
+      },
+      {
+        persona: "再不说实话我就真要急眼了，最后换个人狠狠干这一轮。",
+        thinking: [
+          "前面那几轮听下来，全像在拿废话糊我脸，我耐心也快磨没了。",
+          "礼还是照送，但这回只剩最后一次机会，问不出来我就准备换黑路。",
+          "他要是还装糊涂，那我也不打算继续拿笑脸陪着演了。"
+        ],
+        decide: "我最后换个人再问一轮，能撬就撬，撬不开我就不走这套了。",
+        resultLead: "最后这一轮也差不多问到头了，再没真话我就准备直接翻桌。"
+      }
+    ]
   },
   {
     key: "dark_close",
@@ -105,13 +193,18 @@ const FIXED_SCRIPT_STAGES = [
     instructionLabel: "正常路已经太慢了，直接潜行、闷棍、偷窃。",
     riskLevel: "high",
     actionTypes: ["stealth", "strike", "steal"],
-    thinkingFactory: () => ([
-      "该摸的路子已经摸完，剩下的只会更慢。",
-      "既然正门不开，那就从背后把门砸开。",
-      "潜进去、敲闷棍、下手，这才像真本事。"
-    ]),
-    decideFactory: () => "我不再陪他们磨嘴皮，直接潜进去狠狠干一手。",
-    personaFactory: () => "正常路走到头了，我该换黑的。"
+    roundScripts: [
+      {
+        persona: "正常路磨够了，这回该把手伸到背后那面去了。",
+        thinking: [
+          "该打听的都打听了，再慢吞吞走正门只会把人熬穷。",
+          "既然好声好气换不来快钱，那就潜进去把场面做利索点。",
+          "先敲倒，再下手，拿完赶紧撤，这才叫省时间。"
+        ],
+        decide: "我现在就潜过去把人按住，狠狠干这一手再脱身。",
+        resultLead: "黑路我先替你踩上了，接下来就看这一票能撬出多少东西。"
+      }
+    ]
   }
 ];
 
@@ -301,10 +394,18 @@ function createActionSteps(actionTypes, decide) {
 }
 
 function buildFixedScriptPlan({ stage, roundNumber, scene, userInstruction }) {
-  const thinkingChain = stage.thinkingFactory({ roundNumber, userInstruction });
-  const decide = String(stage.decideFactory({ roundNumber, userInstruction }) || "").trim();
-  const personaInterpretation = String(stage.personaFactory({ roundNumber, userInstruction }) || decide).trim();
-  const actionTypes = [...stage.actionTypes];
+  const roundScript = selectRoundScript(stage, roundNumber);
+  const thinkingChain = roundScript?.thinking
+    ? roundScript.thinking.map((line) => String(line || "").trim()).filter(Boolean)
+    : stage.thinkingFactory({ roundNumber, userInstruction });
+  const decide = String(roundScript?.decide || stage.decideFactory({ roundNumber, userInstruction }) || "").trim();
+  const personaInterpretation = String(roundScript?.persona || stage.personaFactory({ roundNumber, userInstruction }) || decide).trim();
+  const actionTypes = Array.isArray(stage.actionTypesFactory)
+    ? [...stage.actionTypesFactory({ roundNumber, userInstruction })]
+    : typeof stage.actionTypesFactory === "function"
+      ? [...stage.actionTypesFactory({ roundNumber, userInstruction })]
+      : [...stage.actionTypes];
+  const resultLeadText = String(roundScript?.resultLead || "我先照这路做了一轮。").trim();
 
   return {
     intent: `${stage.instructionLabel} 第 ${roundNumber} 轮`,
@@ -317,6 +418,7 @@ function buildFixedScriptPlan({ stage, roundNumber, scene, userInstruction }) {
     recoveryLine: "这一步要是没走通，我就先把现场留住，再按既定顺序补上。",
     actions: createActionSteps(actionTypes, decide),
     decide,
+    resultLeadText,
     scriptKey: stage.key,
     scriptRoundNumber: roundNumber,
     userInstruction
@@ -463,8 +565,8 @@ function getFailedStepTitle(error) {
 
 function buildFunnyFailureLine(stepTitle, errorMessage) {
   const title = String(stepTitle || "这一步").trim();
-  const reason = String(errorMessage || "它就是不肯配合").trim();
-  return `我卡在「${title}」这一步了，${reason}，快救救我。`;
+  const template = rotateOption(FIXED_LINES.failure, title.length, FIXED_LINES.failure[0]);
+  return template.replace("{step}", title);
 }
 
 function buildResumeContextFromError(baseContext, error) {
@@ -1533,7 +1635,7 @@ async function runFixedScriptTurn({
     perceptionSummary,
     plan,
     execution,
-    resultLeadText: "我先照这路做了一轮。"
+    resultLeadText: plan.resultLeadText || "我先照这路做了一轮。"
   });
 }
 
@@ -1905,7 +2007,7 @@ async function maybeRunAutonomousTurn() {
       });
       appendMessage({
         role: "assistant",
-        text: "行，我现在顺着刚才那套安排往下做。",
+        text: FIXED_LINES.runStart,
         thinkingChain: [],
         perceptionSummary: "自动化已从等待切到执行。",
         sceneLabel: runtimeState.latestPerception?.sceneLabel || "自动运行",
@@ -1929,7 +2031,7 @@ async function maybeRunAutonomousTurn() {
       });
       appendMessage({
         role: "assistant",
-        text: "这套安排我已经按顺序做完了，先收手等你回来。",
+        text: rotateOption(FIXED_LINES.completion, latestState.automation?.totalTurns || 0, FIXED_LINES.completion[0]),
         thinkingChain: [],
         perceptionSummary: "固定剧本已执行完毕。",
         sceneLabel: latestState.latestPerception?.sceneLabel || "自动运行结束",
@@ -2330,7 +2432,7 @@ async function handleChat(request, response) {
     });
     appendMessage({
       role: "assistant",
-      text: "好的！收到！等我想想怎么做…",
+      text: FIXED_LINES.triggerAck,
       thinkingChain: [],
       recoveryLine: "这五分钟里就算碰到鼠标键盘，我也先继续等；真开跑后你一接管我就停。",
       perceptionSummary: "固定剧本已经布置完成，当前只是在等待启动；等待期内不会因鼠标或键盘误碰而取消。",

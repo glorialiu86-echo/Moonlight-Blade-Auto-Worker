@@ -238,7 +238,7 @@ ACTION_POINTS = {
     "steal_button_2": (1916 / 2048, 704 / 1360),
     "steal_button_3": (1916 / 2048, 893 / 1360),
     "steal_button_4": (1916 / 2048, 1085 / 1360),
-    "exit_stealth": (1893 / 2048, 573 / 1152),
+    "exit_stealth": (404 / 2048, 806 / 1152),
     "gift_first_slot": (1721 / 2537, 580 / 1384),
     "gift_plus": (0.82, 0.92),
     "gift_submit": (2289 / 2537, 1216 / 1384),

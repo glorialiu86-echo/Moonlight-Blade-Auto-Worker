@@ -31,6 +31,64 @@ body {
     linear-gradient(180deg, #f8f1e6 0%, var(--bg) 100%);
 }
 
+.simple-chat-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+
+.simple-chat-shell {
+  width: min(760px, 100%);
+}
+
+.simple-chat-card {
+  min-height: min(82vh, 880px);
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: rgba(255, 250, 244, 0.94);
+  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
+}
+
+.simple-message-list {
+  min-height: 0;
+  padding: 24px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.simple-composer {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.simple-composer-field {
+  display: block;
+}
+
+.simple-composer-field textarea {
+  min-height: 112px;
+  border-radius: 20px;
+}
+
+.simple-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.simple-composer-actions .primary {
+  min-width: 112px;
+  min-height: 48px;
+}
+
 a {
   color: inherit;
 }
@@ -666,6 +724,25 @@ textarea:focus {
 }
 
 @media (max-width: 720px) {
+  .simple-chat-page {
+    padding: 0;
+  }
+
+  .simple-chat-shell {
+    width: 100%;
+  }
+
+  .simple-chat-card {
+    min-height: 100vh;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+  }
+
+  .simple-message-list {
+    padding: 18px 14px;
+  }
+
   .host-shell,
   .app-shell {
     padding: 18px 12px;

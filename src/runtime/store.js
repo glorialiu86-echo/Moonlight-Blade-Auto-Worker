@@ -51,7 +51,7 @@ function createInitialState() {
   return {
     status: "idle",
     scene: "town_dialogue",
-    interactionMode: "act",
+    interactionMode: "watch",
     externalInputGuardEnabled: true,
     currentTurn: null,
     latestPerception: null,

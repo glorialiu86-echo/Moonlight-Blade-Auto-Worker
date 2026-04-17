@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node src/server/index.js",
     "start": "node src/server/index.js",
+    "check:fixed-script": "node scripts/check-fixed-script-config.js",
     "llm:test": "node scripts/test-llm.js",
     "llm:test:reasoner": "node scripts/test-llm.js --reasoner",
     "llm:test:vision": "node scripts/test-vision.js",

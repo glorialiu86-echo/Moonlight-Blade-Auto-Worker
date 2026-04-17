@@ -4,11 +4,26 @@
 
 ## 目的
 
+这份文档是早期公开资料阶段的前期规划稿，不是当前仓库里 Windows 真机自动化的唯一真源。
+
+当前真实行为应优先以这些文档和代码为准：
+
+- `docs/specs/fixed-script-automation-flow.md`
+- `docs/specs/npc-atomic-action-spec.md`
+- `docs/specs/windows-local-keymap.md`
+- `scripts/windows_input_worker.py`
+- `src/runtime/windows-executor.js`
+
 本规格用于指导《天涯明月刀》AI 玩家控制系统第二、三阶段的真实界面识别与点击实现。
 
 目标不是构建一个通用电脑视觉代理，而是针对《天涯明月刀》PC 端固定 UI 环境，建立一套可控、可验证、可扩展的场景识别与点击规则体系。
 
 本规格严格基于公开的《天涯明月刀》PC 端界面资料与交互说明做前期规划，后续实现时必须再以目标机器上的真实游戏截图样本进行校准。
+
+说明：
+
+- 这份文档仍可作为“历史设计思路”和“公开资料对照”保留
+- 不应再把这里的场景拆分、UI 假设或点击策略，直接当成当前代码的执行真源
 
 ## 设计原则
 

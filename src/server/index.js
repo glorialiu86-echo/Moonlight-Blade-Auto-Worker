@@ -416,7 +416,9 @@ function armAutomationScript(instruction) {
 
 function armResumeFailedStep() {
   const context = pendingResumeContext;
-  if (!context?.workerActions?.length) {
+  const hasWorkerRecovery = Array.isArray(context?.workerActions) && context.workerActions.length > 0;
+  const hasReplyRecovery = context?.recoveryKind === "npc_reply_loop";
+  if (!hasWorkerRecovery && !hasReplyRecovery) {
     throw new Error("当前没有可继续的失败步骤。");
   }
 
@@ -622,6 +624,21 @@ function buildResumeContextFromError(baseContext, error) {
     attemptCount: getFailureAttemptCount(error),
     attemptBudget: getRecoveryBudget(baseContext, error),
     workerActions: recoveryWorkerActions
+  };
+}
+
+function buildNpcReplyResumeContext(baseContext, error, execution) {
+  return {
+    ...baseContext,
+    recoveryKind: "npc_reply_loop",
+    failureCode: getFailureCode(error),
+    failedStepTitle: getFailedStepTitle(error),
+    failureMessageId: null,
+    stageKey: baseContext?.stage?.key || null,
+    attemptCount: 0,
+    attemptBudget: 0,
+    workerActions: [],
+    baseExecution: execution
   };
 }
 
@@ -1268,6 +1285,89 @@ async function maybeSendNpcReply({
   };
 }
 
+function mergeFixedExecutionWithReplyResult(execution, replyResult) {
+  if (!replyResult) {
+    return execution;
+  }
+
+  return {
+    ...execution,
+    steps: [
+      ...execution.steps,
+      ...replyResult.execution.steps
+    ],
+    rawSteps: [
+      ...execution.rawSteps,
+      ...replyResult.execution.rawSteps
+    ],
+    durationMs: execution.durationMs + replyResult.execution.durationMs,
+    outcome: `${execution.outcome} 已顺着这一轮又多聊了 ${replyResult.rounds.length} 轮。`,
+    replyText: replyResult.replyText,
+    replyRounds: replyResult.rounds
+  };
+}
+
+function commitFixedScriptTurnExecution({
+  scene,
+  perception,
+  interactionMode,
+  externalInputGuardEnabled,
+  perceptionSummary,
+  plan,
+  execution,
+  resultLeadText
+}) {
+  const turn = {
+    id: `turn-${Date.now()}`,
+    instruction: "按刚才那套安排继续推进",
+    scene,
+    createdAt: new Date().toISOString(),
+    source: "agent",
+    interactionMode,
+    externalInputGuardEnabled,
+    plan,
+    execution,
+    perception: perception || null
+  };
+
+  setCurrentTurn(turn);
+
+  appendMessage({
+    role: "assistant",
+    text: `${resultLeadText}${execution.outcome}`,
+    thinkingChain: [],
+    recoveryLine: plan.recoveryLine,
+    perceptionSummary,
+    sceneLabel: plan.environment,
+    riskLevel: plan.riskLevel,
+    actions: execution.steps,
+    decide: ""
+  });
+
+  appendExperiment(buildExperimentRecord({
+    instruction: "按既定安排继续推进",
+    source: "agent",
+    scene,
+    plan,
+    execution,
+    perception,
+    perceptionSummary
+  }));
+
+  updateAutomation({
+    lastOutcome: execution.outcome
+  });
+  updateAgent({
+    mode: "autonomous",
+    phase: "autonomous",
+    currentObjective: "按既定安排继续往下做",
+    queuedUserObjective: null,
+    lastTurnSource: "agent",
+    lastTurnAt: new Date().toISOString(),
+    autonomousTurnCount: (getState().agent?.autonomousTurnCount || 0) + 1
+  });
+}
+
 async function recordInteractionLearningSample({
   instruction,
   source,
@@ -1357,6 +1457,7 @@ async function recordMotionReviewSamples({
 async function finalizeFixedScriptTurnExecution({
   stage,
   roundNumber,
+  userInstruction,
   scene,
   perception,
   interactionMode,
@@ -1364,108 +1465,75 @@ async function finalizeFixedScriptTurnExecution({
   perceptionSummary,
   plan,
   execution,
-  resultLeadText
+  resultLeadText,
+  replyResultOverride,
+  skipExecutionRecording = false
 }) {
   if (interactionMode !== "watch") {
-    await recordMotionReviewSamples({
-      instruction: plan.intent,
-      source: "agent",
-      scene,
-      plan,
-      perception,
-      execution
-    });
+    if (!skipExecutionRecording) {
+      await recordMotionReviewSamples({
+        instruction: plan.intent,
+        source: "agent",
+        scene,
+        plan,
+        perception,
+        execution
+      });
 
-    await recordInteractionLearningSample({
-      instruction: plan.intent,
-      source: "agent",
-      scene,
-      plan,
-      perception,
-      execution
-    });
-
-    const replyResult = await maybeSendNpcReply({
-      instruction: plan.intent,
-      plan,
-      execution,
-      externalInputGuardEnabled,
-      closeAfterSend: stage.key === "social_warm" || stage.key === "social_dark"
-    });
-
-    if (replyResult) {
-      execution = {
-        ...execution,
-        steps: [
-          ...execution.steps,
-          ...replyResult.execution.steps
-        ],
-        rawSteps: [
-          ...execution.rawSteps,
-          ...replyResult.execution.rawSteps
-        ],
-        durationMs: execution.durationMs + replyResult.execution.durationMs,
-        outcome: `${execution.outcome} 已顺着这一轮又多聊了 ${replyResult.rounds.length} 轮。`,
-        replyText: replyResult.replyText,
-        replyRounds: replyResult.rounds
-      };
+      await recordInteractionLearningSample({
+        instruction: plan.intent,
+        source: "agent",
+        scene,
+        plan,
+        perception,
+        execution
+      });
     }
+
+    let replyResult = replyResultOverride;
+    if (replyResult === undefined) {
+      try {
+        replyResult = await maybeSendNpcReply({
+          instruction: plan.intent,
+          plan,
+          execution,
+          externalInputGuardEnabled,
+          closeAfterSend: stage.key === "social_warm" || stage.key === "social_dark"
+        });
+      } catch (error) {
+        error.resumeContext = buildNpcReplyResumeContext({
+          stage,
+          roundNumber,
+          userInstruction,
+          scene,
+          perception,
+          interactionMode,
+          externalInputGuardEnabled,
+          perceptionSummary,
+          plan
+        }, error, execution);
+        throw error;
+      }
+    }
+
+    execution = mergeFixedExecutionWithReplyResult(execution, replyResult);
   }
 
-  const turn = {
-    id: `turn-${Date.now()}`,
-    instruction: "按刚才那套安排继续推进",
+  commitFixedScriptTurnExecution({
     scene,
-    createdAt: new Date().toISOString(),
-    source: "agent",
+    perception,
     interactionMode,
     externalInputGuardEnabled,
-    plan,
-    execution,
-    perception: perception || null
-  };
-
-  setCurrentTurn(turn);
-
-  appendMessage({
-    role: "assistant",
-    text: `${resultLeadText}${execution.outcome}`,
-    thinkingChain: [],
-    recoveryLine: plan.recoveryLine,
     perceptionSummary,
-    sceneLabel: plan.environment,
-    riskLevel: plan.riskLevel,
-    actions: execution.steps,
-    decide: ""
-  });
-
-  appendExperiment(buildExperimentRecord({
-    instruction: "按既定安排继续推进",
-    source: "agent",
-    scene,
     plan,
     execution,
-    perception,
-    perceptionSummary
-  }));
+    resultLeadText
+  });
 
   appendLog("info", "固定剧本动作已执行", {
     scriptKey: stage.key,
     roundNumber,
     outcome: execution.outcome
-  });
-
-  updateAutomation({
-    lastOutcome: execution.outcome
-  });
-  updateAgent({
-    mode: "autonomous",
-    phase: "autonomous",
-    currentObjective: "按既定安排继续往下做",
-    queuedUserObjective: null,
-    lastTurnSource: "agent",
-    lastTurnAt: new Date().toISOString(),
-    autonomousTurnCount: (getState().agent?.autonomousTurnCount || 0) + 1
   });
 
   return {
@@ -1750,6 +1818,7 @@ async function runFixedScriptTurn({
   return finalizeFixedScriptTurnExecution({
     stage,
     roundNumber,
+    userInstruction,
     scene,
     perception,
     interactionMode,
@@ -1807,22 +1876,74 @@ async function resumeFailedAutomationStep() {
   try {
     const latestPerception = getState().latestPerception || context.perception || null;
     const perceptionSummary = perceptionSummaryBySource(latestPerception, "agent");
-    const execution = await runWindowsActions(context.workerActions, {
-      interruptOnExternalInput: context.externalInputGuardEnabled
-    });
+    if (context.recoveryKind === "npc_reply_loop") {
+      let replyResult;
+      try {
+        replyResult = await maybeReplyFromCurrentChatScreen({
+          instruction: context.userInstruction || context.plan?.intent || "",
+          externalInputGuardEnabled: context.externalInputGuardEnabled
+        });
+      } catch (error) {
+        error.resumeContext = buildNpcReplyResumeContext({
+          stage: context.stage,
+          roundNumber: context.roundNumber,
+          userInstruction: context.userInstruction,
+          scene: context.scene,
+          perception: latestPerception,
+          interactionMode: context.interactionMode,
+          externalInputGuardEnabled: context.externalInputGuardEnabled,
+          perceptionSummary,
+          plan: context.plan
+        }, error, context.baseExecution || {
+          executor: "WindowsInputExecutor",
+          steps: [],
+          rawSteps: [],
+          durationMs: 0,
+          outcome: "这一轮主动作已经完成。"
+        });
+        throw error;
+      }
 
-    await finalizeFixedScriptTurnExecution({
-      stage: context.stage,
-      roundNumber: context.roundNumber,
-      scene: context.scene,
-      perception: latestPerception,
-      interactionMode: context.interactionMode,
-      externalInputGuardEnabled: context.externalInputGuardEnabled,
-      perceptionSummary,
-      plan: context.plan,
-      execution,
-      resultLeadText: `我从「${context.failedStepTitle || "那一步"}」接上了。`
-    });
+      await finalizeFixedScriptTurnExecution({
+        stage: context.stage,
+        roundNumber: context.roundNumber,
+        userInstruction: context.userInstruction,
+        scene: context.scene,
+        perception: latestPerception,
+        interactionMode: context.interactionMode,
+        externalInputGuardEnabled: context.externalInputGuardEnabled,
+        perceptionSummary,
+        plan: context.plan,
+        execution: context.baseExecution || {
+          executor: "WindowsInputExecutor",
+          steps: [],
+          rawSteps: [],
+          durationMs: 0,
+          outcome: "这一轮主动作已经完成。"
+        },
+        resultLeadText: `我从「${context.failedStepTitle || "那一步"}」接上了。`,
+        replyResultOverride: replyResult || null,
+        skipExecutionRecording: true
+      });
+    } else {
+      const execution = await runWindowsActions(context.workerActions, {
+        interruptOnExternalInput: context.externalInputGuardEnabled
+      });
+
+      await finalizeFixedScriptTurnExecution({
+        stage: context.stage,
+        roundNumber: context.roundNumber,
+        userInstruction: context.userInstruction,
+        scene: context.scene,
+        perception: latestPerception,
+        interactionMode: context.interactionMode,
+        externalInputGuardEnabled: context.externalInputGuardEnabled,
+        perceptionSummary,
+        plan: context.plan,
+        execution,
+        resultLeadText: `我从「${context.failedStepTitle || "那一步"}」接上了。`
+      });
+    }
 
     const progressedState = getState();
     updateAutomation({
@@ -1846,7 +1967,7 @@ async function resumeFailedAutomationStep() {
     });
     recordAutonomousFailure({
       ...error,
-      resumeContext: buildResumeContextFromError({
+      resumeContext: error.resumeContext || buildResumeContextFromError({
         stage: context.stage,
         roundNumber: context.roundNumber,
         userInstruction: context.userInstruction,

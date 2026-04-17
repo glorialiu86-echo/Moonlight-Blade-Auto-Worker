@@ -46,6 +46,7 @@
 - 社交恢复默认按失败码收敛：
   - `NPC_CHAT_THRESHOLD_REVEALED` 时换人后重跑 `赠礼 -> 聊天`
   - `NPC_VIEW_NOT_OPENED` 时根据失败位置决定重跑整段社交链或只跑恢复链
+- 社交阶段进入聊天页后的后置自动回复，如在发送回复时失败，也会进入红三角恢复态；恢复时不重跑整段社交链，而是从当前聊天页继续续聊
 - 潜行恢复默认按失败码收敛：
   - `STEALTH_ENTRY_BLOCKED` 会在 action 内原地重试 `5` 次后停下
   - `STEALTH_ALERTED` / `STEALTH_TARGET_RECOVERED` 会先 `hold S >= 3000ms`，再在固定剧本内有限次重开

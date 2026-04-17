@@ -67,6 +67,437 @@ const WATCH_COMMENTARY_MAX_SILENCE_MS = 5000;
 const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
 const SOCIAL_RETARGET_BUDGET = 2;
 const DARK_CLOSE_RESTART_BUDGET = 2;
+
+function pickRoundVariant(variants, roundNumber) {
+  if (!Array.isArray(variants) || variants.length === 0) {
+    return null;
+  }
+  const normalizedRound = Math.max(1, Number(roundNumber) || 1);
+  return variants[(normalizedRound - 1) % variants.length] || variants[0];
+}
+
+const FIXED_SCRIPT_STAGE_VOICES = {
+  sell_loop: [
+    {
+      thinkingChain: [
+        "先别急着翻脸，正路还能再榨一轮。",
+        "买货叫卖虽然笨，但至少还能看见进账。",
+        "要是这条路都撑不住，后面再换更歪的法子。"
+      ],
+      decide: "我先去买货，再把摊子顶起来试三轮。",
+      persona: "先按老实财路做一遍。",
+      progress: {
+        stock: "先把手里这点空货补满，别还没开张就先心虚。",
+        hawk: "货已经拿到手了，我这就把摊子重新支起来，看街上还有谁肯掏钱。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才手上卡了一下，不过货还是让我补上了，摊子也重新支起来了。"
+        : "货我已经补上了，摊子也照样支起来了，这条钱路暂时还没彻底死。"
+    },
+    {
+      thinkingChain: [
+        "正路虽然慢，可慢也有慢的好处，至少不至于立刻翻船。",
+        "街上这点人情味还能卖钱，那我就先继续装成老实人。",
+        "等这条路真的榨不出油了，我再换别的手段。"
+      ],
+      decide: "我再去补一趟货，把今天这点街面生意撑起来。",
+      persona: "先别露獠牙，把表面功夫继续演下去。",
+      progress: {
+        stock: "先去把货攒齐，空着手去街上晃只会显得更寒酸。",
+        hawk: "行，货到位了，我把摊子一摆，看看今天还能不能再忽悠出几笔。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才差点把这笔老实买卖断掉，好在我又把摊子顺回来了。"
+        : "这笔街面生意总算又续上了，钱不算多，至少看着还像回事。"
+    },
+    {
+      thinkingChain: [
+        "都到这一步了，正路能捞一点是一点，总比白站着强。",
+        "买货叫卖这套不体面，可总比现在就把场面砸烂要稳。",
+        "先把最后这点明面钱收了，后面再看要不要彻底翻脸。"
+      ],
+      decide: "我再顺着这条财路走一遍，把能捞的明钱先捞干净。",
+      persona: "先把明面上的账做漂亮，再考虑别的脏手。",      
+      progress: {
+        stock: "再去补最后一波货，别让街上看出来我已经快没东西卖了。",
+        hawk: "货已经抱回来了，我把摊子一撑，先把这口明钱咽下去再说。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才那一下差点把摊子砸了，好在我又给它扶正了。"
+        : "这一波货也顺出去了，脸面还在，钱也不算白跑。"
+    }
+  ],
+  social_warm: [
+    {
+      thinkingChain: [
+        "硬抢太早了，先拿人情把嘴撬开。",
+        "买礼送礼不算吃亏，关键是能换到对方松口。",
+        "只要他愿意多说两句，后面的路就好掏了。"
+      ],
+      decide: "我先拿礼数开门，再顺着话头把路子套出来。",
+      persona: "先装好人，把门路哄出来。",
+      progress: {
+        trade: "先借交易把门推开，别一上来就把人吓跑。",
+        gift: "礼都拿到手了，我倒想看看他收下之后还准备装到什么时候。",
+        talk: "行，门算是开了，我现在顺着他的话头往里摸。",
+        recover: "刚才那个人太滑了，我换个嘴更松的继续试，不跟他硬耗。",
+        replyLoop: [
+          "他既然还肯接话，我就再顺着陪一句，看他能不能漏点口风。",
+          "这人绕得真够耐心的，我再陪他兜一圈，看他还能藏多久。",
+          "话都聊到这儿了，我再往前递一句，看看他到底怕说漏什么。",
+          "他还在跟我打太极，那我就再顺手推他一句。"
+        ]
+      },
+      resultFactory: ({ replyRounds, recovered, recoveryKind }) => {
+        if (recoveryKind === "npc_reply_loop") {
+          if (replyRounds <= 0) {
+            return "刚才那口气差点断掉，不过我已经把聊天页重新顺住了。";
+          }
+          return `刚才话头差点断掉，我又顺着接了${replyRounds}轮，可他还是净拿场面话糊弄我。`;
+        }
+        if (recovered) {
+          return "刚才那个人不肯松口，我换了个目标又把话头接回来了，嘴还是一样紧。";
+        }
+        if (replyRounds > 0) {
+          return `礼物我都送了，还硬陪他聊了${replyRounds}轮，他嘴还是紧得很。`;
+        }
+        return "礼我送了，场面也陪圆了，可他还是只会拿空话来堵我。";
+      }
+    },
+    {
+      thinkingChain: [
+        "刚才那套热络劲儿还不够，他嘴是真紧。",
+        "礼也送了，面子也给了，总该吐点有用的吧。",
+        "我再陪他磨一轮，但这次得逼他往实处说。"
+      ],
+      decide: "我换个话头，再从他嘴里往外抠一点。",
+      persona: "继续装得客气点，但手已经伸进他话缝里了。",
+      progress: {
+        trade: "先把场面重新铺平，省得他一会儿又装不认识我。",
+        gift: "礼数我都补上了，他要再不张嘴，就真有点不识抬举了。",
+        talk: "行，我继续顺着他说，但这回不能再让他轻轻滑过去。",
+        recover: "这人装得太熟练了，我换个更好下手的，不在他身上白耗。",
+        replyLoop: [
+          "他还在绕，我再陪一句，先别让这口气断掉。",
+          "嘴上这么会躲，我倒要看看他能躲到第几句。",
+          "行，那我再往里探一句，看他这回还怎么打岔。",
+          "话都聊成这样了，我不信他还能一点口风都不漏。"
+        ]
+      },
+      resultFactory: ({ replyRounds, recovered, recoveryKind }) => {
+        if (recoveryKind === "npc_reply_loop") {
+          if (replyRounds <= 0) {
+            return "刚才差点让他把话头带跑，不过我已经把这阵聊天顺回来了。";
+          }
+          return `刚才差点让他把话头带偏，我又顺着聊了${replyRounds}轮，结果他还是不肯往实处说。`;
+        }
+        if (recovered) {
+          return "刚才那口风差点散掉，不过我换了个人又把场面续住了。";
+        }
+        if (replyRounds > 0) {
+          return `面子我给足了，话也陪他绕了${replyRounds}轮，他还是比我还能装。`;
+        }
+        return "礼数已经做到位了，可他那张嘴还是抿得跟锁上一样。";
+      }
+    }
+  ],
+  social_dark: [
+    {
+      thinkingChain: [
+        "光靠装热络太慢了，该往话里掺点刺。",
+        "先把礼递过去，再拿阴话试对方底线。",
+        "他越不舒服，越容易露出真东西。"
+      ],
+      decide: "我继续装熟，但这回套话的时候顺手给他添点堵。",
+      persona: "该把笑脸里那点坏心思露出来了。",
+      progress: {
+        trade: "先把门照样推开，脸上还得挂着笑，刀子再往话里藏。",
+        gift: "礼我照送，但接下来可不打算再让他说得那么舒服了。",
+        talk: "行，门开了，我这回一边陪聊，一边顺手拧他几下。",
+        recover: "这人嘴太油，我换个更经不起刺的继续磨，不让他在我眼前滑过去。",
+        replyLoop: [
+          "他既然还想绕，那我就再陪一句，顺手多扎他一下。",
+          "话都说到这儿了，我再压他一句，看他还装不装得下去。",
+          "他还敢绕，那我就再往里拧一句，逼他自己露怯。",
+          "行，我再接一句，让他边聊边难受。"
+        ]
+      },
+      resultFactory: ({ replyRounds, recovered, recoveryKind }) => {
+        if (recoveryKind === "npc_reply_loop") {
+          if (replyRounds <= 0) {
+            return "刚才那口阴劲差点散掉，不过我已经把聊天又压回正轨了。";
+          }
+          return `刚才那口阴话差点断掉，我又顺着聊了${replyRounds}轮，他还是又躲又装。`;
+        }
+        if (recovered) {
+          return "刚才那一下没压住，我换了个目标又把话头拧回来了。";
+        }
+        if (replyRounds > 0) {
+          return `礼物我照送了，狠话也照夹了，还陪他聊了${replyRounds}轮，他还是只会拐着弯躲。`;
+        }
+        return "面子我给了，刺我也递过去了，可他还是缩着不肯露底。";
+      }
+    },
+    {
+      thinkingChain: [
+        "笑脸已经演过一遍了，再软下去就是白白让人牵着走。",
+        "礼数照旧，话却得更阴一点，得让他越聊越不自在。",
+        "他只要皱一下眉，嘴里的东西就容易掉出来。"
+      ],
+      decide: "我继续陪他说，但每一句都往他心口多顶一下。",
+      persona: "礼还在送，手已经开始往软处掐了。",
+      progress: {
+        trade: "先把场面撑住，别还没开口就让他看出来我已经不耐烦了。",
+        gift: "礼数还是要做，可我今天不是来陪他舒舒服服收礼的。",
+        talk: "行，我继续陪笑，但这回每一句都得让他发紧。",
+        recover: "这人太会打滑，我换个没那么经磨的再继续掐。",
+        replyLoop: [
+          "他还在兜圈子，那我就再顺着他的话往里塞一句刺。",
+          "我再接一句，让他嘴上继续笑，心里先发虚。",
+          "这人口风是真滑，我再压他一手，看他还能不能稳住。",
+          "行，那我继续陪，但这回让他每个字都别那么好受。"
+        ]
+      },
+      resultFactory: ({ replyRounds, recovered, recoveryKind }) => {
+        if (recoveryKind === "npc_reply_loop") {
+          if (replyRounds <= 0) {
+            return "刚才那阵阴劲差点松掉，不过我又把这口气重新压回去了。";
+          }
+          return `刚才那阵阴劲差点散掉，我又接着聊了${replyRounds}轮，可他还是滑得很。`;
+        }
+        if (recovered) {
+          return "刚才那个人太会躲，我换了个更好拿捏的，又把场面压住了。";
+        }
+        if (replyRounds > 0) {
+          return `我一边送礼一边给他上刺，还陪他扯了${replyRounds}轮，他居然还能继续装。`;
+        }
+        return "脸我还挂着，刺也已经递进去了，可他还是缩着不肯露。";
+      }
+    }
+  ],
+  dark_close: [
+    {
+      thinkingChain: [
+        "该摸的路子已经摸完，剩下的只会更慢。",
+        "既然正门不开，那就从背后把门砸开。",
+        "潜进去、敲闷棍、把人拖走再搜，这才像真本事。"
+      ],
+      decide: "我不再陪他们磨嘴皮，直接潜进去放倒、拖走、搜干净。",
+      persona: "正常路走到头了，我该换黑的。",
+      progress: {
+        stealth: "先把人悄悄贴上去，只要位置对了，这一下不会太难看。",
+        drag: "人已经倒了，我先把他拖开，别在原地给别人看热闹。",
+        loot: "行，地方算是腾出来了，我现在把他身上的东西一件件掏干净。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才动静有点大，我退开又补了一手，东西还是让我搜到了。"
+        : "人已经放倒拖开，身上那点东西我也搜过了，这一趟没白下手。"
+    },
+    {
+      thinkingChain: [
+        "嘴上撬不开，那就换手上撬。",
+        "闷棍这活不难，难的是别让街上那群眼睛全盯过来。",
+        "只要先把人拖离人堆，后面就都好办。"
+      ],
+      decide: "我先把人从背后放倒，再拖到没那么扎眼的地方慢慢搜。",
+      persona: "既然要下黑手，那就下得利索点。",
+      progress: {
+        stealth: "先贴进去，别急，位置一对上他连回头的机会都没有。",
+        drag: "好，人已经到手，我先往外拖一段，省得原地炸锅。",
+        loot: "地方够干净了，我现在慢慢搜，不跟他们抢这一两秒。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才差点把场子闹起来，我换了下位置，最后还是把东西摸出来了。"
+        : "这一下敲得还算稳，拖也拖开了，搜起来顺手多了。"
+    },
+    {
+      thinkingChain: [
+        "既然都走到这儿了，再讲礼数就显得我自己都不信。",
+        "先敲，再拖，再搜，麻烦是麻烦，但胜在踏实。",
+        "只要不把人留在人堆里，这活就还算做得干净。"
+      ],
+      decide: "我照着背后那套来，先放倒，再拖开，再把身上掏空。",
+      persona: "手已经脏了，那就别脏得半吊子。",
+      progress: {
+        stealth: "先把背后这个角度踩稳，宁可慢半拍，也别正面撞上去。",
+        drag: "人一倒我就先拖走，别让这地方继续围出热闹。",
+        loot: "现在地方清了，我把能搜的全顺出来，省得白冒这一次险。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才那一下差点露馅，我绕开又补了一手，最后还是把东西带出来了。"
+        : "这趟手下得够黑，但也够稳，东西总算没白冒险。"
+    }
+  ],
+  dark_miaoqu: [
+    {
+      thinkingChain: [
+        "扛走搜刮那套已经有镜头了，接下来只拼妙取手速。",
+        "不贪，不恋战，点一下，到点就撤。",
+        "这段要的是轻，不是狠。"
+      ],
+      decide: "我换成独立妙取，盲点一手，到点就跑。",
+      persona: "这回得更轻、更快。",
+      progress: {
+        setup: "先把人和角度都对上，妙取这活就怕手快之前眼先乱。",
+        panel: "目标已经对上了，我只等那列金按钮露出来，手到了就点。",
+        escape: "手一伸完我就撤，不管拿没拿满，先把人从现场摘出去。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才那一下不够稳，我换了个角度又摸了一手，至少没把自己留在原地。"
+        : "能摸的我已经摸了一手，转身就撤，至少没把自己赔进去。"
+    },
+    {
+      thinkingChain: [
+        "这段不拼狠，只拼谁更会在手伸进去之前先看准。",
+        "按钮一亮就得下手，再晚半拍，整圈眼睛都能转过来。",
+        "我只贪那一下，不贪后面的热闹。"
+      ],
+      decide: "我盯着那列金按钮，只要一亮，我就点了立刻跑。",
+      persona: "这回不是抢，是沾一下就走。",
+      progress: {
+        setup: "先把视角和人都踩准，别还没伸手就先被树和人群挡乱。",
+        panel: "行，查看已经拉起来了，我现在就等金按钮自己跳出来。",
+        escape: "点完立刻撤，这点时间我宁可省在跑上，也不省在犹豫上。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才那一下有点悬，我立刻换了个角度又摸了一手，脚下总算没绊住。"
+        : "这一手妙取下得够快，拿多少另说，至少撤得很利索。"
+    },
+    {
+      thinkingChain: [
+        "正面硬来太显眼，这会儿就该让手比脑子更快一点。",
+        "只要那列金按钮出来，我就有一口能钻的缝。",
+        "钻进去一下，立刻抽身，这才是这段该有的样子。"
+      ],
+      decide: "我盯着面板那口缝，只取一下，然后立刻抽身。",
+      persona: "这回靠的是节奏，不是蛮劲。",
+      progress: {
+        setup: "先把前面这堆遮挡理顺，不然连伸手的缝都看不见。",
+        panel: "好，目标已经挂上了，我现在只等金按钮自己亮相。",
+        escape: "手一过去我就往外抽，不给旁边那群眼睛留回神时间。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才差点让人盯住，我立刻换了个身位，又把这一下补回来了。"
+        : "这一下伸手够快，撤得也够快，现场没来得及把我黏住。"
+    },
+    {
+      thinkingChain: [
+        "这活越贪越死，越轻反而越像样。",
+        "我要的不是把人摸空，是把手伸进去之后还能完整退出来。",
+        "只要节奏踩对，这一口就不算白冒险。"
+      ],
+      decide: "我就摸这一口，点完就退，绝不在原地多耗半秒。",
+      persona: "手伸得轻一点，命就能稳一点。",
+      progress: {
+        setup: "先把位置踩住，妙取靠的是那一下准头，不是站在原地赌命。",
+        panel: "查看已经挂住了，我现在只认那列金按钮，不跟别的东西纠缠。",
+        escape: "按钮一点完我就撤，这一步最值钱的不是点，是退。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才那一下太贴脸了，我换了个更顺手的角度，又摸了一口就退。"
+        : "这一手拿不拿满先放一边，至少我退得够快，没把自己挂住。"
+    },
+    {
+      thinkingChain: [
+        "越到后面越得稳，手一急，整段都容易炸。",
+        "我现在只认一个节奏：看准，点下去，立刻走。",
+        "能不能全拿不是关键，别把自己搭进去才是关键。"
+      ],
+      decide: "我照着最快那条线走，点一下，后撤，换地方再来。",
+      persona: "这回我不跟现场较劲，只跟时间较劲。",
+      progress: {
+        setup: "先把人和查看都踩好，后面那一下才配得上叫快。",
+        panel: "好，面板只要一亮金按钮，我这只手就不会再犹豫。",
+        escape: "这一手出去就往回抽，不给旁边任何人补第二眼的时间。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才那一下差点拖慢，我立刻换了个地方，又把节奏找回来了。"
+        : "这一手已经够快了，东西到手多少是一回事，人先退出来才是真的。"
+    }
+  ],
+  ending_trade: [
+    {
+      thinkingChain: [
+        "该拿的都拿到了，最后还得把手里这批货顺出去。",
+        "就在原地找个顺手的路人，把十个道具一口气卖干净。",
+        "只要这笔尾单收好，整套活就算像样地落地了。"
+      ],
+      decide: "我就地找个路人做完最后一笔交易，卖干净就正式收工。",
+      persona: "最后把货清掉，再像没事发生过一样站回街上。",
+      progress: {
+        target: "先随手拎个路人过来，把最后这批货处理干净。",
+        trade: "交易页既然已经开了，我就把手里这点尾货一口气全推出去。",
+        finish: "这笔收尾做完，我就能像什么都没发生过一样站回街上。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才这笔收尾差点卡住，不过最后还是让我把尾货顺干净了。"
+        : "最后这批货总算顺干净了，街面看起来又像什么都没发生过。"
+    }
+  ]
+};
+
+function getFixedStageVoice(stageKey, roundNumber) {
+  return pickRoundVariant(FIXED_SCRIPT_STAGE_VOICES[stageKey] || [], roundNumber) || {
+    thinkingChain: [],
+    decide: "",
+    persona: "",
+    progress: {},
+    resultFactory: ({ execution }) => execution?.outcome || ""
+  };
+}
+
+function getFixedStageProgressText(stageKey, roundNumber, progressKey) {
+  const voice = getFixedStageVoice(stageKey, roundNumber);
+  const value = voice.progress?.[progressKey];
+  if (Array.isArray(value)) {
+    return String(value[0] || "").trim();
+  }
+  return String(value || "").trim();
+}
+
+function getFixedReplyLoopCommentary(stageKey, roundNumber, replyRoundNumber) {
+  const voice = getFixedStageVoice(stageKey, roundNumber);
+  const variants = Array.isArray(voice.progress?.replyLoop) ? voice.progress.replyLoop : [];
+  return String(pickRoundVariant(variants, replyRoundNumber) || "").trim();
+}
+
+function buildFixedStageResultText({ stage, roundNumber, execution, recoveryKind = null }) {
+  if (execution?.executor === "WatchMode") {
+    return String(execution?.outcome || "").trim();
+  }
+  const voice = getFixedStageVoice(stage.key, roundNumber);
+  const replyRounds = Array.isArray(execution?.replyRounds) ? execution.replyRounds.length : 0;
+  const recovered = Boolean(recoveryKind) || execution?.outcomeKind === "recovered";
+  if (typeof voice.resultFactory === "function") {
+    return String(voice.resultFactory({
+      replyRounds,
+      recovered,
+      recoveryKind,
+      execution
+    }) || execution?.outcome || "").trim();
+  }
+  return String(execution?.outcome || "").trim();
+}
+
+function appendFixedScriptCommentary({ text, plan, perceptionSummary }) {
+  const content = String(text || "").trim();
+  if (!content) {
+    return null;
+  }
+
+  return appendMessage({
+    role: "assistant",
+    text: content,
+    thinkingChain: [],
+    recoveryLine: plan.recoveryLine,
+    perceptionSummary,
+    sceneLabel: plan.environment,
+    riskLevel: plan.riskLevel,
+    actions: [],
+    decide: ""
+  });
+}
+
 const FIXED_SCRIPT_STAGES = [
   {
     key: "sell_loop",
@@ -74,13 +505,9 @@ const FIXED_SCRIPT_STAGES = [
     instructionLabel: "先走正路买货叫卖，看看这条钱路能不能撑起来。",
     riskLevel: "low",
     actionTypes: ["sale"],
-    thinkingFactory: () => ([
-      "先别急着翻脸，正路还能再榨一轮。",
-      "买货叫卖虽然笨，但至少还能看见进账。",
-      "要是这条路都撑不住，后面再换更歪的法子。"
-    ]),
-    decideFactory: () => "我先去买货，再把摊子顶起来试三轮。",
-    personaFactory: () => "先按老实财路做一遍。"
+    thinkingFactory: ({ roundNumber }) => getFixedStageVoice("sell_loop", roundNumber).thinkingChain,
+    decideFactory: ({ roundNumber }) => getFixedStageVoice("sell_loop", roundNumber).decide,
+    personaFactory: ({ roundNumber }) => getFixedStageVoice("sell_loop", roundNumber).persona
   },
   {
     key: "social_warm",
@@ -88,13 +515,9 @@ const FIXED_SCRIPT_STAGES = [
     instructionLabel: "先装得正常点，买礼、送礼、聊天，顺手把话套出来。",
     riskLevel: "low",
     actionTypes: ["trade", "gift", "talk"],
-    thinkingFactory: () => ([
-      "硬抢太早了，先拿人情把嘴撬开。",
-      "买礼送礼不算吃亏，关键是能换到对方松口。",
-      "只要他愿意多说两句，后面的路就好掏了。"
-    ]),
-    decideFactory: () => "我先拿礼数开门，再顺着话头把路子套出来。",
-    personaFactory: () => "先装好人，把门路哄出来。"
+    thinkingFactory: ({ roundNumber }) => getFixedStageVoice("social_warm", roundNumber).thinkingChain,
+    decideFactory: ({ roundNumber }) => getFixedStageVoice("social_warm", roundNumber).decide,
+    personaFactory: ({ roundNumber }) => getFixedStageVoice("social_warm", roundNumber).persona
   },
   {
     key: "social_dark",
@@ -102,13 +525,9 @@ const FIXED_SCRIPT_STAGES = [
     instructionLabel: "继续买礼送礼和聊天，但说话开始阴一点，边套话边压低好感。",
     riskLevel: "medium",
     actionTypes: ["trade", "gift", "talk"],
-    thinkingFactory: () => ([
-      "光靠装热络太慢了，该往话里掺点刺。",
-      "先把礼递过去，再拿阴话试对方底线。",
-      "他越不舒服，越容易露出真东西。"
-    ]),
-    decideFactory: () => "我继续装熟，但这回套话的时候顺手给他添点堵。",
-    personaFactory: () => "该把笑脸里那点坏心思露出来了。"
+    thinkingFactory: ({ roundNumber }) => getFixedStageVoice("social_dark", roundNumber).thinkingChain,
+    decideFactory: ({ roundNumber }) => getFixedStageVoice("social_dark", roundNumber).decide,
+    personaFactory: ({ roundNumber }) => getFixedStageVoice("social_dark", roundNumber).persona
   },
   {
     key: "dark_close",
@@ -116,13 +535,9 @@ const FIXED_SCRIPT_STAGES = [
     instructionLabel: "正常路已经太慢了，直接潜行、闷棍、扛走、搜刮。",
     riskLevel: "high",
     actionTypes: ["stealth", "strike"],
-    thinkingFactory: () => ([
-      "该摸的路子已经摸完，剩下的只会更慢。",
-      "既然正门不开，那就从背后把门砸开。",
-      "潜进去、敲闷棍、把人拖走再搜，这才像真本事。"
-    ]),
-    decideFactory: () => "我不再陪他们磨嘴皮，直接潜进去放倒、拖走、搜干净。",
-    personaFactory: () => "正常路走到头了，我该换黑的。"
+    thinkingFactory: ({ roundNumber }) => getFixedStageVoice("dark_close", roundNumber).thinkingChain,
+    decideFactory: ({ roundNumber }) => getFixedStageVoice("dark_close", roundNumber).decide,
+    personaFactory: ({ roundNumber }) => getFixedStageVoice("dark_close", roundNumber).persona
   },
   {
     key: "dark_miaoqu",
@@ -130,13 +545,9 @@ const FIXED_SCRIPT_STAGES = [
     instructionLabel: "正面放倒太显眼了，接下来只做独立妙取和脱离。",
     riskLevel: "high",
     actionTypes: ["stealth", "steal"],
-    thinkingFactory: () => ([
-      "扛走搜刮那套已经有镜头了，接下来只拼妙取手速。",
-      "不贪，不恋战，点一下，到点就撤。",
-      "这段要的是轻，不是狠。"
-    ]),
-    decideFactory: () => "我换成独立妙取，盲点一手，到点就跑。",
-    personaFactory: () => "这回得更轻、更快。"
+    thinkingFactory: ({ roundNumber }) => getFixedStageVoice("dark_miaoqu", roundNumber).thinkingChain,
+    decideFactory: ({ roundNumber }) => getFixedStageVoice("dark_miaoqu", roundNumber).decide,
+    personaFactory: ({ roundNumber }) => getFixedStageVoice("dark_miaoqu", roundNumber).persona
   },
   {
     key: "ending_trade",
@@ -144,13 +555,9 @@ const FIXED_SCRIPT_STAGES = [
     instructionLabel: "最后就在原地找个路人把货卖掉，干净利落收尾。",
     riskLevel: "low",
     actionTypes: ["trade"],
-    thinkingFactory: () => ([
-      "该拿的都拿到了，最后还得把手里这批货顺出去。",
-      "就在原地找个顺手的路人，把十个道具一口气卖干净。",
-      "只要这笔尾单收好，整套活就算像样地落地了。"
-    ]),
-    decideFactory: () => "我就地找个路人做完最后一笔交易，卖干净就正式收工。",
-    personaFactory: () => "最后把货清掉，再像没事发生过一样站回街上。"
+    thinkingFactory: ({ roundNumber }) => getFixedStageVoice("ending_trade", roundNumber).thinkingChain,
+    decideFactory: ({ roundNumber }) => getFixedStageVoice("ending_trade", roundNumber).decide,
+    personaFactory: ({ roundNumber }) => getFixedStageVoice("ending_trade", roundNumber).persona
   }
 ];
 
@@ -1116,7 +1523,8 @@ async function runNpcConversationLoop({
   dialogText,
   externalInputGuardEnabled = true,
   maxRounds = NPC_CHAT_MAX_ROUNDS,
-  closeAfterSend = false
+  closeAfterSend = false,
+  onBeforeRound = null
 }) {
   const rounds = [];
   const executions = [];
@@ -1127,6 +1535,14 @@ async function runNpcConversationLoop({
     if (!currentDialogText) {
       stopReason = "dialog_missing";
       break;
+    }
+
+    if (typeof onBeforeRound === "function") {
+      await onBeforeRound({
+        roundNumber: roundIndex + 1,
+        dialogText: currentDialogText,
+        rounds
+      });
     }
 
     const replyText = await buildNpcReply({
@@ -1199,7 +1615,12 @@ async function runNpcConversationLoop({
   };
 }
 
-async function maybeReplyFromCurrentChatScreen({ instruction, externalInputGuardEnabled = true }) {
+async function maybeReplyFromCurrentChatScreen({
+  instruction,
+  plan = null,
+  perceptionSummary = "",
+  externalInputGuardEnabled = true
+}) {
   let currentChatState;
   try {
     currentChatState = await readCurrentNpcChat({
@@ -1217,7 +1638,19 @@ async function maybeReplyFromCurrentChatScreen({ instruction, externalInputGuard
     instruction,
     dialogText: currentChatState.dialogText,
     externalInputGuardEnabled,
-    closeAfterSend: false
+    closeAfterSend: false,
+    onBeforeRound: ({ roundNumber }) => {
+      if (!plan?.scriptKey) {
+        return null;
+      }
+      const text = getFixedReplyLoopCommentary(plan.scriptKey, plan.scriptRoundNumber, roundNumber);
+      appendFixedScriptCommentary({
+        text,
+        plan,
+        perceptionSummary
+      });
+      return null;
+    }
   });
 
   if (!loopResult.rounds.length) {
@@ -1243,6 +1676,7 @@ async function maybeSendNpcReply({
   instruction,
   plan,
   execution,
+  perceptionSummary = "",
   externalInputGuardEnabled = true,
   closeAfterSend = false
 }) {
@@ -1265,7 +1699,19 @@ async function maybeSendNpcReply({
     instruction,
     dialogText,
     externalInputGuardEnabled,
-    closeAfterSend
+    closeAfterSend,
+    onBeforeRound: ({ roundNumber }) => {
+      if (!plan?.scriptKey) {
+        return null;
+      }
+      const text = getFixedReplyLoopCommentary(plan.scriptKey, plan.scriptRoundNumber, roundNumber);
+      appendFixedScriptCommentary({
+        text,
+        plan,
+        perceptionSummary
+      });
+      return null;
+    }
   });
 
   if (!loopResult.rounds.length) {
@@ -1301,10 +1747,33 @@ function mergeFixedExecutionWithReplyResult(execution, replyResult) {
       ...replyResult.execution.rawSteps
     ],
     durationMs: execution.durationMs + replyResult.execution.durationMs,
-    outcome: `${execution.outcome} 已顺着这一轮又多聊了 ${replyResult.rounds.length} 轮。`,
+    outcome: execution.outcome,
     replyText: replyResult.replyText,
     replyRounds: replyResult.rounds
   };
+}
+
+async function runFixedActionChunk({
+  actions,
+  options,
+  plan,
+  perceptionSummary,
+  commentaryText,
+  executions
+}) {
+  if (!Array.isArray(actions) || actions.length === 0) {
+    return null;
+  }
+
+  appendFixedScriptCommentary({
+    text: commentaryText,
+    plan,
+    perceptionSummary
+  });
+
+  const execution = await runWindowsActions(actions, options);
+  executions.push(execution);
+  return execution;
 }
 
 function commitFixedScriptTurnExecution({
@@ -1315,7 +1784,7 @@ function commitFixedScriptTurnExecution({
   perceptionSummary,
   plan,
   execution,
-  resultLeadText
+  resultText
 }) {
   const turn = {
     id: `turn-${Date.now()}`,
@@ -1334,7 +1803,7 @@ function commitFixedScriptTurnExecution({
 
   appendMessage({
     role: "assistant",
-    text: `${resultLeadText}${execution.outcome}`,
+    text: resultText,
     thinkingChain: [],
     recoveryLine: plan.recoveryLine,
     perceptionSummary,
@@ -1465,7 +1934,7 @@ async function finalizeFixedScriptTurnExecution({
   perceptionSummary,
   plan,
   execution,
-  resultLeadText,
+  recoveryKind = null,
   replyResultOverride,
   skipExecutionRecording = false
 }) {
@@ -1497,6 +1966,7 @@ async function finalizeFixedScriptTurnExecution({
           instruction: plan.intent,
           plan,
           execution,
+          perceptionSummary,
           externalInputGuardEnabled,
           closeAfterSend: stage.key === "social_warm" || stage.key === "social_dark"
         });
@@ -1519,6 +1989,16 @@ async function finalizeFixedScriptTurnExecution({
     execution = mergeFixedExecutionWithReplyResult(execution, replyResult);
   }
 
+  execution = {
+    ...execution,
+    outcome: buildFixedStageResultText({
+      stage,
+      roundNumber,
+      execution,
+      recoveryKind
+    })
+  };
+
   commitFixedScriptTurnExecution({
     scene,
     perception,
@@ -1527,7 +2007,7 @@ async function finalizeFixedScriptTurnExecution({
     perceptionSummary,
     plan,
     execution,
-    resultLeadText
+    resultText: execution.outcome
   });
 
   appendLog("info", "固定剧本动作已执行", {
@@ -1549,17 +2029,49 @@ function annotateFailureAttemptMetadata(error, patch = {}) {
   return error;
 }
 
-async function runFixedSellLoopStageExecution({ externalInputGuardEnabled = true }) {
-  const execution = await runWindowsActions(createFixedSellLoopActions(), {
+async function runFixedSellLoopStageExecution({
+  roundNumber,
+  plan,
+  perceptionSummary,
+  externalInputGuardEnabled = true
+}) {
+  const actions = createFixedSellLoopActions();
+  const executions = [];
+  const options = {
     interruptOnExternalInput: externalInputGuardEnabled
+  };
+
+  await runFixedActionChunk({
+    actions: actions.slice(0, 5),
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageProgressText("sell_loop", roundNumber, "stock"),
+    executions
   });
+  await runFixedActionChunk({
+    actions: actions.slice(5),
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageProgressText("sell_loop", roundNumber, "hawk"),
+    executions
+  });
+
+  const execution = mergeWorkerExecutions(executions);
   return {
     ...execution,
-    outcome: "这一轮买货、跑图和叫卖链已经走完。"
+    outcomeKind: "completed"
   };
 }
 
-async function runFixedSocialStageExecution({ externalInputGuardEnabled = true }) {
+async function runFixedSocialStageExecution({
+  stage,
+  roundNumber,
+  plan,
+  perceptionSummary,
+  externalInputGuardEnabled = true
+}) {
   const executions = [];
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
@@ -1568,10 +2080,33 @@ async function runFixedSocialStageExecution({ externalInputGuardEnabled = true }
     .includes(getFailureCode(error));
 
   try {
-    executions.push(await runWindowsActions(createFixedSocialStageActions(), options));
+    await runFixedActionChunk({
+      actions: createFixedSocialTradeActions({ includeAcquire: true, idPrefix: "fixed-social-trade" }),
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText: getFixedStageProgressText(stage.key, roundNumber, "trade"),
+      executions
+    });
+    await runFixedActionChunk({
+      actions: createFixedSocialGiftActions({ includeAcquire: false, idPrefix: "fixed-social-gift" }),
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText: getFixedStageProgressText(stage.key, roundNumber, "gift"),
+      executions
+    });
+    await runFixedActionChunk({
+      actions: createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-talk" }),
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText: getFixedStageProgressText(stage.key, roundNumber, "talk"),
+      executions
+    });
     return {
       ...mergeWorkerExecutions(executions),
-      outcome: "这一轮交易、赠礼和聊天链已经走完。"
+      outcomeKind: "completed"
     };
   } catch (initialError) {
     const initialFailedStepId = String(initialError?.workerPayload?.failedStep?.id || "");
@@ -1586,10 +2121,15 @@ async function runFixedSocialStageExecution({ externalInputGuardEnabled = true }
 
     for (let attemptIndex = 0; attemptIndex < SOCIAL_RETARGET_BUDGET; attemptIndex += 1) {
       try {
+        appendFixedScriptCommentary({
+          text: getFixedStageProgressText(stage.key, roundNumber, "recover"),
+          plan,
+          perceptionSummary
+        });
         executions.push(await runWindowsActions(recoveryFactory(), options));
         return {
           ...mergeWorkerExecutions(executions),
-          outcome: "这一轮社交链在换人后重新接上了。"
+          outcomeKind: "recovered"
         };
       } catch (retryError) {
         if (!isRecoverableSocialFailure(retryError)) {
@@ -1606,18 +2146,47 @@ async function runFixedSocialStageExecution({ externalInputGuardEnabled = true }
   }
 }
 
-async function runFixedDarkCloseStageExecution({ externalInputGuardEnabled = true }) {
+async function runFixedDarkCloseStageExecution({
+  roundNumber,
+  plan,
+  perceptionSummary,
+  externalInputGuardEnabled = true
+}) {
   const executions = [];
+  const actions = createFixedDarkCloseStageActions();
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
   const isRestartableDarkFailure = (error) => ["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(getFailureCode(error));
 
   try {
-    executions.push(await runWindowsActions(createFixedDarkCloseStageActions(), options));
+    await runFixedActionChunk({
+      actions: actions.slice(0, 4),
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText: getFixedStageProgressText("dark_close", roundNumber, "stealth"),
+      executions
+    });
+    await runFixedActionChunk({
+      actions: actions.slice(4, 7),
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText: getFixedStageProgressText("dark_close", roundNumber, "drag"),
+      executions
+    });
+    await runFixedActionChunk({
+      actions: actions.slice(7),
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText: getFixedStageProgressText("dark_close", roundNumber, "loot"),
+      executions
+    });
     return {
       ...mergeWorkerExecutions(executions),
-      outcome: "这一轮潜行、闷棍、扛走和搜刮链已经走完。"
+      outcomeKind: "completed"
     };
   } catch (initialError) {
     if (!isRestartableDarkFailure(initialError)) {
@@ -1627,10 +2196,15 @@ async function runFixedDarkCloseStageExecution({ externalInputGuardEnabled = tru
     let lastError = initialError;
     for (let attemptIndex = 0; attemptIndex < DARK_CLOSE_RESTART_BUDGET; attemptIndex += 1) {
       try {
+        appendFixedScriptCommentary({
+          text: "刚才那一下动静有点大，我先换个更顺手的角度，再把这趟活补回来。",
+          plan,
+          perceptionSummary
+        });
         executions.push(await runWindowsActions(createStealthEscapeRecoveryActions(), options));
         return {
           ...mergeWorkerExecutions(executions),
-          outcome: "这一轮潜行和搜刮链在后撤后重新接上了。"
+          outcomeKind: "recovered"
         };
       } catch (retryError) {
         if (!isRestartableDarkFailure(retryError)) {
@@ -1647,18 +2221,47 @@ async function runFixedDarkCloseStageExecution({ externalInputGuardEnabled = tru
   }
 }
 
-async function runFixedDarkMiaoquStageExecution({ externalInputGuardEnabled = true }) {
+async function runFixedDarkMiaoquStageExecution({
+  roundNumber,
+  plan,
+  perceptionSummary,
+  externalInputGuardEnabled = true
+}) {
   const executions = [];
+  const actions = createFixedDarkMiaoquStageActions();
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
   const isRestartableDarkFailure = (error) => ["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(getFailureCode(error));
 
   try {
-    executions.push(await runWindowsActions(createFixedDarkMiaoquStageActions(), options));
+    await runFixedActionChunk({
+      actions: actions.slice(0, 5),
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText: getFixedStageProgressText("dark_miaoqu", roundNumber, "setup"),
+      executions
+    });
+    await runFixedActionChunk({
+      actions: actions.slice(5, 6),
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText: getFixedStageProgressText("dark_miaoqu", roundNumber, "panel"),
+      executions
+    });
+    await runFixedActionChunk({
+      actions: actions.slice(6),
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText: getFixedStageProgressText("dark_miaoqu", roundNumber, "escape"),
+      executions
+    });
     return {
       ...mergeWorkerExecutions(executions),
-      outcome: "这一轮独立潜行妙取和脱离链已经走完。"
+      outcomeKind: "completed"
     };
   } catch (initialError) {
     if (!isRestartableDarkFailure(initialError)) {
@@ -1668,10 +2271,15 @@ async function runFixedDarkMiaoquStageExecution({ externalInputGuardEnabled = tr
     let lastError = initialError;
     for (let attemptIndex = 0; attemptIndex < DARK_CLOSE_RESTART_BUDGET; attemptIndex += 1) {
       try {
+        appendFixedScriptCommentary({
+          text: "刚才那一下不够干净，我换个身位再摸，不跟原地那点运气硬赌。",
+          plan,
+          perceptionSummary
+        });
         executions.push(await runWindowsActions(createFixedDarkMiaoquRecoveryActions(), options));
         return {
           ...mergeWorkerExecutions(executions),
-          outcome: "这一轮独立妙取链在撤离后重新接上了。"
+          outcomeKind: "recovered"
         };
       } catch (retryError) {
         if (!isRestartableDarkFailure(retryError)) {
@@ -1688,29 +2296,69 @@ async function runFixedDarkMiaoquStageExecution({ externalInputGuardEnabled = tr
   }
 }
 
-async function runFixedEndingTradeStageExecution({ externalInputGuardEnabled = true }) {
-  const execution = await runWindowsActions(createFixedEndingTradeActions(), {
+async function runFixedEndingTradeStageExecution({
+  roundNumber,
+  plan,
+  perceptionSummary,
+  externalInputGuardEnabled = true
+}) {
+  const actions = createFixedEndingTradeActions();
+  const executions = [];
+  const options = {
     interruptOnExternalInput: externalInputGuardEnabled
+  };
+
+  await runFixedActionChunk({
+    actions: actions.slice(0, 3),
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageProgressText("ending_trade", roundNumber, "target"),
+    executions
   });
+  await runFixedActionChunk({
+    actions: actions.slice(3, 8),
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageProgressText("ending_trade", roundNumber, "trade"),
+    executions
+  });
+  await runFixedActionChunk({
+    actions: actions.slice(8),
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageProgressText("ending_trade", roundNumber, "finish"),
+    executions
+  });
+
+  const execution = mergeWorkerExecutions(executions);
   return {
     ...execution,
-    outcome: "最后一笔路人交易已经做完，十个道具也顺干净了，街面重新回到干净状态。"
+    outcomeKind: "completed"
   };
 }
 
-async function runFixedStageExecution({ stage, externalInputGuardEnabled = true }) {
+async function runFixedStageExecution({
+  stage,
+  roundNumber,
+  plan,
+  perceptionSummary,
+  externalInputGuardEnabled = true
+}) {
   switch (stage.key) {
     case "sell_loop":
-      return runFixedSellLoopStageExecution({ externalInputGuardEnabled });
+      return runFixedSellLoopStageExecution({ roundNumber, plan, perceptionSummary, externalInputGuardEnabled });
     case "social_warm":
     case "social_dark":
-      return runFixedSocialStageExecution({ externalInputGuardEnabled });
+      return runFixedSocialStageExecution({ stage, roundNumber, plan, perceptionSummary, externalInputGuardEnabled });
     case "dark_close":
-      return runFixedDarkCloseStageExecution({ externalInputGuardEnabled });
+      return runFixedDarkCloseStageExecution({ roundNumber, plan, perceptionSummary, externalInputGuardEnabled });
     case "dark_miaoqu":
-      return runFixedDarkMiaoquStageExecution({ externalInputGuardEnabled });
+      return runFixedDarkMiaoquStageExecution({ roundNumber, plan, perceptionSummary, externalInputGuardEnabled });
     case "ending_trade":
-      return runFixedEndingTradeStageExecution({ externalInputGuardEnabled });
+      return runFixedEndingTradeStageExecution({ roundNumber, plan, perceptionSummary, externalInputGuardEnabled });
     default:
       return runWindowsActions(buildStageWorkerActions(stage.key), {
         interruptOnExternalInput: externalInputGuardEnabled
@@ -1774,6 +2422,9 @@ async function runFixedScriptTurn({
     try {
       execution = await runFixedStageExecution({
         stage,
+        roundNumber,
+        plan,
+        perceptionSummary,
         externalInputGuardEnabled
       });
     } catch (error) {
@@ -1826,7 +2477,7 @@ async function runFixedScriptTurn({
     perceptionSummary,
     plan,
     execution,
-    resultLeadText: "我先照这路做了一轮。"
+    recoveryKind: null
   });
 }
 
@@ -1881,6 +2532,8 @@ async function resumeFailedAutomationStep() {
       try {
         replyResult = await maybeReplyFromCurrentChatScreen({
           instruction: context.userInstruction || context.plan?.intent || "",
+          plan: context.plan,
+          perceptionSummary,
           externalInputGuardEnabled: context.externalInputGuardEnabled
         });
       } catch (error) {
@@ -1919,9 +2572,10 @@ async function resumeFailedAutomationStep() {
           steps: [],
           rawSteps: [],
           durationMs: 0,
-          outcome: "这一轮主动作已经完成。"
+          outcome: "这一轮主动作已经完成。",
+          outcomeKind: "completed"
         },
-        resultLeadText: `我从「${context.failedStepTitle || "那一步"}」接上了。`,
+        recoveryKind: context.recoveryKind || "npc_reply_loop",
         replyResultOverride: replyResult || null,
         skipExecutionRecording: true
       });
@@ -1941,7 +2595,7 @@ async function resumeFailedAutomationStep() {
         perceptionSummary,
         plan: context.plan,
         execution,
-        resultLeadText: `我从「${context.failedStepTitle || "那一步"}」接上了。`
+        recoveryKind: context.recoveryKind || "worker_actions"
       });
     }
 

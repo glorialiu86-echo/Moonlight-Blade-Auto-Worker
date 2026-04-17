@@ -31,6 +31,7 @@
 - 第三段与第二段的动作链保持一致，变化的是思考文案与聊天语气
 - 第二段和第三段的社交链现在固定为同一目标 owner：首次拿人继续扫圈，聊天门槛暴露后才换人，`Tab` 只负责换到新的“可查看”目标
 - 第四段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_select_item_once/loot_put_in_once -> loot_submit_once`
+- 第四段里的 `闷棍` 当前按“只要选中人就直接放倒”来设计，但它本身疑似存在按小时计的使用次数限制；准确预算还没锁定，需等技术确认后再把次数限制写死进链路
 - 第五段是独立妙取链，固定执行 `travel_to_coordinate -> recover_front_target_visibility -> enter_stealth_with_retry -> acquire_npc_target(只要查看按钮) -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
 - 第六段是收尾卖货链，固定执行 `acquire_npc_target -> open_npc_action_menu -> click_menu_trade -> trade_prepare_gift_bundle(10) -> trade_select_right_money_slot -> trade_scale_quantity -> trade_right_item_up_shelf -> trade_submit -> close_current_panel`
 - 不允许前端展示“当前阶段 / 当前轮次 / 倒计时 / 固定剧本编号”

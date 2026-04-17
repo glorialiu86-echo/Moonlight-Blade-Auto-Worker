@@ -257,6 +257,8 @@ function createKnockLootActions(baseAction) {
       title: "Select Front Target",
       type: "stealth_select_target",
       sourceType: baseAction.sourceType,
+      selectionTimeoutMs: 2200,
+      selectionSettleMs: 120,
       frontRoi: [0.36, 0.18, 0.64, 0.42]
     },
     {
@@ -280,7 +282,7 @@ function createKnockLootActions(baseAction) {
       title: "Backstep With Target",
       type: "stealth_backstep_target",
       sourceType: baseAction.sourceType,
-      backstepMs: 3000,
+      backstepMs: 2000,
       moveSettleMs: 40
     },
     {

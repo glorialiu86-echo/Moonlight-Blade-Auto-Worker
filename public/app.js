@@ -221,10 +221,14 @@ async function submitVoiceTranscript(transcript) {
       })
     });
 
+    if (elements.instructionInput.value.trim() === instruction) {
+      elements.instructionInput.value = "";
+    }
+
     applyPayload(payload);
   } catch (error) {
     await refresh().catch(() => {});
-    updateVoiceStatus(`语音发送失败：${error.message}`);
+    updateVoiceStatus(`Voice send failed: ${error.message}`);
   } finally {
     state.submitting = false;
     syncUiState();
@@ -237,7 +241,8 @@ function showTranscriptPreview(transcript) {
     return;
   }
 
-  updateVoiceStatus(`识别到：${text}`);
+  elements.instructionInput.value = text;
+  updateVoiceStatus(`Transcript: ${text}`);
 }
 
 function enqueueVoiceTranscript(transcript) {

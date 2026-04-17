@@ -240,7 +240,7 @@ ACTION_POINTS = {
     "hawking_max_quantity": (1464 / 2048, 661 / 1151),
     "hawking_stock_button": (1298 / 2048, 843 / 1151),
     "hawking_submit": (2459 / 2644, 1227 / 1399),
-    "steal_button_1": (1916 / 2048, 512 / 1360),
+    "steal_button_1": (1701 / 2048, 389 / 1152),
     "steal_button_2": (1916 / 2048, 704 / 1360),
     "steal_button_3": (1916 / 2048, 893 / 1360),
     "steal_button_4": (1916 / 2048, 1085 / 1360),
@@ -259,12 +259,12 @@ ACTION_POINTS = {
     "map_coord_x_input": (1520 / 2048, 1032 / 1152),
     "map_go": (1674 / 2048, 1027 / 1152),
     "teleport_confirm": (0.569, 0.742),
-    "drop_carried_target": (0.706, 0.553),
-    "loot_item_1": (0.717, 0.356),
+    "drop_carried_target": (1372 / 2048, 667 / 1152),
+    "loot_item_1": (1428 / 2048, 381 / 1152),
     "loot_item_2": (0.788, 0.356),
     "loot_item_3": (0.860, 0.356),
     "loot_put_in": (0.543, 0.634),
-    "loot_submit": (0.862, 0.885),
+    "loot_submit": (1206 / 2048, 1076 / 1152),
 }
 
 MAP_KEYPAD_POINTS = {

@@ -275,6 +275,29 @@
   - `buttonIndex`
   - `click`
 
+说明：
+
+- 这个动作当前仍保留给独立妙取链使用。
+- 固定剧本第四段已经不再把它挂在闷棍后面。
+
+### `click_fixed_steal_button_and_escape`
+
+- 前置状态：`steal_screen`
+- 行为：盲点固定一条金色 `妙取` 按钮，然后等待 `1.2s`
+- 成功状态：在撤离节奏内抓到 `妙取成功` 文案，或读到妙取面板内容发生变化
+- 失败：不在 `steal_screen` 时启动，或撤离结束前未确认 `妙取成功`，抛出 `STEALTH_TARGET_RECOVERED`
+- 关键输出：
+  - `stage`
+  - `beforeText`
+  - `afterText`
+  - `successBannerText`
+  - `buttonIndex`
+  - `pointName`
+  - `click`
+  - `escapeDelayMs`
+  - `shortBackstepMs`
+  - `longBackstepMs`
+
 ### `travel_to_coordinate`
 
 - 前置状态：城镇或可开图状态
@@ -379,6 +402,7 @@
 
 - 这一层只覆盖 `4 -> 金色妙取按钮`。
 - `潜行(2)`、靠近目标、再次按 `4` 开下一轮，都不归 `steal` 这个语义动作接管。
+- 固定剧本第五段使用的是更强约束的独立妙取链，不直接复用这里的语义动作映射。
 
 ### `threaten / strike`
 

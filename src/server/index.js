@@ -23,6 +23,8 @@ import {
 } from "../runtime/motion-review.js";
 import {
   createFixedDarkCloseStageActions,
+  createFixedDarkMiaoquRecoveryActions,
+  createFixedDarkMiaoquStageActions,
   createFixedSellLoopActions,
   createFixedSocialRecoveryActions,
   createFixedSocialStageActions,
@@ -109,17 +111,31 @@ const FIXED_SCRIPT_STAGES = [
   },
   {
     key: "dark_close",
-    rounds: 1,
-    instructionLabel: "正常路已经太慢了，直接潜行、闷棍、偷窃。",
+    rounds: 3,
+    instructionLabel: "正常路已经太慢了，直接潜行、闷棍、扛走、搜刮。",
     riskLevel: "high",
-    actionTypes: ["stealth", "strike", "steal"],
+    actionTypes: ["stealth", "strike"],
     thinkingFactory: () => ([
       "该摸的路子已经摸完，剩下的只会更慢。",
       "既然正门不开，那就从背后把门砸开。",
-      "潜进去、敲闷棍、下手，这才像真本事。"
+      "潜进去、敲闷棍、把人拖走再搜，这才像真本事。"
     ]),
-    decideFactory: () => "我不再陪他们磨嘴皮，直接潜进去狠狠干一手。",
+    decideFactory: () => "我不再陪他们磨嘴皮，直接潜进去放倒、拖走、搜干净。",
     personaFactory: () => "正常路走到头了，我该换黑的。"
+  },
+  {
+    key: "dark_miaoqu",
+    rounds: 5,
+    instructionLabel: "正面放倒太显眼了，接下来只做独立妙取和脱离。",
+    riskLevel: "high",
+    actionTypes: ["stealth", "steal"],
+    thinkingFactory: () => ([
+      "扛走搜刮那套已经有镜头了，接下来只拼妙取手速。",
+      "不贪，不恋战，点一下，到点就撤。",
+      "这段要的是轻，不是狠。"
+    ]),
+    decideFactory: () => "我换成独立妙取，盲点一手，到点就跑。",
+    personaFactory: () => "这回得更轻、更快。"
   }
 ];
 
@@ -415,6 +431,8 @@ function buildStageWorkerActions(stageKey) {
       return createFixedSocialStageActions();
     case "dark_close":
       return createFixedDarkCloseStageActions();
+    case "dark_miaoqu":
+      return createFixedDarkMiaoquStageActions();
     default:
       return [];
   }
@@ -449,6 +467,15 @@ function buildRecoveryWorkerActions(baseContext, error, workerActions, failedInd
     }
   }
 
+  if (stageKey === "dark_miaoqu") {
+    if (failureCode === "STEALTH_ENTRY_BLOCKED") {
+      return createFixedDarkMiaoquStageActions();
+    }
+    if (["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(failureCode)) {
+      return createFixedDarkMiaoquRecoveryActions();
+    }
+  }
+
   return workerActions.slice(failedIndex);
 }
 
@@ -457,6 +484,9 @@ function getRecoveryBudget(baseContext, error) {
   const stageKey = baseContext?.stage?.key || "";
 
   if (stageKey === "dark_close" && ["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(failureCode)) {
+    return DARK_CLOSE_RESTART_BUDGET;
+  }
+  if (stageKey === "dark_miaoqu" && ["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(failureCode)) {
     return DARK_CLOSE_RESTART_BUDGET;
   }
   if ((stageKey === "social_warm" || stageKey === "social_dark")
@@ -1453,7 +1483,7 @@ async function runFixedDarkCloseStageExecution({ externalInputGuardEnabled = tru
     executions.push(await runWindowsActions(createFixedDarkCloseStageActions(), options));
     return {
       ...mergeWorkerExecutions(executions),
-      outcome: "这一轮潜行、闷棍和妙取链已经走完。"
+      outcome: "这一轮潜行、闷棍、扛走和搜刮链已经走完。"
     };
   } catch (initialError) {
     if (!isRestartableDarkFailure(initialError)) {
@@ -1466,7 +1496,48 @@ async function runFixedDarkCloseStageExecution({ externalInputGuardEnabled = tru
         executions.push(await runWindowsActions(createStealthEscapeRecoveryActions(), options));
         return {
           ...mergeWorkerExecutions(executions),
-          outcome: "这一轮潜行链在后撤后重新接上了。"
+          outcome: "这一轮潜行和搜刮链在后撤后重新接上了。"
+        };
+      } catch (retryError) {
+        if (!isRestartableDarkFailure(retryError)) {
+          throw retryError;
+        }
+        lastError = retryError;
+      }
+    }
+
+    throw annotateFailureAttemptMetadata(lastError, {
+      attemptCount: DARK_CLOSE_RESTART_BUDGET,
+      attemptBudget: DARK_CLOSE_RESTART_BUDGET
+    });
+  }
+}
+
+async function runFixedDarkMiaoquStageExecution({ externalInputGuardEnabled = true }) {
+  const executions = [];
+  const options = {
+    interruptOnExternalInput: externalInputGuardEnabled
+  };
+  const isRestartableDarkFailure = (error) => ["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(getFailureCode(error));
+
+  try {
+    executions.push(await runWindowsActions(createFixedDarkMiaoquStageActions(), options));
+    return {
+      ...mergeWorkerExecutions(executions),
+      outcome: "这一轮独立潜行妙取和脱离链已经走完。"
+    };
+  } catch (initialError) {
+    if (!isRestartableDarkFailure(initialError)) {
+      throw initialError;
+    }
+
+    let lastError = initialError;
+    for (let attemptIndex = 0; attemptIndex < DARK_CLOSE_RESTART_BUDGET; attemptIndex += 1) {
+      try {
+        executions.push(await runWindowsActions(createFixedDarkMiaoquRecoveryActions(), options));
+        return {
+          ...mergeWorkerExecutions(executions),
+          outcome: "这一轮独立妙取链在撤离后重新接上了。"
         };
       } catch (retryError) {
         if (!isRestartableDarkFailure(retryError)) {
@@ -1492,6 +1563,8 @@ async function runFixedStageExecution({ stage, externalInputGuardEnabled = true 
       return runFixedSocialStageExecution({ externalInputGuardEnabled });
     case "dark_close":
       return runFixedDarkCloseStageExecution({ externalInputGuardEnabled });
+    case "dark_miaoqu":
+      return runFixedDarkMiaoquStageExecution({ externalInputGuardEnabled });
     default:
       return runWindowsActions(buildStageWorkerActions(stage.key), {
         interruptOnExternalInput: externalInputGuardEnabled

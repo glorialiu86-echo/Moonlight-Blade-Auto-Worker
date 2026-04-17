@@ -397,6 +397,25 @@ export function createFixedSellLoopActions() {
   ];
 }
 
+function createFixedDarkCloseLootActions(options = {}) {
+  const lootRounds = Math.max(1, Number(options.lootRounds || 3));
+  const lootActions = [];
+
+  for (let roundIndex = 0; roundIndex < lootRounds; roundIndex += 1) {
+    const sequenceIndex = roundIndex + 1;
+    lootActions.push(
+      createWorkerAction(`fixed-dark-close-loot-select-${sequenceIndex}`, `搜刮第 ${sequenceIndex} 件物品`, "loot_select_item_once", {
+        lootSettleMs: 80
+      }),
+      createWorkerAction(`fixed-dark-close-loot-put-${sequenceIndex}`, `放入第 ${sequenceIndex} 件物品`, "loot_put_in_once", {
+        lootSettleMs: 120
+      })
+    );
+  }
+
+  return lootActions;
+}
+
 export function createFixedDarkCloseStageActions() {
   return [
     createTravelToCoordinateAction({
@@ -420,13 +439,23 @@ export function createFixedDarkCloseStageActions() {
       frontRoi: [0.36, 0.18, 0.64, 0.42],
       postDelayMs: 600
     }),
-    createWorkerAction("fixed-dark-close-5", "拉起妙取面板", "stealth_trigger_miaoqu", {
-      triggerTimeoutMs: 5000,
-      triggerSettleMs: 40
+    createWorkerAction("fixed-dark-close-5", "扛走被闷倒的目标", "stealth_carry_target", {
+      carrySettleMs: 180
     }),
-    createWorkerAction("fixed-dark-close-6", "点击右侧第一条金色妙取按钮", "click_steal_button", {
-      buttonIndex: 1,
-      postDelayMs: 500
+    createWorkerAction("fixed-dark-close-6", "长按 S 把人拖离人堆", "stealth_backstep_target", {
+      backstepMs: 3000,
+      moveSettleMs: 80
+    }),
+    createWorkerAction("fixed-dark-close-7", "放下扛走的目标", "stealth_drop_target", {
+      dropSettleMs: 200
+    }),
+    createWorkerAction("fixed-dark-close-8", "拉起搜刮面板", "stealth_open_loot", {
+      lootOpenTimeoutMs: 1600,
+      lootSettleMs: 80
+    }),
+    ...createFixedDarkCloseLootActions(),
+    createWorkerAction("fixed-dark-close-9", "提交这一轮搜刮", "loot_submit_once", {
+      lootSettleMs: 160
     })
   ];
 }
@@ -438,6 +467,58 @@ export function createStealthEscapeRecoveryActions() {
       moveSettleMs: 80
     }),
     ...createFixedDarkCloseStageActions().slice(2)
+  ];
+}
+
+export function createFixedDarkMiaoquStageActions() {
+  return [
+    createTravelToCoordinateAction({
+      id: "fixed-dark-miaoqu-1",
+      title: "去妙取潜行点",
+      xCoordinate: 740,
+      yCoordinate: 944,
+      confirmPointName: "teleport_confirm"
+    }),
+    createPressKeyAction("fixed-dark-miaoqu-2", "下马准备妙取", "1", { postDelayMs: 800 }),
+    createWorkerAction("fixed-dark-miaoqu-3", "进入潜行并等待时机", "enter_stealth_with_retry", {
+      retryLimit: 5,
+      settleMs: 260,
+      waitBetweenMs: 600
+    }),
+    createWorkerAction("fixed-dark-miaoqu-4", "拉起当前目标的查看按钮", "acquire_npc_target", {
+      timeoutMs: 5000,
+      movePulseMs: 160,
+      scanIntervalMs: 180
+    }),
+    createWorkerAction("fixed-dark-miaoqu-5", "按 4 拉起妙取面板", "stealth_trigger_miaoqu", {
+      triggerKey: "4",
+      triggerTimeoutMs: 5000,
+      triggerSettleMs: 60
+    }),
+    createWorkerAction("fixed-dark-miaoqu-6", "盲点固定妙取按钮并在 1.2 秒后撤离", "click_fixed_steal_button_and_escape", {
+      buttonIndex: 1,
+      escapeDelayMs: 1200,
+      shortBackstepMs: 120,
+      betweenEscapeMs: 80,
+      longBackstepMs: 3000,
+      moveSettleMs: 80
+    }),
+    createWorkerAction("fixed-dark-miaoqu-7", "退出潜行回到普通场景", "exit_stealth", {
+      settleMs: 450
+    })
+  ];
+}
+
+export function createFixedDarkMiaoquRecoveryActions() {
+  return [
+    createWorkerAction("fixed-dark-miaoqu-recovery-1", "长按 S 先撤离妙取现场", "stealth_escape_backward", {
+      backstepMs: 3000,
+      moveSettleMs: 80
+    }),
+    createWorkerAction("fixed-dark-miaoqu-recovery-2", "退出潜行回到普通场景", "exit_stealth", {
+      settleMs: 450
+    }),
+    ...createFixedDarkMiaoquStageActions()
   ];
 }
 

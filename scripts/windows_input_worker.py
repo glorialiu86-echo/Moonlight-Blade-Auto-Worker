@@ -187,6 +187,7 @@ NPC_STAGE_ROIS = {
 STEALTH_ROIS = {
     "front_name_band": (0.36, 0.18, 0.64, 0.42),
     "exit_button": (0.86, 0.44, 0.99, 0.58),
+    "result_banner": (0.26, 0.22, 0.74, 0.56),
 }
 
 MAP_STAGE_ROIS = {
@@ -1156,6 +1157,16 @@ def detect_loot_screen(hwnd: int) -> dict[str, Any]:
     return {
         "visible": count_keywords(panel_text, LOOT_SCREEN_KEYWORDS) >= 2,
         "text": panel_text,
+    }
+
+
+def detect_miaoqu_success_banner(hwnd: int) -> dict[str, Any]:
+    banner_text = ocr_text(capture_window_region(hwnd, STEALTH_ROIS["result_banner"]))
+    normalized_text = normalize_npc_name(banner_text)
+    return {
+        "visible": "妙取成功" in normalized_text,
+        "text": banner_text,
+        "normalizedText": normalized_text,
     }
 
 
@@ -4057,10 +4068,20 @@ def run_exit_stealth(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     exit_state = detect_exit_stealth_button(hwnd)
     if not exit_state["visible"]:
-        raise RuntimeError(
-            "exit_stealth requires visible 退出潜行 button. "
-            f"Detected text: {exit_state['text'] or 'none'}"
-        )
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": "Stealth mode was already inactive",
+            "input": {
+                "mode": "exit_stealth",
+                "beforeText": exit_state["text"],
+                "afterText": exit_state["text"],
+                "pointName": "exit_stealth",
+                "click": None,
+                "exitTriggered": False,
+            },
+        }
 
     step_click = click_named_point(hwnd, "exit_stealth")
     INPUT_GUARD.guarded_sleep(settle_ms, title)
@@ -4080,6 +4101,129 @@ def run_exit_stealth(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
             "afterText": next_exit_state["text"],
             "pointName": "exit_stealth",
             "click": step_click,
+            "exitTriggered": True,
+        },
+    }
+
+
+def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "click_fixed_steal_button_and_escape")
+    button_index = int(action.get("buttonIndex") or 1)
+    escape_delay_ms = int(action.get("escapeDelayMs") or 1200)
+    short_backstep_ms = int(action.get("shortBackstepMs") or 120)
+    between_escape_ms = int(action.get("betweenEscapeMs") or 80)
+    long_backstep_ms = int(action.get("longBackstepMs") or 3000)
+    move_settle_ms = int(action.get("moveSettleMs") or 80)
+    success_check_interval_ms = int(action.get("successCheckIntervalMs") or 120)
+    point_name = f"steal_button_{button_index}"
+
+    if point_name not in ACTION_POINTS:
+        raise RuntimeError(f"Unsupported steal button index: {button_index}")
+
+    stage_state = detect_npc_interaction_stage(hwnd)
+    if stage_state["stage"] != "steal_screen":
+        failed_input = {
+            "mode": "click_fixed_steal_button_and_escape",
+            **collect_npc_stage_input(hwnd, stage_state),
+            "buttonIndex": button_index,
+            "pointName": point_name,
+        }
+        raise ActionExecutionError(
+            "Fixed miaoqu escape requires steal_screen",
+            error_code="STEALTH_TARGET_RECOVERED",
+            failed_step=build_failed_step_payload(
+                action,
+                f"Fixed miaoqu chain started from {stage_state['stage'] or 'none'} instead of steal_screen",
+                failed_input,
+            ),
+        )
+
+    steal_state = detect_steal_screen(hwnd)
+    step_click = click_named_point(hwnd, point_name)
+    INPUT_GUARD.guarded_sleep(max(0, escape_delay_ms), title)
+
+    pydirectinput.keyDown("s")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(max(40, short_backstep_ms), title)
+    pydirectinput.keyUp("s")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(max(0, between_escape_ms), title)
+
+    pydirectinput.keyDown("s")
+    INPUT_GUARD.refresh_baseline()
+    success_banner = detect_miaoqu_success_banner(hwnd)
+    after_steal_state = detect_steal_screen(hwnd)
+    steal_success = success_banner["visible"] or (
+        after_steal_state["visible"] and after_steal_state["text"] != steal_state["text"]
+    )
+    long_backstep_deadline = time.time() + max(80, long_backstep_ms) / 1000.0
+    while time.time() <= long_backstep_deadline:
+        if not steal_success:
+            success_banner = detect_miaoqu_success_banner(hwnd)
+            after_steal_state = detect_steal_screen(hwnd)
+            steal_success = success_banner["visible"] or (
+                after_steal_state["visible"] and after_steal_state["text"] != steal_state["text"]
+            )
+        remaining_ms = max(0, int((long_backstep_deadline - time.time()) * 1000))
+        if remaining_ms <= 0:
+            break
+        INPUT_GUARD.guarded_sleep(min(success_check_interval_ms, remaining_ms), title)
+    pydirectinput.keyUp("s")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(max(0, move_settle_ms), title)
+
+    next_stage_state = detect_npc_interaction_stage(hwnd)
+    success_banner = detect_miaoqu_success_banner(hwnd)
+    after_steal_state = detect_steal_screen(hwnd)
+    steal_success = steal_success or success_banner["visible"] or (
+        after_steal_state["visible"] and after_steal_state["text"] != steal_state["text"]
+    )
+    if not steal_success:
+        failed_input = {
+            "mode": "click_fixed_steal_button_and_escape",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "beforeText": steal_state["text"],
+            "afterText": after_steal_state["text"],
+            "successBannerText": success_banner["text"],
+            "buttonIndex": button_index,
+            "pointName": point_name,
+            "click": step_click,
+            "escapeDelayMs": escape_delay_ms,
+            "shortBackstepMs": short_backstep_ms,
+            "betweenEscapeMs": between_escape_ms,
+            "longBackstepMs": long_backstep_ms,
+            "successCheckIntervalMs": success_check_interval_ms,
+        }
+        raise ActionExecutionError(
+            "Fixed miaoqu click did not produce a confirmed steal success before retreat finished",
+            error_code="STEALTH_TARGET_RECOVERED",
+            failed_step=build_failed_step_payload(
+                action,
+                "Blind miaoqu click finished the escape rhythm but did not confirm 妙取成功",
+                failed_input,
+            ),
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Clicked the fixed gold miaoqu button, waited 1.2s, then escaped with two S backsteps",
+        "input": {
+            "mode": "click_fixed_steal_button_and_escape",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "beforeText": steal_state["text"],
+            "afterText": after_steal_state["text"],
+            "successBannerText": success_banner["text"],
+            "buttonIndex": button_index,
+            "pointName": point_name,
+            "click": step_click,
+            "escapeDelayMs": escape_delay_ms,
+            "shortBackstepMs": short_backstep_ms,
+            "betweenEscapeMs": between_escape_ms,
+            "longBackstepMs": long_backstep_ms,
+            "successCheckIntervalMs": success_check_interval_ms,
         },
     }
 
@@ -4817,7 +4961,8 @@ def run_stealth_trigger_miaoqu(hwnd: int, action: dict[str, Any]) -> dict[str, A
     title = str(action.get("title") or "stealth_trigger_miaoqu")
     trigger_timeout_ms = int(action.get("triggerTimeoutMs") or 5000)
     trigger_settle_ms = int(action.get("triggerSettleMs") or 40)
-    pydirectinput.press("3")
+    trigger_key = str(action.get("triggerKey") or "3").strip().lower()
+    pydirectinput.press(trigger_key)
     INPUT_GUARD.refresh_baseline()
     INPUT_GUARD.guarded_sleep(trigger_settle_ms, title)
 
@@ -4836,6 +4981,7 @@ def run_stealth_trigger_miaoqu(hwnd: int, action: dict[str, Any]) -> dict[str, A
                 "Target recovered before the steal panel opened",
                 {
                     "mode": "stealth_trigger_miaoqu",
+                    "triggerKey": trigger_key,
                     "triggerTimeoutMs": trigger_timeout_ms,
                     "text": steal_state["text"],
                 },
@@ -4846,10 +4992,11 @@ def run_stealth_trigger_miaoqu(hwnd: int, action: dict[str, Any]) -> dict[str, A
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Opened miaoqu panel after pressing 3 once",
+        "detail": f"Opened miaoqu panel after pressing {trigger_key} once",
         "input": {
             "mode": "stealth_trigger_miaoqu",
             "text": steal_state["text"],
+            "triggerKey": trigger_key,
             "triggerTimeoutMs": trigger_timeout_ms,
         },
     }
@@ -4968,6 +5115,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "stealth_knock_loot_flow":
         return run_stealth_knock_loot_flow(hwnd, action)
+
+    if action_type == "click_fixed_steal_button_and_escape":
+        return run_click_fixed_steal_button_and_escape(hwnd, action)
 
     if action_type == "click_named_point":
         point_name = str(action.get("pointName") or "").strip()

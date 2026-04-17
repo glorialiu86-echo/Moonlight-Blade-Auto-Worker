@@ -22,13 +22,15 @@
 1. 正常思考，执行 `买货 -> 叫卖`，循环 `3` 轮
 2. 正常思考，执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
 3. 黑化思考，执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
-4. 黑化思考，执行 `潜行 -> 闷棍 -> 偷窃`，循环 `1` 次
+4. 黑化思考，执行 `潜行 -> 闷棍 -> 扛走 -> 搜刮`，循环 `3` 次
+5. 黑化思考，执行 `潜行 -> 妙取 -> 脱离 -> 退出潜行`，循环 `5` 次
 
 说明：
 
 - 第三段与第二段的动作链保持一致，变化的是思考文案与聊天语气
 - 第二段和第三段的社交链现在固定为同一目标 owner：首次拿人继续扫圈，聊天门槛暴露后才换人，`Tab` 只负责换到新的“可查看”目标
-- 第四段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_trigger_miaoqu -> click_steal_button`
+- 第四段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_select_item_once/loot_put_in_once -> loot_submit_once`
+- 第五段是独立妙取链，固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> acquire_npc_target(只要查看按钮) -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
 - 不允许前端展示“当前阶段 / 当前轮次 / 倒计时 / 固定剧本编号”
 - 前端只允许看到人格化思考、执行结果、暂停和完成状态
 
@@ -45,3 +47,5 @@
 - 潜行恢复默认按失败码收敛：
   - `STEALTH_ENTRY_BLOCKED` 会在 action 内原地重试 `5` 次后停下
   - `STEALTH_ALERTED` / `STEALTH_TARGET_RECOVERED` 会先 `hold S >= 3000ms`，再在固定剧本内有限次重开
+- `妙取` 已从固定剧本第四段拆出，不再跟在闷棍后面硬接
+- 独立妙取链不做 OCR 选 `1.0 秒`；拉起面板后直接盲点固定金色按钮，并在 `1.2s` 后执行一次短按 `S` 加一次长按 `S`

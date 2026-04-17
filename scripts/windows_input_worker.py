@@ -1568,13 +1568,69 @@ def scan_nearby_npc_targets(hwnd: int, title: str) -> dict[str, Any]:
         "movingView": None,
     }
     return {
-        "source": "nearby_scan",
-        "matched": False,
-        "attempts": scan_attempts,
-        "stage": last_attempt["stage"],
-        "stageTexts": {},
-        "targetText": last_attempt["targetText"],
-        "movingView": last_attempt["movingView"],
+            "source": "nearby_scan",
+            "matched": False,
+            "attempts": scan_attempts,
+            "stage": last_attempt["stage"],
+            "stageTexts": {},
+            "targetText": last_attempt["targetText"],
+            "movingView": last_attempt["movingView"],
+        }
+
+
+def open_view_for_selected_npc(
+    hwnd: int,
+    title: str,
+    target_text: str,
+    last_npc_click: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    view_attempts: list[dict[str, Any]] = []
+
+    moving_view = find_moving_view_button(hwnd)
+    if not moving_view and target_text:
+        moving_view = find_view_button_near_target(hwnd, target_text)
+    if (
+        not moving_view
+        and last_npc_click
+        and last_npc_click.get("screenX") is not None
+        and last_npc_click.get("screenY") is not None
+    ):
+        moving_view = find_view_button_near_click(
+            hwnd,
+            int(last_npc_click["screenX"]),
+            int(last_npc_click["screenY"]),
+        )
+
+    if not moving_view:
+        return {
+            "opened": False,
+            "stage": detect_npc_interaction_stage(hwnd)["stage"],
+            "viewAttempts": view_attempts,
+        }
+
+    click_screen_point(hwnd, moving_view["screenX"], moving_view["screenY"], "left")
+    view_attempts.append({
+        **moving_view,
+        "source": "selected_npc_view_button",
+    })
+    INPUT_GUARD.guarded_sleep(100, title)
+
+    stage_state = detect_npc_interaction_stage(hwnd)
+    quick_menu_state = detect_bottom_right_menu_stage(hwnd)
+    stage = quick_menu_state["stage"]
+    stage_texts = {
+        **stage_state["texts"],
+        "bottom_right_actions": quick_menu_state["text"],
+    }
+    if stage not in ["npc_action_menu", "small_talk_menu"]:
+        stage = stage_state["stage"]
+        stage_texts = stage_state["texts"]
+
+    return {
+        "opened": stage in ["npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"],
+        "stage": stage,
+        "stageTexts": stage_texts,
+        "viewAttempts": view_attempts,
     }
 
 
@@ -2773,27 +2829,22 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
                 "clickPointAttempts": click_point_attempts,
                 "nearbyScanAttempts": nearbyScanAttempts,
                 "selectionAttempts": selectionAttempts,
-                "viewAttempts": viewAttempts,
-                "targetText": nearby_scan["targetText"],
-            }
+                    "viewAttempts": viewAttempts,
+                    "targetText": nearby_scan["targetText"],
+                }
 
-        moving_view = nearby_scan.get("movingView")
-        if moving_view:
-            click_screen_point(hwnd, moving_view["screenX"], moving_view["screenY"], "left")
-            viewAttempts.append({
-                **moving_view,
-                "source": "nearby_scan_relative_view_button",
-            })
-            INPUT_GUARD.guarded_sleep(100, "ensure_npc_action_menu")
-            quick_menu_state = detect_bottom_right_menu_stage(hwnd)
-            stage_history.append(quick_menu_state["stage"])
-            if quick_menu_state["stage"] in ["npc_action_menu", "small_talk_menu"]:
+        if nearby_scan["stage"] == "npc_selected" or has_selected_target({"text": nearby_scan["targetText"]}):
+            open_view_result = open_view_for_selected_npc(
+                hwnd,
+                "ensure_npc_action_menu",
+                nearby_scan["targetText"],
+            )
+            viewAttempts.extend(open_view_result["viewAttempts"])
+            stage_history.append(open_view_result["stage"])
+            if open_view_result["opened"]:
                 return {
-                    "stage": quick_menu_state["stage"],
-                    "stageTexts": {
-                        **nearby_scan["stageTexts"],
-                        "bottom_right_actions": quick_menu_state["text"],
-                    },
+                    "stage": open_view_result["stage"],
+                    "stageTexts": open_view_result["stageTexts"],
                     "stageHistory": stage_history,
                     "clickAttempts": len(nearbyScanAttempts),
                     "moveAttempts": move_attempts,
@@ -2829,36 +2880,28 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
             }
 
         if last_stage == "npc_selected" or has_selected_target(target_info):
-            moving_view = None
-            if last_npc_click and names_match(last_npc_click.get("targetName", ""), target_info["text"]):
-                moving_view = find_view_button_near_click(
-                    hwnd,
-                    int(last_npc_click["screenX"]),
-                    int(last_npc_click["screenY"]),
-                )
-            if moving_view:
-                click_screen_point(hwnd, moving_view["screenX"], moving_view["screenY"], "left")
-                viewAttempts.append(moving_view)
-                INPUT_GUARD.guarded_sleep(80, "ensure_npc_action_menu")
-                quick_menu_state = detect_bottom_right_menu_stage(hwnd)
-                stage_history.append(quick_menu_state["stage"])
-                if quick_menu_state["stage"] in ["npc_action_menu", "small_talk_menu"]:
-                    return {
-                        "stage": quick_menu_state["stage"],
-                        "stageTexts": {
-                            **stage_state["texts"],
-                            "bottom_right_actions": quick_menu_state["text"],
-                        },
-                        "stageHistory": stage_history,
-                        "clickAttempts": click_attempts + 1,
-                        "moveAttempts": move_attempts,
-                        "cameraDrags": camera_drags,
-                        "clickPointAttempts": click_point_attempts,
-                        "nearbyScanAttempts": nearbyScanAttempts,
-                        "selectionAttempts": selectionAttempts,
-                        "viewAttempts": viewAttempts,
-                        "targetText": target_info["text"],
-                    }
+            open_view_result = open_view_for_selected_npc(
+                hwnd,
+                "ensure_npc_action_menu",
+                target_info["text"],
+                last_npc_click,
+            )
+            viewAttempts.extend(open_view_result["viewAttempts"])
+            stage_history.append(open_view_result["stage"])
+            if open_view_result["opened"]:
+                return {
+                    "stage": open_view_result["stage"],
+                    "stageTexts": open_view_result["stageTexts"],
+                    "stageHistory": stage_history,
+                    "clickAttempts": click_attempts + len(open_view_result["viewAttempts"]),
+                    "moveAttempts": move_attempts,
+                    "cameraDrags": camera_drags,
+                    "clickPointAttempts": click_point_attempts,
+                    "nearbyScanAttempts": nearbyScanAttempts,
+                    "selectionAttempts": selectionAttempts,
+                    "viewAttempts": viewAttempts,
+                    "targetText": target_info["text"],
+                }
             click_attempts += 1
             INPUT_GUARD.guarded_sleep(120, "ensure_npc_action_menu")
             stage_state = detect_npc_interaction_stage(hwnd)

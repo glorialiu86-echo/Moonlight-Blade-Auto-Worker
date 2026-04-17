@@ -277,6 +277,28 @@ function createStealthMiaoquActions(baseAction) {
     },
     {
       id: `${baseAction.id}-primitive-10`,
+      title: "Carry Target",
+      type: "stealth_carry_target",
+      sourceType: baseAction.sourceType,
+      carrySettleMs: 120
+    },
+    {
+      id: `${baseAction.id}-primitive-11`,
+      title: "Backstep With Target",
+      type: "stealth_backstep_target",
+      sourceType: baseAction.sourceType,
+      backstepMs: 2000,
+      moveSettleMs: 40
+    },
+    {
+      id: `${baseAction.id}-primitive-12`,
+      title: "Drop Carried Target",
+      type: "stealth_drop_target",
+      sourceType: baseAction.sourceType,
+      dropSettleMs: 80
+    },
+    {
+      id: `${baseAction.id}-primitive-13`,
       title: "Trigger Miaoqu",
       type: "stealth_trigger_miaoqu",
       sourceType: baseAction.sourceType,
@@ -284,7 +306,7 @@ function createStealthMiaoquActions(baseAction) {
       triggerSettleMs: 40
     },
     {
-      id: `${baseAction.id}-primitive-11`,
+      id: `${baseAction.id}-primitive-14`,
       title: "Click Fixed Miaoqu Button",
       type: "click_steal_button",
       sourceType: baseAction.sourceType,
@@ -293,7 +315,7 @@ function createStealthMiaoquActions(baseAction) {
       postDelayMs: 1500
     },
     {
-      id: `${baseAction.id}-primitive-12`,
+      id: `${baseAction.id}-primitive-15`,
       title: "Escape Backward",
       type: "stealth_escape_backward",
       sourceType: baseAction.sourceType,

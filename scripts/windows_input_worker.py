@@ -210,11 +210,11 @@ NPC_CAPTURE_SCAN_POINTS = [
 
 ACTION_POINTS = {
     "view": (0.32, 0.57),
-    "talk": (1870 / 2537, 1252 / 1384),
-    "small_talk": (1677 / 2537, 1081 / 1384),
+    "talk": (1562 / 2048, 1042 / 1152),
+    "small_talk": (1446 / 2048, 904 / 1152),
     "confirm_small_talk": (1481 / 2537, 1018 / 1384),
-    "trade": (2139 / 2537, 1139 / 1384),
-    "gift": (2404 / 2537, 1141 / 1384),
+    "trade": (1735 / 2048, 1033 / 1152),
+    "gift": (1910 / 2048, 1031 / 1152),
     "target_close": (1115 / 2537, 691 / 1384),
     "close_panel": (2494 / 2537, 48 / 1384),
     "trade_left_item_tab": (0.037, 0.394),
@@ -241,9 +241,9 @@ ACTION_POINTS = {
     "steal_button_3": (1916 / 2048, 893 / 1360),
     "steal_button_4": (1916 / 2048, 1085 / 1360),
     "exit_stealth": (407 / 2048, 810 / 1152),
-    "gift_first_slot": (1721 / 2537, 580 / 1384),
+    "gift_first_slot": (1423 / 2048, 445 / 1152),
     "gift_plus": (0.82, 0.92),
-    "gift_submit": (2289 / 2537, 1216 / 1384),
+    "gift_submit": (1813 / 2048, 968 / 1152),
     "small_talk_confirm_dialog": (0.581, 0.746),
     "chat_input": (652 / 2537, 1294 / 1384),
     # Send is fixed UI, but it only becomes actionable after valid text input.

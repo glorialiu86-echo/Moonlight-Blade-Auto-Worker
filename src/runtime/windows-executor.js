@@ -254,12 +254,11 @@ function createStealthSetupActions(baseAction) {
     },
     {
       id: `${baseAction.id}-primitive-8`,
-      title: "Select Front Target",
-      type: "stealth_select_target",
+      title: "Select Front Target By Tab",
+      type: "stealth_select_target_tab",
       sourceType: baseAction.sourceType,
       selectionTimeoutMs: 2200,
       selectionSettleMs: 120,
-      frontRoi: [0.36, 0.18, 0.64, 0.42]
     }
   ];
 }

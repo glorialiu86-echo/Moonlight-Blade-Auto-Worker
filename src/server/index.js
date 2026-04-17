@@ -384,6 +384,7 @@ function armAutomationScript(instruction) {
     startsAt: startsAt.toISOString(),
     startedAt: null,
     finishedAt: null,
+    ignoreExternalInputUntilStart: true,
     stageIndex: 0,
     completedRoundsInStage: 0,
     totalTurns: 0,
@@ -1867,7 +1868,8 @@ async function maybeRunAutonomousTurn() {
 
       updateAutomation({
         status: "running",
-        startedAt: new Date().toISOString()
+        startedAt: new Date().toISOString(),
+        ignoreExternalInputUntilStart: false
       });
       appendMessage({
         role: "assistant",
@@ -1913,6 +1915,7 @@ async function maybeRunAutonomousTurn() {
       perception: latestState.latestPerception,
       interactionMode: latestState.interactionMode || "act",
       externalInputGuardEnabled: latestState.externalInputGuardEnabled !== false
+        && latestState.automation?.ignoreExternalInputUntilStart !== true
     });
 
     const progressedState = getState();
@@ -2278,14 +2281,15 @@ async function handleChat(request, response) {
     appendLog("info", "固定剧本自动化已布置", {
       instruction,
       startsAt: getState().automation.startsAt,
-      triggerWord: "加油"
+      triggerWord: "加油",
+      ignoreExternalInputUntilStart: true
     });
     appendMessage({
       role: "assistant",
       text: "好的！收到！等我想想怎么做…",
       thinkingChain: [],
-      recoveryLine: "你回来一碰鼠标或键盘，我就立刻停手。",
-      perceptionSummary: "固定剧本已经布置完成，当前只是在等待启动。",
+      recoveryLine: "这五分钟里就算碰到鼠标键盘，我也先继续等；真开跑后你一接管我就停。",
+      perceptionSummary: "固定剧本已经布置完成，当前只是在等待启动；等待期内不会因鼠标或键盘误碰而取消。",
       sceneLabel: getState().latestPerception?.sceneLabel || "等待启动",
       riskLevel: "low",
       actions: []

@@ -25,6 +25,7 @@ function createInitialAutomationState() {
     startsAt: null,
     startedAt: null,
     finishedAt: null,
+    ignoreExternalInputUntilStart: false,
     stageIndex: 0,
     completedRoundsInStage: 0,
     totalTurns: 0,

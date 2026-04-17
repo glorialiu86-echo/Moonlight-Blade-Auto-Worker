@@ -14,9 +14,11 @@ const state = {
     pcmChunks: [],
     inputSampleRate: 48000,
     silenceTimerId: null,
+    healthTimerId: null,
     speechDetected: false,
     speechStartedAt: 0,
     lastVoiceAt: 0,
+    lastProcessAt: 0,
     activityNotified: false,
     sending: false
   }
@@ -25,6 +27,7 @@ const state = {
 const VOICE_ACTIVITY_RMS_THRESHOLD = 0.009;
 const VOICE_AUTO_SEND_SILENCE_MS = 2000;
 const VOICE_MIN_SPEECH_MS = 450;
+const VOICE_CAPTURE_STALL_MS = 1800;
 
 const elements = {
   composerForm: document.querySelector("#composerForm"),
@@ -391,16 +394,28 @@ function clearVoiceSilenceTimer() {
   state.voice.silenceTimerId = null;
 }
 
+function clearVoiceHealthTimer() {
+  if (!state.voice.healthTimerId) {
+    return;
+  }
+
+  window.clearInterval(state.voice.healthTimerId);
+  state.voice.healthTimerId = null;
+}
+
 function resetVoiceState() {
   state.voice.pcmChunks = [];
   state.voice.speechDetected = false;
   state.voice.speechStartedAt = 0;
   state.voice.lastVoiceAt = 0;
+  state.voice.lastProcessAt = 0;
   state.voice.activityNotified = false;
 }
 
 async function releaseVoiceCapture() {
   const { sourceNode, processorNode, mediaStream, audioContext } = state.voice;
+
+  clearVoiceHealthTimer();
 
   if (sourceNode) {
     sourceNode.disconnect();
@@ -423,6 +438,38 @@ async function releaseVoiceCapture() {
   state.voice.audioContext = null;
   state.voice.sourceNode = null;
   state.voice.processorNode = null;
+}
+
+async function handleVoiceCaptureInterrupted(message) {
+  if (!state.voice.recording) {
+    return;
+  }
+
+  clearVoiceSilenceTimer();
+  state.voice.recording = false;
+  state.voice.sending = false;
+  state.voice.transcribing = false;
+  resetVoiceState();
+  await releaseVoiceCapture();
+  updateVoiceStatus(message);
+  syncUiState();
+}
+
+function startVoiceHealthTimer() {
+  clearVoiceHealthTimer();
+  state.voice.healthTimerId = window.setInterval(() => {
+    if (!state.voice.recording || state.voice.sending || state.voice.transcribing) {
+      return;
+    }
+
+    if (!state.voice.lastProcessAt) {
+      return;
+    }
+
+    if (Date.now() - state.voice.lastProcessAt >= VOICE_CAPTURE_STALL_MS) {
+      handleVoiceCaptureInterrupted("语音监听已中断，请重新开启").catch(() => {});
+    }
+  }, 300);
 }
 
 async function transcribeRecordedVoice(chunks, inputSampleRate) {
@@ -560,12 +607,42 @@ async function startVoiceRecording() {
     state.voice.inputSampleRate = audioContext.sampleRate;
     state.voice.recording = true;
     resetVoiceState();
+    state.voice.lastProcessAt = Date.now();
+
+    const [audioTrack] = mediaStream.getAudioTracks();
+    if (audioTrack) {
+      audioTrack.onended = () => {
+        handleVoiceCaptureInterrupted("语音监听已结束，请重新开启").catch(() => {});
+      };
+      audioTrack.onmute = () => {
+        if (!state.voice.recording) {
+          return;
+        }
+
+        window.setTimeout(() => {
+          if (state.voice.recording && audioTrack.muted) {
+            handleVoiceCaptureInterrupted("语音输入已被系统挂起，请重新开启").catch(() => {});
+          }
+        }, VOICE_CAPTURE_STALL_MS);
+      };
+    }
+
+    audioContext.onstatechange = () => {
+      if (!state.voice.recording) {
+        return;
+      }
+
+      if (audioContext.state !== "running") {
+        handleVoiceCaptureInterrupted("语音监听已暂停，请重新开启").catch(() => {});
+      }
+    };
 
     processorNode.onaudioprocess = (event) => {
       if (!state.voice.recording) {
         return;
       }
 
+      state.voice.lastProcessAt = Date.now();
       const samples = new Float32Array(event.inputBuffer.getChannelData(0));
       const rms = computeRms(samples);
       if (rms >= VOICE_ACTIVITY_RMS_THRESHOLD) {
@@ -600,6 +677,7 @@ async function startVoiceRecording() {
       }
     }, 120);
 
+    startVoiceHealthTimer();
     updateVoiceStatus("正在听你说话，静音 2 秒会自动发送。");
     syncUiState();
   } catch (error) {

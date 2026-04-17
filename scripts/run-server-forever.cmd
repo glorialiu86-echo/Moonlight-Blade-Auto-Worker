@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "ROOT=C:\Users\ZMT-User\Downloads\天刀控制系统"
+set "ROOT=%~dp0.."
 set "LOG_DIR=%ROOT%\tmp\service-logs"
 set "NODE_EXE=C:\Program Files\nodejs\node.exe"
 

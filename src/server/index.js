@@ -1764,7 +1764,7 @@ async function handleChat(request, response) {
   });
   appendMessage({
     role: "assistant",
-    text: "没问题，我先把这套安排含住，等你走开以后再自己往下做。",
+    text: "好的！收到！等我想想怎么做…",
     thinkingChain: [],
     recoveryLine: "你回来一碰鼠标或键盘，我就立刻停手。",
     perceptionSummary: "固定剧本已经布置完成，当前只是在等待启动。",

@@ -185,7 +185,7 @@ function buildStatusSummary(runtimeState) {
   const automationStatus = runtimeState.automation?.status || "idle";
 
   if (automationStatus === "armed") {
-    return "我已经接住这套安排了，先等籽岷走开，再自己往下做。";
+    return "好的，收到。等我先想想怎么做。";
   }
 
   if (automationStatus === "paused") {
@@ -284,7 +284,7 @@ function renderRunState(runtimeState) {
           : "我在待命";
 
   elements.runStatusHint.textContent = automationStatus === "armed"
-    ? "我已经把整套安排收住了，等籽岷走开后再自己往下做。"
+    ? "我已经收到这套安排了，现在先想想怎么做。"
     : automationStatus === "completed"
       ? "这套安排已经走完，我现在不再继续乱动。"
       : running

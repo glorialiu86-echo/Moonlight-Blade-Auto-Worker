@@ -35,6 +35,7 @@
 - `retarget_social_target`
 - `travel_to_coordinate`
 - `enter_stealth_with_retry`
+- `recover_front_target_visibility`
 
 ## 当前状态枚举
 
@@ -72,6 +73,22 @@
   - `nearbyScanAttempts`
   - `selectionAttempts`
   - `lastClick`
+
+### `recover_front_target_visibility`
+
+- 前置状态：普通场景、准备重新选人，当前既没有 `查看` 也没有稳定选中目标
+- 行为：先检查前方名字带是否还能看到可用名字；若已经能看到，则不做额外动作；若完全被树木或建筑遮挡，则先滚轮放大，再按预算做小幅左右转
+- 成功状态：
+  - 已出现 `查看`
+  - 或已经稳定选中目标
+  - 或前方名字带重新出现可用名字
+- 失败：多轮 `滚轮放大 + 小幅转向` 后仍然看不到前方名字，抛出 `NPC_TARGET_OCCLUDED`
+- 关键输出：
+  - `stage`
+  - `targetText`
+  - `frontNameCandidates`
+  - `retryLimit`
+  - `attempts`
 
 ### `open_npc_action_menu`
 

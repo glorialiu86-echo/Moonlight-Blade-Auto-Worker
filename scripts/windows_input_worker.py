@@ -983,6 +983,35 @@ def pulse_turn_key(hwnd: int, key: str, duration_ms: int, action_title: str) -> 
     }
 
 
+def scroll_mouse_wheel(
+    hwnd: int,
+    notches: int,
+    action_title: str,
+    anchor_ratio: tuple[float, float] = (0.58, 0.42),
+    settle_ms: int = 60,
+) -> dict[str, Any]:
+    bounds = focus_window(hwnd)
+    anchor_x = round(bounds["left"] + bounds["width"] * anchor_ratio[0])
+    anchor_y = round(bounds["top"] + bounds["height"] * anchor_ratio[1])
+    win32api.SetCursorPos((anchor_x, anchor_y))
+    INPUT_GUARD.refresh_baseline()
+
+    direction = 1 if notches >= 0 else -1
+    total_notches = max(0, abs(int(notches)))
+    for _ in range(total_notches):
+        win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0, win32con.WHEEL_DELTA * direction, 0)
+        INPUT_GUARD.refresh_baseline()
+        INPUT_GUARD.guarded_sleep(settle_ms, action_title)
+
+    return {
+        "anchorX": anchor_x,
+        "anchorY": anchor_y,
+        "notches": total_notches,
+        "direction": "forward" if direction > 0 else "backward",
+        "settleMs": settle_ms,
+    }
+
+
 def normalize_name_candidate(text: str) -> str:
     normalized = re.sub(r"\s+", "", str(text or ""))
     normalized = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9<>团队]", "", normalized)
@@ -1049,6 +1078,33 @@ def find_stealth_front_target(hwnd: int, roi: tuple[float, float, float, float])
             "y2": roi[3],
         },
     }
+
+
+def list_front_visible_name_candidates(hwnd: int, roi: tuple[float, float, float, float]) -> list[dict[str, Any]]:
+    bounds = get_window_bounds(hwnd)
+    image = capture_window_region(hwnd, roi)
+    items = ocr_items(image)
+    items.extend(ocr_items_upscaled(image, 2.0))
+
+    candidates: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for item in items:
+        normalized = normalize_name_candidate(item["text"])
+        if not looks_like_stealth_target_name(normalized) or normalized in seen_names:
+            continue
+        seen_names.add(normalized)
+        candidates.append(
+            {
+                "text": normalized,
+                "score": round(float(item["score"]), 4),
+                "screenX": round(bounds["left"] + bounds["width"] * roi[0] + item["centerX"]),
+                "screenY": round(bounds["top"] + bounds["height"] * roi[1] + item["centerY"]),
+            }
+        )
+        if len(candidates) >= 6:
+            break
+
+    return candidates
 
 
 def detect_map_screen(hwnd: int) -> dict[str, Any]:
@@ -3313,6 +3369,148 @@ def npc_stage_has_selectable_target(stage_state: dict[str, Any], target_info: di
     return contains_any_keyword(stage_state["texts"].get("look_button", ""), ["查看"]) or has_selected_target(target_info)
 
 
+def collect_front_target_visibility(hwnd: int, front_roi: tuple[float, float, float, float]) -> dict[str, Any]:
+    stage_state = detect_npc_interaction_stage(hwnd)
+    target_info = detect_target_threshold(hwnd)
+    exit_state = detect_exit_stealth_button(hwnd)
+    front_candidates = list_front_visible_name_candidates(hwnd, front_roi)
+    selectable_target = npc_stage_has_selectable_target(stage_state, target_info)
+    return {
+        "stage": stage_state["stage"],
+        "stageTexts": stage_state["texts"],
+        "targetText": str(target_info.get("text") or "").strip(),
+        "hasSelectableTarget": selectable_target,
+        "frontNameCandidates": front_candidates,
+        "frontNameVisible": len(front_candidates) > 0,
+        "isInStealth": bool(exit_state.get("visible")),
+        "frontRoi": {
+            "x1": front_roi[0],
+            "y1": front_roi[1],
+            "x2": front_roi[2],
+            "y2": front_roi[3],
+        },
+    }
+
+
+def run_recover_front_target_visibility(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "recover_front_target_visibility")
+    retry_limit = max(1, int(action.get("retryLimit") or 3))
+    wheel_notches = max(1, int(action.get("wheelNotches") or 6))
+    wheel_settle_ms = max(40, int(action.get("wheelSettleMs") or 70))
+    post_wheel_settle_ms = max(60, int(action.get("postWheelSettleMs") or 140))
+    turn_pulse_ms = max(80, int(action.get("turnPulseMs") or 180))
+    post_turn_settle_ms = max(60, int(action.get("postTurnSettleMs") or 120))
+    turn_pattern = action.get("turnPattern") or ["left", "right", "left"]
+    front_roi_value = action.get("frontRoi") or STEALTH_ROIS["front_name_band"]
+    front_roi = (
+        float(front_roi_value[0]),
+        float(front_roi_value[1]),
+        float(front_roi_value[2]),
+        float(front_roi_value[3]),
+    )
+
+    focus_window(hwnd)
+    initial_visibility = collect_front_target_visibility(hwnd, front_roi)
+    if initial_visibility["hasSelectableTarget"] or initial_visibility["frontNameVisible"] or initial_visibility["isInStealth"]:
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": "Front target visibility already stable enough for targeting",
+            "input": {
+                "mode": "recover_front_target_visibility",
+                **initial_visibility,
+                "retryLimit": retry_limit,
+                "attempts": [],
+            },
+        }
+
+    attempts: list[dict[str, Any]] = []
+    for attempt_index in range(retry_limit):
+        INPUT_GUARD.check_or_raise(title)
+        before_visibility = collect_front_target_visibility(hwnd, front_roi)
+        if before_visibility["hasSelectableTarget"] or before_visibility["frontNameVisible"]:
+            return {
+                "id": action_id,
+                "title": title,
+                "status": "performed",
+                "detail": "Front target visibility recovered before extra adjustment",
+                "input": {
+                    "mode": "recover_front_target_visibility",
+                    **before_visibility,
+                    "retryLimit": retry_limit,
+                    "attempts": attempts,
+                },
+            }
+
+        scroll_state = scroll_mouse_wheel(hwnd, wheel_notches, title, settle_ms=wheel_settle_ms)
+        INPUT_GUARD.guarded_sleep(post_wheel_settle_ms, title)
+        after_zoom_visibility = collect_front_target_visibility(hwnd, front_roi)
+        attempt_entry = {
+            "attempt": attempt_index + 1,
+            "before": before_visibility,
+            "zoom": scroll_state,
+            "afterZoom": after_zoom_visibility,
+            "turn": None,
+            "afterTurn": None,
+        }
+        attempts.append(attempt_entry)
+        if after_zoom_visibility["hasSelectableTarget"] or after_zoom_visibility["frontNameVisible"]:
+            return {
+                "id": action_id,
+                "title": title,
+                "status": "performed",
+                "detail": "Recovered front target visibility after zooming in",
+                "input": {
+                    "mode": "recover_front_target_visibility",
+                    **after_zoom_visibility,
+                    "retryLimit": retry_limit,
+                    "attempts": attempts,
+                },
+            }
+
+        turn_key = str(turn_pattern[attempt_index % len(turn_pattern)] or "left").strip().lower()
+        if turn_key not in ["left", "right"]:
+            turn_key = "left"
+        turn_state = pulse_turn_key(hwnd, turn_key, turn_pulse_ms, title)
+        INPUT_GUARD.guarded_sleep(post_turn_settle_ms, title)
+        after_turn_visibility = collect_front_target_visibility(hwnd, front_roi)
+        attempt_entry["turn"] = turn_state
+        attempt_entry["afterTurn"] = after_turn_visibility
+        if after_turn_visibility["hasSelectableTarget"] or after_turn_visibility["frontNameVisible"]:
+            return {
+                "id": action_id,
+                "title": title,
+                "status": "performed",
+                "detail": f"Recovered front target visibility after turning {turn_key}",
+                "input": {
+                    "mode": "recover_front_target_visibility",
+                    **after_turn_visibility,
+                    "retryLimit": retry_limit,
+                    "attempts": attempts,
+                },
+            }
+
+    failed_visibility = collect_front_target_visibility(hwnd, front_roi)
+    failed_input = {
+        "mode": "recover_front_target_visibility",
+        **failed_visibility,
+        "retryCount": retry_limit,
+        "retryLimit": retry_limit,
+        "attempts": attempts,
+    }
+    raise ActionExecutionError(
+        "Front target visibility stayed occluded before reacquiring an NPC target",
+        error_code="NPC_TARGET_OCCLUDED",
+        failed_step=build_failed_step_payload(
+            action,
+            "Front target visibility stayed occluded after zoom and turn retries",
+            failed_input,
+        ),
+    )
+
+
 def extract_chat_threshold_gate(stage_state: dict[str, Any]) -> dict[str, Any] | None:
     combined_text = " ".join(
         [
@@ -5049,6 +5247,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "retarget_social_target":
         return run_retarget_social_target(hwnd, action)
+
+    if action_type == "recover_front_target_visibility":
+        return run_recover_front_target_visibility(hwnd, action)
 
     if action_type == "open_npc_action_menu":
         return run_open_npc_action_menu(hwnd, action)

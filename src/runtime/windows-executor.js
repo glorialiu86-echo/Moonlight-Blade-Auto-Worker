@@ -480,22 +480,31 @@ export function createFixedDarkMiaoquStageActions() {
       confirmPointName: "teleport_confirm"
     }),
     createPressKeyAction("fixed-dark-miaoqu-2", "下马准备妙取", "1", { postDelayMs: 800 }),
-    createWorkerAction("fixed-dark-miaoqu-3", "进入潜行并等待时机", "enter_stealth_with_retry", {
+    createWorkerAction("fixed-dark-miaoqu-3", "先把前方目标从遮挡里找出来", "recover_front_target_visibility", {
+      retryLimit: 3,
+      wheelNotches: 6,
+      wheelSettleMs: 70,
+      postWheelSettleMs: 140,
+      turnPulseMs: 180,
+      postTurnSettleMs: 120,
+      turnPattern: ["left", "right", "left"]
+    }),
+    createWorkerAction("fixed-dark-miaoqu-4", "进入潜行并等待时机", "enter_stealth_with_retry", {
       retryLimit: 5,
       settleMs: 260,
       waitBetweenMs: 600
     }),
-    createWorkerAction("fixed-dark-miaoqu-4", "拉起当前目标的查看按钮", "acquire_npc_target", {
+    createWorkerAction("fixed-dark-miaoqu-5", "拉起当前目标的查看按钮", "acquire_npc_target", {
       timeoutMs: 5000,
       movePulseMs: 160,
       scanIntervalMs: 180
     }),
-    createWorkerAction("fixed-dark-miaoqu-5", "按 4 拉起妙取面板", "stealth_trigger_miaoqu", {
+    createWorkerAction("fixed-dark-miaoqu-6", "按 4 拉起妙取面板", "stealth_trigger_miaoqu", {
       triggerKey: "4",
       triggerTimeoutMs: 5000,
       triggerSettleMs: 60
     }),
-    createWorkerAction("fixed-dark-miaoqu-6", "盲点固定妙取按钮并在 1.2 秒后撤离", "click_fixed_steal_button_and_escape", {
+    createWorkerAction("fixed-dark-miaoqu-7", "盲点固定妙取按钮并在 1.2 秒后撤离", "click_fixed_steal_button_and_escape", {
       buttonIndex: 1,
       escapeDelayMs: 1200,
       shortBackstepMs: 120,
@@ -503,7 +512,7 @@ export function createFixedDarkMiaoquStageActions() {
       longBackstepMs: 3000,
       moveSettleMs: 80
     }),
-    createWorkerAction("fixed-dark-miaoqu-7", "退出潜行回到普通场景", "exit_stealth", {
+    createWorkerAction("fixed-dark-miaoqu-8", "退出潜行回到普通场景", "exit_stealth", {
       settleMs: 450
     })
   ];

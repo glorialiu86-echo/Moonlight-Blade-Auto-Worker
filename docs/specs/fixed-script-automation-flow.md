@@ -30,7 +30,7 @@
 - 第三段与第二段的动作链保持一致，变化的是思考文案与聊天语气
 - 第二段和第三段的社交链现在固定为同一目标 owner：首次拿人继续扫圈，聊天门槛暴露后才换人，`Tab` 只负责换到新的“可查看”目标
 - 第四段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_select_item_once/loot_put_in_once -> loot_submit_once`
-- 第五段是独立妙取链，固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> acquire_npc_target(只要查看按钮) -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
+- 第五段是独立妙取链，固定执行 `travel_to_coordinate -> recover_front_target_visibility -> enter_stealth_with_retry -> acquire_npc_target(只要查看按钮) -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
 - 不允许前端展示“当前阶段 / 当前轮次 / 倒计时 / 固定剧本编号”
 - 前端只允许看到人格化思考、执行结果、暂停和完成状态
 
@@ -49,3 +49,4 @@
   - `STEALTH_ALERTED` / `STEALTH_TARGET_RECOVERED` 会先 `hold S >= 3000ms`，再在固定剧本内有限次重开
 - `妙取` 已从固定剧本第四段拆出，不再跟在闷棍后面硬接
 - 独立妙取链不做 OCR 选 `1.0 秒`；拉起面板后直接盲点固定金色按钮，并在 `1.2s` 后执行一次短按 `S` 加一次长按 `S`
+- 独立妙取链在进入潜行前新增遮挡恢复 owner：若普通场景下既没有 `查看` 也看不到前方名字，就先滚轮放大，再小幅左右转；仍未脱离遮挡时只进入失败恢复态，让三角按钮变红，不额外吐失败台词

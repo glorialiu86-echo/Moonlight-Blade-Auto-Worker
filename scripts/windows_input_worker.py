@@ -188,6 +188,7 @@ STEALTH_ROIS = {
     "front_name_band": (0.36, 0.18, 0.64, 0.42),
     "exit_button": (0.86, 0.44, 0.99, 0.58),
     "result_banner": (0.26, 0.22, 0.74, 0.56),
+    "steal_button_stack": (0.82, 0.28, 0.99, 0.94),
 }
 
 MAP_STAGE_ROIS = {
@@ -1187,6 +1188,82 @@ def detect_steal_screen(hwnd: int) -> dict[str, Any]:
     return {
         "visible": count_keywords(panel_text, STEAL_KEYWORDS) >= 2,
         "text": panel_text,
+    }
+
+
+def detect_steal_button_stack(hwnd: int) -> dict[str, Any]:
+    image = capture_window_region(hwnd, STEALTH_ROIS["steal_button_stack"])
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    gold_mask = cv2.inRange(
+        hsv,
+        np.array([10, 70, 135], dtype=np.uint8),
+        np.array([40, 255, 255], dtype=np.uint8),
+    )
+    gold_mask = cv2.morphologyEx(gold_mask, cv2.MORPH_CLOSE, np.ones((5, 5), dtype=np.uint8))
+    gold_mask = cv2.morphologyEx(gold_mask, cv2.MORPH_OPEN, np.ones((3, 3), dtype=np.uint8))
+    contours, _hierarchy = cv2.findContours(gold_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    height, width = image.shape[:2]
+    min_width = max(42, int(width * 0.34))
+    max_width = max(min_width, int(width * 0.98))
+    min_height = max(18, int(height * 0.05))
+    max_height = max(min_height, int(height * 0.22))
+    candidates: list[dict[str, Any]] = []
+
+    for contour in contours:
+        x, y, box_width, box_height = cv2.boundingRect(contour)
+        contour_area = float(cv2.contourArea(contour))
+        fill_ratio = contour_area / float(max(1, box_width * box_height))
+        aspect_ratio = box_width / float(max(1, box_height))
+
+        if box_width < min_width or box_width > max_width:
+            continue
+        if box_height < min_height or box_height > max_height:
+            continue
+        if aspect_ratio < 2.1:
+            continue
+        if fill_ratio < 0.52:
+            continue
+
+        candidates.append(
+            {
+                "minX": int(x),
+                "minY": int(y),
+                "maxX": int(x + box_width),
+                "maxY": int(y + box_height),
+                "width": int(box_width),
+                "height": int(box_height),
+                "area": round(contour_area, 2),
+                "fillRatio": round(fill_ratio, 4),
+            }
+        )
+
+    candidates.sort(key=lambda item: (item["minY"], -item["area"]))
+    gold_ratio = float(np.count_nonzero(gold_mask)) / float(max(1, gold_mask.size))
+    return {
+        "visible": len(candidates) >= 1,
+        "buttonCount": len(candidates),
+        "goldPixelRatio": round(gold_ratio, 5),
+        "candidates": candidates[:4],
+    }
+
+
+def detect_steal_screen_ready(hwnd: int) -> dict[str, Any]:
+    visual_state = detect_steal_button_stack(hwnd)
+    if visual_state["visible"]:
+        return {
+            "visible": True,
+            "text": "",
+            "source": "fixed_gold_buttons",
+            "visual": visual_state,
+        }
+
+    steal_state = detect_steal_screen(hwnd)
+    return {
+        "visible": steal_state["visible"],
+        "text": steal_state["text"],
+        "source": "ocr",
+        "visual": visual_state,
     }
 
 
@@ -4319,13 +4396,17 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
     if point_name not in ACTION_POINTS:
         raise RuntimeError(f"Unsupported steal button index: {button_index}")
 
-    stage_state = detect_npc_interaction_stage(hwnd)
-    if stage_state["stage"] != "steal_screen":
+    ready_state = detect_steal_screen_ready(hwnd)
+    if not ready_state["visible"]:
+        stage_state = detect_npc_interaction_stage(hwnd)
         failed_input = {
             "mode": "click_fixed_steal_button_and_escape",
             **collect_npc_stage_input(hwnd, stage_state),
             "buttonIndex": button_index,
             "pointName": point_name,
+            "panelReadySource": ready_state["source"],
+            "panelReadyText": ready_state["text"],
+            "panelReadyVisual": ready_state["visual"],
         }
         raise ActionExecutionError(
             "Fixed miaoqu escape requires steal_screen",
@@ -4392,6 +4473,8 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
             "betweenEscapeMs": between_escape_ms,
             "longBackstepMs": long_backstep_ms,
             "successCheckIntervalMs": success_check_interval_ms,
+            "panelReadySource": ready_state["source"],
+            "panelReadyVisual": ready_state["visual"],
         }
         raise ActionExecutionError(
             "Fixed miaoqu click did not produce a confirmed steal success before retreat finished",
@@ -4422,6 +4505,8 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
             "betweenEscapeMs": between_escape_ms,
             "longBackstepMs": long_backstep_ms,
             "successCheckIntervalMs": success_check_interval_ms,
+            "panelReadySource": ready_state["source"],
+            "panelReadyVisual": ready_state["visual"],
         },
     }
 
@@ -5159,16 +5244,42 @@ def run_stealth_trigger_miaoqu(hwnd: int, action: dict[str, Any]) -> dict[str, A
     title = str(action.get("title") or "stealth_trigger_miaoqu")
     trigger_timeout_ms = int(action.get("triggerTimeoutMs") or 5000)
     trigger_settle_ms = int(action.get("triggerSettleMs") or 40)
+    ocr_fallback_interval_ms = int(action.get("ocrFallbackIntervalMs") or 280)
     trigger_key = str(action.get("triggerKey") or "3").strip().lower()
     pydirectinput.press(trigger_key)
     INPUT_GUARD.refresh_baseline()
     INPUT_GUARD.guarded_sleep(trigger_settle_ms, title)
 
-    steal_state = detect_steal_screen(hwnd)
+    initial_visual_state = detect_steal_button_stack(hwnd)
+    steal_state = {
+        "visible": initial_visual_state["visible"],
+        "text": "",
+        "source": "fixed_gold_buttons",
+        "visual": initial_visual_state,
+    }
     deadline = time.time() + trigger_timeout_ms / 1000.0
+    last_ocr_probe_at = time.time()
     while time.time() <= deadline and not steal_state["visible"]:
         INPUT_GUARD.guarded_sleep(40, title)
-        steal_state = detect_steal_screen(hwnd)
+        visual_state = detect_steal_button_stack(hwnd)
+        if visual_state["visible"]:
+            steal_state = {
+                "visible": True,
+                "text": "",
+                "source": "fixed_gold_buttons",
+                "visual": visual_state,
+            }
+            break
+        if (time.time() - last_ocr_probe_at) * 1000 >= max(120, ocr_fallback_interval_ms):
+            steal_state = detect_steal_screen_ready(hwnd)
+            last_ocr_probe_at = time.time()
+        else:
+            steal_state = {
+                "visible": False,
+                "text": "",
+                "source": "fixed_gold_buttons",
+                "visual": visual_state,
+            }
 
     if not steal_state["visible"]:
         raise ActionExecutionError(
@@ -5182,6 +5293,8 @@ def run_stealth_trigger_miaoqu(hwnd: int, action: dict[str, Any]) -> dict[str, A
                     "triggerKey": trigger_key,
                     "triggerTimeoutMs": trigger_timeout_ms,
                     "text": steal_state["text"],
+                    "panelReadySource": steal_state["source"],
+                    "panelReadyVisual": steal_state["visual"],
                 },
             ),
         )
@@ -5196,6 +5309,8 @@ def run_stealth_trigger_miaoqu(hwnd: int, action: dict[str, Any]) -> dict[str, A
             "text": steal_state["text"],
             "triggerKey": trigger_key,
             "triggerTimeoutMs": trigger_timeout_ms,
+            "panelReadySource": steal_state["source"],
+            "panelReadyVisual": steal_state["visual"],
         },
     }
 

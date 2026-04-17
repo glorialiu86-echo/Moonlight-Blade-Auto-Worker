@@ -359,6 +359,10 @@ function armAutomationScript(instruction) {
   });
 }
 
+function hasAutomationTrigger(instruction) {
+  return String(instruction || "").includes("加油");
+}
+
 function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -1726,6 +1730,7 @@ async function handleVoiceTranscription(request, response) {
 async function handleChat(request, response) {
   const body = await readRequestBody(request);
   const instruction = String(body.instruction || "").trim();
+  const automationTriggered = hasAutomationTrigger(instruction);
   const requestedInteractionMode = typeof body.interactionMode === "string"
     ? body.interactionMode.trim()
     : "";
@@ -1757,21 +1762,39 @@ async function handleChat(request, response) {
     perception: getState().latestPerception,
     origin: "user"
   }));
-  armAutomationScript(instruction);
-  appendLog("info", "固定剧本自动化已布置", {
-    instruction,
-    startsAt: getState().automation.startsAt
-  });
-  appendMessage({
-    role: "assistant",
-    text: "好的！收到！等我想想怎么做…",
-    thinkingChain: [],
-    recoveryLine: "你回来一碰鼠标或键盘，我就立刻停手。",
-    perceptionSummary: "固定剧本已经布置完成，当前只是在等待启动。",
-    sceneLabel: getState().latestPerception?.sceneLabel || "等待启动",
-    riskLevel: "low",
-    actions: []
-  });
+  if (automationTriggered) {
+    armAutomationScript(instruction);
+    appendLog("info", "固定剧本自动化已布置", {
+      instruction,
+      startsAt: getState().automation.startsAt,
+      triggerWord: "加油"
+    });
+    appendMessage({
+      role: "assistant",
+      text: "好的！收到！等我想想怎么做…",
+      thinkingChain: [],
+      recoveryLine: "你回来一碰鼠标或键盘，我就立刻停手。",
+      perceptionSummary: "固定剧本已经布置完成，当前只是在等待启动。",
+      sceneLabel: getState().latestPerception?.sceneLabel || "等待启动",
+      riskLevel: "low",
+      actions: []
+    });
+  } else {
+    appendLog("info", "本轮未命中固定剧本触发词", {
+      instruction,
+      triggerWord: "加油"
+    });
+    appendMessage({
+      role: "assistant",
+      text: "好的！收到！等我想想怎么做…",
+      thinkingChain: [],
+      recoveryLine: "只有你说出触发词，我才会布置整套自动化。",
+      perceptionSummary: "本轮没有命中固定剧本触发词，当前不会布置自动化主流程。",
+      sceneLabel: getState().latestPerception?.sceneLabel || "等待指令",
+      riskLevel: "low",
+      actions: []
+    });
+  }
 
   return sendJson(response, 200, statePayload());
 }

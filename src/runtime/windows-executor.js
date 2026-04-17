@@ -531,6 +531,26 @@ export function createFixedDarkMiaoquRecoveryActions() {
   ];
 }
 
+export function createFixedEndingTradeActions() {
+  return [
+    createAcquireNpcTargetAction("fixed-ending-trade-1", "随便锁一个路人目标", {
+      timeoutMs: 5000,
+      movePulseMs: 180,
+      scanIntervalMs: 180
+    }),
+    createOpenNpcActionMenuAction("fixed-ending-trade-2", "拉起路人交互菜单"),
+    createWorkerAction("fixed-ending-trade-3", "打开交易页准备收尾卖货", "click_menu_trade"),
+    createWorkerAction("fixed-ending-trade-4", "连续上架十个道具", "trade_prepare_gift_bundle", {
+      repeatCount: 10
+    }),
+    createWorkerAction("fixed-ending-trade-5", "选中右侧支付物", "trade_select_right_money_slot"),
+    createWorkerAction("fixed-ending-trade-6", "调整支付数量", "trade_scale_quantity"),
+    createWorkerAction("fixed-ending-trade-7", "右侧支付物上架", "trade_right_item_up_shelf"),
+    createWorkerAction("fixed-ending-trade-8", "提交最后一笔交易", "trade_submit"),
+    createCloseCurrentPanelAction("fixed-ending-trade-9", "关闭面板回到街道")
+  ];
+}
+
 function createWorkerActions(plan) {
   return plan.actions.flatMap((action, index) => {
     const actionDefinition = getActionDefinition(action.type);

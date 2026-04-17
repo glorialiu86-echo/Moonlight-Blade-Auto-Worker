@@ -23,6 +23,7 @@ import {
 } from "../runtime/motion-review.js";
 import {
   createFixedDarkCloseStageActions,
+  createFixedEndingTradeActions,
   createFixedDarkMiaoquRecoveryActions,
   createFixedDarkMiaoquStageActions,
   createFixedSellLoopActions,
@@ -136,6 +137,20 @@ const FIXED_SCRIPT_STAGES = [
     ]),
     decideFactory: () => "我换成独立妙取，盲点一手，到点就跑。",
     personaFactory: () => "这回得更轻、更快。"
+  },
+  {
+    key: "ending_trade",
+    rounds: 1,
+    instructionLabel: "最后就在原地找个路人把货卖掉，干净利落收尾。",
+    riskLevel: "low",
+    actionTypes: ["trade"],
+    thinkingFactory: () => ([
+      "该拿的都拿到了，最后还得把手里这批货顺出去。",
+      "就在原地找个顺手的路人，把十个道具一口气卖干净。",
+      "只要这笔尾单收好，整套活就算像样地落地了。"
+    ]),
+    decideFactory: () => "我就地找个路人做完最后一笔交易，卖干净就正式收工。",
+    personaFactory: () => "最后把货清掉，再像没事发生过一样站回街上。"
   }
 ];
 
@@ -466,6 +481,8 @@ function buildStageWorkerActions(stageKey) {
       return createFixedDarkCloseStageActions();
     case "dark_miaoqu":
       return createFixedDarkMiaoquStageActions();
+    case "ending_trade":
+      return createFixedEndingTradeActions();
     default:
       return [];
   }
@@ -507,6 +524,10 @@ function buildRecoveryWorkerActions(baseContext, error, workerActions, failedInd
     if (["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(failureCode)) {
       return createFixedDarkMiaoquRecoveryActions();
     }
+  }
+
+  if (stageKey === "ending_trade" && ["NPC_VIEW_NOT_OPENED", "NPC_TARGET_SWITCH_FAILED"].includes(failureCode)) {
+    return createFixedEndingTradeActions();
   }
 
   return workerActions.slice(failedIndex);
@@ -1599,6 +1620,16 @@ async function runFixedDarkMiaoquStageExecution({ externalInputGuardEnabled = tr
   }
 }
 
+async function runFixedEndingTradeStageExecution({ externalInputGuardEnabled = true }) {
+  const execution = await runWindowsActions(createFixedEndingTradeActions(), {
+    interruptOnExternalInput: externalInputGuardEnabled
+  });
+  return {
+    ...execution,
+    outcome: "最后一笔路人交易已经做完，十个道具也顺干净了，街面重新回到干净状态。"
+  };
+}
+
 async function runFixedStageExecution({ stage, externalInputGuardEnabled = true }) {
   switch (stage.key) {
     case "sell_loop":
@@ -1610,6 +1641,8 @@ async function runFixedStageExecution({ stage, externalInputGuardEnabled = true 
       return runFixedDarkCloseStageExecution({ externalInputGuardEnabled });
     case "dark_miaoqu":
       return runFixedDarkMiaoquStageExecution({ externalInputGuardEnabled });
+    case "ending_trade":
+      return runFixedEndingTradeStageExecution({ externalInputGuardEnabled });
     default:
       return runWindowsActions(buildStageWorkerActions(stage.key), {
         interruptOnExternalInput: externalInputGuardEnabled
@@ -2115,7 +2148,7 @@ async function maybeRunAutonomousTurn() {
       });
       appendMessage({
         role: "assistant",
-        text: "这套安排我已经按顺序做完了，先收手等你回来。",
+        text: "我完美完成籽岷的任务啦，现在可骄傲了，就等他回来验收啦。这一趟也赚了不少钱，先在街上乖乖收手。",
         thinkingChain: [],
         perceptionSummary: "固定剧本已执行完毕。",
         sceneLabel: latestState.latestPerception?.sceneLabel || "自动运行结束",

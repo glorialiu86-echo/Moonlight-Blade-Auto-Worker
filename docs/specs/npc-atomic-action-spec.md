@@ -235,6 +235,18 @@
   - `pointName`
   - `click`
 
+### `trade_prepare_gift_bundle`
+
+- 前置状态：`trade_screen`
+- 行为：切到固定礼物页签，并连续执行多轮 `选中礼物 -> 上架`
+- 成功状态：仍为 `trade_screen`
+- 失败：任一轮离开交易页
+- 关键输出：
+  - `repeatCount`
+  - `categoryClick`
+  - `rounds`
+  - `stageHistory`
+
 ### `trade_select_right_money_slot`
 
 - 前置状态：`trade_screen`

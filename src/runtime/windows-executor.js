@@ -128,34 +128,11 @@ function createNpcTradeActions(baseAction, options = {}) {
       payload: {}
     },
     {
-      title: "切到左侧货栏",
-      type: "trade_select_left_item_tab",
-      payload: {}
-    },
-    {
-      title: "选中左侧货物",
-      type: "trade_select_left_item",
-      payload: {}
-    },
-    {
-      title: "左侧货物上架",
-      type: "trade_left_item_up_shelf",
-      payload: {}
-    },
-    {
-      title: "选中右侧支付物",
-      type: "trade_select_right_money_slot",
-      payload: {}
-    },
-    {
-      title: "调整支付数量",
-      type: "trade_scale_quantity",
-      payload: {}
-    },
-    {
-      title: "右侧支付物上架",
-      type: "trade_right_item_up_shelf",
-      payload: {}
+      title: `固定礼物上架 ${options.giftBundleCount || 10} 次`,
+      type: "trade_prepare_gift_bundle",
+      payload: {
+        repeatCount: options.giftBundleCount || 10
+      }
     },
     {
       title: "提交当前交易",

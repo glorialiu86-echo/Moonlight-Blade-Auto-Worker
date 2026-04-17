@@ -220,6 +220,8 @@ ACTION_POINTS = {
     "trade_left_item_tab": (0.037, 0.394),
     "trade_left_item_slot": (0.115, 0.409),
     "trade_left_up_shelf_button": (0.362, 0.764),
+    "trade_gift_item_tab": (49 / 2048, 447 / 1152),
+    "trade_gift_item_slot": (189 / 2048, 510 / 1152),
     "trade_right_money_slot": (0.843, 0.159),
     "trade_scale_button": (0.744, 0.542),
     "trade_right_up_shelf_button": (0.639, 0.703),
@@ -1476,6 +1478,45 @@ def execute_fixed_trade_flow(hwnd: int, title: str) -> dict[str, Any]:
 
     return {
         "clicks": click_results,
+        "stageHistory": stage_history,
+    }
+
+
+def execute_trade_gift_bundle_flow(hwnd: int, title: str, repeat_count: int = 10) -> dict[str, Any]:
+    repeat_count = max(1, int(repeat_count))
+    stage_state = detect_npc_interaction_stage(hwnd)
+    if stage_state["stage"] != "trade_screen":
+        raise RuntimeError(
+            f"trade gift bundle flow requires trade_screen. Last stage: {stage_state['stage'] or 'none'}"
+        )
+
+    category_click = click_named_point(hwnd, "trade_gift_item_tab")
+    INPUT_GUARD.guarded_sleep(220, title)
+
+    stage_history = ["trade_screen"]
+    rounds: list[dict[str, Any]] = []
+
+    for round_index in range(repeat_count):
+        item_click = click_named_point(hwnd, "trade_gift_item_slot")
+        INPUT_GUARD.guarded_sleep(220, title)
+        shelf_click = click_named_point(hwnd, "trade_left_up_shelf_button")
+        INPUT_GUARD.guarded_sleep(320, title)
+        next_stage_state = detect_npc_interaction_stage(hwnd)
+        stage_history.append(next_stage_state["stage"])
+        if next_stage_state["stage"] != "trade_screen":
+            raise RuntimeError(
+                f"Trade gift bundle flow left trade_screen unexpectedly at round {round_index + 1}. "
+                f"Last stage: {next_stage_state['stage'] or 'none'}"
+            )
+        rounds.append({
+            "round": round_index + 1,
+            "itemClick": item_click,
+            "upShelfClick": shelf_click,
+        })
+
+    return {
+        "categoryClick": category_click,
+        "rounds": rounds,
         "stageHistory": stage_history,
     }
 
@@ -3408,6 +3449,27 @@ def run_trade_click_step(
     }
 
 
+def run_trade_prepare_gift_bundle(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "trade_prepare_gift_bundle")
+    repeat_count = int(action.get("repeatCount") or 10)
+    bundle_flow = execute_trade_gift_bundle_flow(hwnd, title, repeat_count)
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Prepared fixed gift bundle with {len(bundle_flow['rounds'])} up-shelf rounds",
+        "input": {
+            "mode": "trade_prepare_gift_bundle",
+            "repeatCount": repeat_count,
+            "categoryClick": bundle_flow["categoryClick"],
+            "rounds": bundle_flow["rounds"],
+            "stageHistory": bundle_flow["stageHistory"],
+        },
+    }
+
+
 def run_click_steal_button(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "click_steal_button")
@@ -4282,6 +4344,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "trade_left_item_up_shelf":
         return run_trade_click_step(hwnd, action, "trade_left_up_shelf_button", "Placed the left trade item on shelf", 320)
+
+    if action_type == "trade_prepare_gift_bundle":
+        return run_trade_prepare_gift_bundle(hwnd, action)
 
     if action_type == "trade_select_right_money_slot":
         return run_trade_click_step(hwnd, action, "trade_right_money_slot", "Selected the right-side payment item", 220)

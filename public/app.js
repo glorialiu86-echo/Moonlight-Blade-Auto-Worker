@@ -458,6 +458,15 @@ elements.composerForm.addEventListener("submit", async (event) => {
   await submitInstruction();
 });
 
+elements.instructionInput.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) {
+    return;
+  }
+
+  event.preventDefault();
+  await submitInstruction();
+});
+
 elements.resumeFailedStepButton?.addEventListener("click", async () => {
   await resumeFailedStep();
 });

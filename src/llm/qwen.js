@@ -19,6 +19,21 @@ function normalizeMessages(messages) {
   });
 }
 
+function buildMultimodalUserContent({ prompt, imageInput }) {
+  return [
+    {
+      type: "image_url",
+      image_url: {
+        url: toImageUrl(imageInput)
+      }
+    },
+    {
+      type: "text",
+      text: prompt
+    }
+  ];
+}
+
 function parseJsonResponse(raw, providerName) {
   try {
     return JSON.parse(raw);
@@ -202,12 +217,54 @@ export async function analyzeImage({
       },
       {
         role: "user",
-        content: [
-          { type: "text", text: prompt },
-          { type: "image_url", image_url: { url: toImageUrl(imageInput) } }
-        ]
+        content: buildMultimodalUserContent({
+          prompt,
+          imageInput
+        })
       }
     ]
+  });
+
+  return completionToResult(completion);
+}
+
+export async function analyzeImageWithHistory({
+  prompt,
+  imageInput,
+  systemPrompt = "你是一个严谨的图像场景分析助手。",
+  historyMessages = [],
+  maxTokens = 500,
+  temperature = 0.2,
+  model
+}) {
+  const config = getLlmConfig();
+  const messages = [];
+
+  if (systemPrompt) {
+    messages.push({
+      role: "system",
+      content: systemPrompt
+    });
+  }
+
+  if (Array.isArray(historyMessages) && historyMessages.length > 0) {
+    messages.push(...normalizeMessages(historyMessages));
+  }
+
+  messages.push({
+    role: "user",
+    content: buildMultimodalUserContent({
+      prompt,
+      imageInput
+    })
+  });
+
+  const completion = await requestChatCompletion({
+    config,
+    model: model || config.visionModel,
+    maxTokens,
+    temperature,
+    messages
   });
 
   return completionToResult(completion);

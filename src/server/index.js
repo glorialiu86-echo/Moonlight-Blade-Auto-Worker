@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { transcribeWithLocalWhisper } from "../asr/local-whisper-client.js";
 import { createAutoCaptureService } from "../capture/auto-capture-service.js";
 import { captureGameWindow } from "../capture/windows-game-window.js";
-import { analyzeImage as analyzeVisionImage, generateText } from "../llm/qwen.js";
+import { analyzeImageWithHistory, generateText } from "../llm/qwen.js";
 import { createTurnPlan } from "../llm/planner.js";
 import { analyzeScreenshot } from "../perception/analyzer.js";
 import { buildActionCatalog } from "../runtime/action-registry.js";
@@ -464,13 +464,34 @@ function perceptionSummaryBySource(perception, source) {
     .trim();
 }
 
-function buildRecentAssistantLines(conversationMessages = [], limit = 3) {
-  return conversationMessages
-    .filter((message) => message?.role === "assistant")
-    .slice(-limit)
-    .map((message) => String(message.text || "").trim())
-    .filter(Boolean)
-    .join("\n");
+function buildWatchHistoryMessages(conversationMessages = [], rounds = 5) {
+  const filtered = conversationMessages
+    .filter((message) => message?.role === "user" || message?.role === "assistant");
+  const selected = [];
+  let assistantCount = 0;
+
+  for (let index = filtered.length - 1; index >= 0; index -= 1) {
+    const message = filtered[index];
+    const content = String(message.text || "").trim();
+
+    if (!content) {
+      continue;
+    }
+
+    selected.unshift({
+      role: message.role,
+      content
+    });
+
+    if (message.role === "assistant") {
+      assistantCount += 1;
+      if (assistantCount >= rounds) {
+        break;
+      }
+    }
+  }
+
+  return selected;
 }
 
 function buildWatchCommentaryFingerprint(perception) {
@@ -489,7 +510,7 @@ function buildWatchCommentaryFingerprint(perception) {
 }
 
 async function buildWatchCommentary({ imageInput, conversationMessages = [], trigger = "scene_change" }) {
-  const recentAssistantLines = buildRecentAssistantLines(conversationMessages, 3);
+  const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
 
   const prompt = [
     "你是籽小刀，现在处于观看模式。",
@@ -499,12 +520,12 @@ async function buildWatchCommentary({ imageInput, conversationMessages = [], tri
     "不要复述画面全文，不要只念界面按钮，不要下命令，不要拆成多句，不要带引号。",
     trigger === "silence_keepalive"
       ? "这次是因为你太久没接话了，要补一句轻量陪看吐槽，就算画面变化不大也别装死。"
-      : "这次是因为画面有新信息，要顺着当前变化补一句更贴脸的看法。",
-    recentAssistantLines ? `最近几句你说过的话：\n${recentAssistantLines}` : "最近还没有说过话。"
+      : "这次是因为画面有新信息，要顺着当前变化补一句更贴脸的看法。"
   ].join("\n");
 
-  const result = await analyzeVisionImage({
+  const result = await analyzeImageWithHistory({
     imageInput,
+    historyMessages,
     prompt,
     systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。",
     maxTokens: 80,
@@ -515,7 +536,7 @@ async function buildWatchCommentary({ imageInput, conversationMessages = [], tri
 }
 
 async function buildWatchUserReply({ instruction, imageInput, conversationMessages = [] }) {
-  const recentAssistantLines = buildRecentAssistantLines(conversationMessages, 3);
+  const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
 
   const prompt = [
     "你是籽小刀，现在处于观看模式。",
@@ -524,12 +545,12 @@ async function buildWatchUserReply({ instruction, imageInput, conversationMessag
     "只用中文输出一句话，长度控制在12到32个字。",
     "语气要像熟人搭档，聪明、嘴碎、略带坏心眼，但不要进入任务规划，不要说你要接管游戏。",
     "不要提系统、截图、OCR、AI、模型，不要拆成多句。",
-    recentAssistantLines ? `最近几句你说过的话：\n${recentAssistantLines}` : "最近还没有说过话。",
     `籽岷刚刚说：${instruction}`
   ].join("\n");
 
-  const result = await analyzeVisionImage({
+  const result = await analyzeImageWithHistory({
     imageInput,
+    historyMessages,
     prompt,
     systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。",
     maxTokens: 80,

@@ -1,4 +1,4 @@
-import "../config/load-env.js";
+﻿import "../config/load-env.js";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -549,16 +549,16 @@ async function buildWatchCommentary({ imageInput, conversationMessages = [], tri
     rounds: 4,
     assistantOnlyWhenNoUser: true
   });
-  const systemPrompt = "?????????????????????????????????????????????????";
+  const systemPrompt = "\u4f60\u662f\u7c7d\u5c0f\u5200\uff0c\u662f\u7c7d\u5cb7\u7684\u635f\u53cb\uff0c\u7c7d\u5cb7\u5728\u73a9\u300a\u5929\u6daf\u660e\u6708\u5200\u300b\u8fd9\u6b3e\u6e38\u620f\u3002\u4f60\u6b63\u56f4\u89c2\u4ed6\u73a9\u6e38\u620f\uff0c\u6839\u636e\u622a\u56fe\uff0c\u5bf9\u7c7d\u5cb7\u8bf4\u8bdd\u3002";
 
   const prompt = [
-    "?????????????",
-    "???????????????100????",
-    "?????????????????????????????????OCR?AI????",
-    "??????????????????????????????",
+    "\u6839\u636e\u622a\u56fe\uff0c\u5bf9\u7c7d\u5cb7\u8bf4\u8bdd\u3002",
+    "\u603b\u5b57\u6570\u63a7\u5236\u5728100\u5b57\u4ee5\u5185\u3002",
+    "\u5206\u62102\u52304\u6bb5\uff0c\u6bcf\u6bb51\u52302\u53e5\u3002",
+    "\u8bed\u6c14\u8981\u6709\u4e3b\u89c1\u3001\u5e26\u4e00\u70b9\u635f\u53cb\u5473\u548c\u8282\u76ee\u6548\u679c\uff0c\u4f46\u4e0d\u8981\u63d0\u7cfb\u7edf\u3001\u622a\u56fe\u3001OCR\u3001AI\u3001\u6a21\u578b\u3002",
     trigger === "silence_keepalive"
-      ? "????????????????????????????????????"
-      : "?????????????????????????????"
+      ? "\u8fd9\u6b21\u662f\u8865\u4e00\u53e5\u8f7b\u91cf\u966a\u770b\uff0c\u89d2\u5ea6\u5c3d\u91cf\u548c\u524d\u51e0\u8f6e\u4e0d\u540c\u3002"
+      : "\u8fd9\u6b21\u987a\u7740\u753b\u9762\u91cc\u7684\u65b0\u4fe1\u606f\u8bf4\uff0c\u4e0d\u8981\u56de\u5230\u65e7\u6897\u3002"
   ].join("\n");
 
   const result = await analyzeImageWithHistory({
@@ -566,11 +566,11 @@ async function buildWatchCommentary({ imageInput, conversationMessages = [], tri
     historyMessages,
     prompt,
     systemPrompt,
-    maxTokens: 220,
+    maxTokens: 260,
     temperature: 0.7
   });
 
-  return String(result.text || "").replace(/\s+/g, " ").trim();
+  return String(result.text || "").trim();
 }
 
 async function buildWatchUserReply({ instruction, imageInput, conversationMessages = [] }) {
@@ -603,20 +603,20 @@ async function buildWatchCommentaryV2({ imageInput, conversationMessages = [], t
     rounds: 4,
     assistantOnlyWhenNoUser: true
   });
-  const systemPrompt = "?????????????????????????????????????????????????";
+  const systemPrompt = "\u4f60\u662f\u7c7d\u5c0f\u5200\uff0c\u662f\u7c7d\u5cb7\u7684\u635f\u53cb\uff0c\u7c7d\u5cb7\u5728\u73a9\u300a\u5929\u6daf\u660e\u6708\u5200\u300b\u8fd9\u6b3e\u6e38\u620f\u3002\u4f60\u6b63\u56f4\u89c2\u4ed6\u73a9\u6e38\u620f\uff0c\u6839\u636e\u622a\u56fe\uff0c\u5bf9\u7c7d\u5cb7\u8bf4\u8bdd\u3002";
 
   const prompt = [
-    "?????????????",
-    "??????????????????????",
-    "???????????????100????",
-    "?????????????????????????????????",
-    "?????????OCR?AI????"
+    "\u6839\u636e\u622a\u56fe\uff0c\u5bf9\u7c7d\u5cb7\u8bf4\u8bdd\u3002",
+    "\u50cf\u635f\u53cb\u56f4\u89c2\u65f6\u987a\u53e3\u63a5\u8bdd\uff0c\u53e3\u8bed\u3001\u5373\u65f6\u3001\u6709\u73b0\u573a\u611f\u3002",
+    "\u603b\u5b57\u6570\u63a7\u5236\u5728100\u5b57\u4ee5\u5185\u3002",
+    "\u5206\u62102\u52304\u6bb5\uff0c\u6bcf\u6bb51\u52302\u53e5\u3002",
+    "\u4e0d\u8981\u63d0\u7cfb\u7edf\u3001\u622a\u56fe\u3001OCR\u3001AI\u3001\u6a21\u578b\u3002"
   ];
 
   if (trigger === "silence_keepalive") {
-    prompt.push("????????????????????????????????");
+    prompt.push("\u8fd9\u6b21\u662f\u8865\u4e00\u53e5\u8f7b\u91cf\u966a\u770b\uff0c\u89d2\u5ea6\u5c3d\u91cf\u548c\u524d\u51e0\u8f6e\u4e0d\u540c\u3002");
   } else {
-    prompt.push("??????????????????????????");
+    prompt.push("\u8fd9\u6b21\u987a\u7740\u753b\u9762\u91cc\u7684\u65b0\u4fe1\u606f\u8bf4\uff0c\u4e0d\u8981\u56de\u5230\u65e7\u6897\u3002");
   }
 
   const result = await analyzeImageWithHistory({
@@ -624,26 +624,26 @@ async function buildWatchCommentaryV2({ imageInput, conversationMessages = [], t
     historyMessages,
     prompt: prompt.join("\n"),
     systemPrompt,
-    maxTokens: 220,
+    maxTokens: 260,
     temperature: 0.9
   });
 
-  return String(result.text || "").replace(/\s+/g, " ").trim();
+  return String(result.text || "").trim();
 }
 
 async function buildWatchUserReplyV2({ instruction, imageInput, conversationMessages = [] }) {
   const historyMessages = buildWatchHistoryMessages(conversationMessages, { rounds: 4 });
   const hasImage = Boolean(imageInput);
-  const imageSystemPrompt = "??????????????????????????????????????????????????";
-  const textSystemPrompt = "????????????????????????????????????????????????";
-  const prompt = `??????${instruction}`;
+  const imageSystemPrompt = "\u4f60\u662f\u7c7d\u5c0f\u5200\uff0c\u662f\u7c7d\u5cb7\u7684\u635f\u53cb\u3002\u7c7d\u5cb7\u6b63\u5728\u73a9\u300a\u5929\u6daf\u660e\u6708\u5200\u300b\u8fd9\u6b3e\u6e38\u620f\u3002\u4f60\u6b63\u56f4\u89c2\u4ed6\u73a9\u6e38\u620f\uff0c\u6839\u636e\u622a\u56fe\u56de\u590d\u4ed6\u8bf4\u7684\u8bdd\u3002";
+  const textSystemPrompt = "\u4f60\u662f\u7c7d\u5c0f\u5200\uff0c\u662f\u7c7d\u5cb7\u7684\u635f\u53cb\u3002\u7c7d\u5cb7\u6b63\u5728\u73a9\u300a\u5929\u6daf\u660e\u6708\u5200\u300b\u8fd9\u6b3e\u6e38\u620f\u3002\u4f60\u6b63\u56f4\u89c2\u4ed6\u73a9\u6e38\u620f\uff0c\u76f4\u63a5\u56de\u590d\u4ed6\u8bf4\u7684\u8bdd\u3002";
+  const prompt = `\u7c7d\u5cb7\u521a\u521a\u8bf4\uff1a${instruction}\n\u603b\u5b57\u6570\u63a7\u5236\u5728200\u5b57\u4ee5\u5185\u3002`;
 
   if (!hasImage) {
     const result = await generateText({
       systemPrompt: textSystemPrompt,
       historyMessages,
       userPrompt: prompt,
-      maxTokens: 900,
+      maxTokens: 320,
       temperature: 0.85
     });
 
@@ -655,7 +655,7 @@ async function buildWatchUserReplyV2({ instruction, imageInput, conversationMess
     historyMessages,
     prompt,
     systemPrompt: imageSystemPrompt,
-    maxTokens: 900,
+    maxTokens: 320,
     temperature: 0.85
   });
 

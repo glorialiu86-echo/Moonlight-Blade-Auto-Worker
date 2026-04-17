@@ -18,7 +18,9 @@ const state = {
     speechStartedAt: 0,
     lastVoiceAt: 0,
     queue: [],
-    queueProcessing: false
+    queueProcessing: false,
+    submitQueue: [],
+    submitQueueProcessing: false
   }
 };
 
@@ -223,6 +225,39 @@ async function submitVoiceTranscript(transcript) {
     state.submitting = false;
     syncUiState();
   }
+}
+
+function showTranscriptPreview(transcript) {
+  const text = String(transcript || "").trim();
+  if (!text) {
+    return;
+  }
+
+  updateVoiceStatus(`识别到：${text}`);
+}
+
+function enqueueVoiceTranscript(transcript) {
+  const text = String(transcript || "").trim();
+  if (!text) {
+    return;
+  }
+
+  state.voice.submitQueue.push(text);
+}
+
+async function processVoiceSubmitQueue() {
+  if (state.voice.submitQueueProcessing) {
+    return;
+  }
+
+  state.voice.submitQueueProcessing = true;
+
+  while (state.voice.submitQueue.length > 0) {
+    const transcript = state.voice.submitQueue.shift();
+    await submitVoiceTranscript(transcript);
+  }
+
+  state.voice.submitQueueProcessing = false;
 }
 
 async function resumeFailedStep() {
@@ -451,7 +486,7 @@ async function processVoiceQueue() {
     const segment = state.voice.queue.shift();
     state.voice.transcribing = true;
     syncUiState();
-    updateVoiceStatus(state.voice.recording ? "持续听写中，正在识别上一句…" : "正在完成最后一句识别…");
+    updateVoiceStatus(state.voice.recording ? "Listening... transcribing previous segment" : "Finishing last segment");
 
     try {
       const merged = mergeFloat32Chunks(segment.chunks);
@@ -468,10 +503,12 @@ async function processVoiceQueue() {
         continue;
       }
 
-      await submitVoiceTranscript(transcript);
-      updateVoiceStatus(state.voice.recording ? "持续听写中…" : "听写完成");
+      showTranscriptPreview(transcript);
+      enqueueVoiceTranscript(transcript);
+      processVoiceSubmitQueue().catch(() => {});
+      updateVoiceStatus(state.voice.recording ? `Transcript: ${transcript}` : "Transcription done");
     } catch (error) {
-      updateVoiceStatus(`语音失败：${error.message}`);
+      updateVoiceStatus(`Voice failed: ${error.message}`);
     } finally {
       state.voice.transcribing = false;
       syncUiState();
@@ -568,7 +605,7 @@ async function startVoiceRecording() {
     sourceNode.connect(processorNode);
     processorNode.connect(audioContext.destination);
 
-    updateVoiceStatus("Listening continuously... pauses around 1s will auto-send");
+    updateVoiceStatus("Listening continuously... pause about 1s to auto-send");
     syncUiState();
   } catch (error) {
     await releaseVoiceCapture();

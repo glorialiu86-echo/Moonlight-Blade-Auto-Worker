@@ -88,8 +88,13 @@ function providerLabel(provider) {
   return provider === "qwen" ? "Qwen" : "OpenAI-compatible provider";
 }
 
-async function requestChatCompletion({ messages, model, maxTokens = 512, temperature = 0.7 }) {
-  const config = getTextLlmConfig();
+async function requestChatCompletion({
+  messages,
+  model,
+  maxTokens = 512,
+  temperature = 0.7,
+  config = getTextLlmConfig()
+}) {
   const body = {
     model,
     messages: normalizeMessages(messages),
@@ -138,6 +143,7 @@ export async function createChatCompletion({ messages, model, maxTokens, tempera
   const config = getTextLlmConfig();
   return requestChatCompletion({
     messages,
+    config,
     model: model || config.model,
     maxTokens,
     temperature
@@ -184,7 +190,8 @@ export async function analyzeImage({
   model
 }) {
   const config = getLlmConfig();
-  const completion = await createChatCompletion({
+  const completion = await requestChatCompletion({
+    config,
     model: model || config.visionModel,
     maxTokens,
     temperature,
@@ -214,7 +221,8 @@ export async function extractTextFromImage({
   model
 }) {
   const config = getLlmConfig();
-  const completion = await createChatCompletion({
+  const completion = await requestChatCompletion({
+    config,
     model: model || config.ocrModel,
     maxTokens,
     temperature,

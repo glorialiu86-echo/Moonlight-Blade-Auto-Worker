@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { transcribeWithLocalWhisper } from "../asr/local-whisper-client.js";
 import { createAutoCaptureService } from "../capture/auto-capture-service.js";
 import { captureGameWindow } from "../capture/windows-game-window.js";
-import { generateText } from "../llm/qwen.js";
+import { analyzeImage as analyzeVisionImage, generateText } from "../llm/qwen.js";
 import { createTurnPlan } from "../llm/planner.js";
 import { analyzeScreenshot } from "../perception/analyzer.js";
 import { buildActionCatalog } from "../runtime/action-registry.js";
@@ -116,13 +116,16 @@ const FIXED_SCRIPT_STAGES = [
 
 let turnInFlight = false;
 let pendingResumeContext = null;
+let latestCaptureImageDataUrl = null;
 
 const autoCaptureService = createAutoCaptureService({
   captureWindow: () => captureGameWindow(),
   analyzeScreenshot,
   intervalMs: CAPTURE_INTERVAL_MS,
   onPerception: (perception, meta) => {
-    setLatestPerception(perception, meta);
+    latestCaptureImageDataUrl = meta?.imageDataUrl || latestCaptureImageDataUrl;
+    const { imageDataUrl, ...perceptionMeta } = meta || {};
+    setLatestPerception(perception, perceptionMeta);
     setCaptureState({
       lastImageSource: "auto_window"
     });
@@ -461,21 +464,6 @@ function perceptionSummaryBySource(perception, source) {
     .trim();
 }
 
-function buildPerceptionContext(perception) {
-  if (!perception) {
-    return "暂无截图识别结果。";
-  }
-
-  return [
-    `截图总结：${perception.summary || "暂无总结"}`,
-    `场景标签：${perception.sceneLabel || "未判定"}`,
-    `OCR 文字：${perception.ocrText || "无"}`,
-    `NPC：${perception.npcNames?.join("、") || "无"}`,
-    `交互项：${perception.interactiveOptions?.join("、") || "无"}`,
-    `警告：${perception.alerts?.join("、") || "无"}`
-  ].join("\n");
-}
-
 function buildRecentAssistantLines(conversationMessages = [], limit = 3) {
   return conversationMessages
     .filter((message) => message?.role === "assistant")
@@ -500,33 +488,33 @@ function buildWatchCommentaryFingerprint(perception) {
   });
 }
 
-async function buildWatchCommentary({ perception, conversationMessages = [], trigger = "scene_change" }) {
+async function buildWatchCommentary({ imageInput, conversationMessages = [], trigger = "scene_change" }) {
   const recentAssistantLines = buildRecentAssistantLines(conversationMessages, 3);
 
   const prompt = [
     "你是籽小刀，现在处于观看模式。",
-    "籽岷正在主玩游戏，你不操作游戏，只根据当前截图识别结果，在旁边像弹幕一样补一句看法。",
+    "籽岷正在主玩游戏，你不操作游戏，只根据当前这张游戏截图，在旁边像弹幕一样补一句看法。",
     "只用中文输出一句话，长度控制在12到28个字。",
     "语气要有主见、带一点邪门歪理、能增加节目效果，但不要提系统、截图、OCR、AI、模型。",
-    "不要复述画面全文，不要下命令，不要拆成多句，不要带引号。",
+    "不要复述画面全文，不要只念界面按钮，不要下命令，不要拆成多句，不要带引号。",
     trigger === "silence_keepalive"
       ? "这次是因为你太久没接话了，要补一句轻量陪看吐槽，就算画面变化不大也别装死。"
       : "这次是因为画面有新信息，要顺着当前变化补一句更贴脸的看法。",
-    recentAssistantLines ? `最近几句你说过的话：\n${recentAssistantLines}` : "最近还没有说过话。",
-    "当前画面信息：",
-    buildPerceptionContext(perception)
+    recentAssistantLines ? `最近几句你说过的话：\n${recentAssistantLines}` : "最近还没有说过话。"
   ].join("\n");
 
-  const result = await generateText({
-    userPrompt: prompt,
-    maxTokens: 60,
-    temperature: 0.9
+  const result = await analyzeVisionImage({
+    imageInput,
+    prompt,
+    systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。",
+    maxTokens: 80,
+    temperature: 0.7
   });
 
   return String(result.text || "").replace(/\s+/g, " ").trim();
 }
 
-async function buildWatchUserReply({ instruction, perception, conversationMessages = [] }) {
+async function buildWatchUserReply({ instruction, imageInput, conversationMessages = [] }) {
   const recentAssistantLines = buildRecentAssistantLines(conversationMessages, 3);
 
   const prompt = [
@@ -537,15 +525,15 @@ async function buildWatchUserReply({ instruction, perception, conversationMessag
     "语气要像熟人搭档，聪明、嘴碎、略带坏心眼，但不要进入任务规划，不要说你要接管游戏。",
     "不要提系统、截图、OCR、AI、模型，不要拆成多句。",
     recentAssistantLines ? `最近几句你说过的话：\n${recentAssistantLines}` : "最近还没有说过话。",
-    `籽岷刚刚说：${instruction}`,
-    "当前画面信息：",
-    buildPerceptionContext(perception)
+    `籽岷刚刚说：${instruction}`
   ].join("\n");
 
-  const result = await generateText({
-    userPrompt: prompt,
+  const result = await analyzeVisionImage({
+    imageInput,
+    prompt,
+    systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。",
     maxTokens: 80,
-    temperature: 0.85
+    temperature: 0.65
   });
 
   return String(result.text || "").replace(/\s+/g, " ").trim();
@@ -553,8 +541,9 @@ async function buildWatchUserReply({ instruction, perception, conversationMessag
 
 async function maybeRunWatchCommentaryTurn(runtimeState) {
   const perception = runtimeState.latestPerception;
+  const imageInput = latestCaptureImageDataUrl;
 
-  if (!perception) {
+  if (!perception || !imageInput) {
     return false;
   }
 
@@ -583,7 +572,7 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
   }
 
   const text = await buildWatchCommentary({
-    perception,
+    imageInput,
     conversationMessages: runtimeState.messages,
     trigger: fingerprintUnchanged ? "silence_keepalive" : "scene_change"
   });
@@ -627,6 +616,30 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
 }
 
 async function runWatchUserReplyTurn({ instruction, scene, perception, conversationMessages = [] }) {
+  if (!latestCaptureImageDataUrl) {
+    appendMessage({
+      role: "assistant",
+      text: "你先继续玩，我盯到画面再接你这句。",
+      thinkingChain: [],
+      perceptionSummary: perceptionSummaryBySource(perception, "agent"),
+      sceneLabel: perception?.sceneLabel || sceneDescription(scene),
+      riskLevel: "low",
+      actions: [],
+      decide: ""
+    });
+    updateAgent({
+      mode: "user_priority",
+      phase: "cooldown",
+      currentObjective: "watch",
+      queuedUserObjective: null,
+      lastUserInstruction: instruction,
+      lastTurnSource: "user",
+      lastTurnAt: new Date().toISOString(),
+      watchCommentaryCooldownUntil: new Date(Date.now() + WATCH_USER_REPLY_COOLDOWN_MS).toISOString()
+    });
+    return;
+  }
+
   await waitForTurnSlot();
 
   updateAgent({
@@ -639,7 +652,7 @@ async function runWatchUserReplyTurn({ instruction, scene, perception, conversat
   try {
     const replyText = await buildWatchUserReply({
       instruction,
-      perception,
+      imageInput: latestCaptureImageDataUrl,
       conversationMessages
     });
 
@@ -1847,6 +1860,7 @@ async function handleControl(request, response) {
     reset: () => {
       autoCaptureService.stop();
       clearPendingResumeContext();
+      latestCaptureImageDataUrl = null;
       resetRuntime();
       appendLog("info", "运行上下文已清空");
     },
@@ -1990,6 +2004,7 @@ async function handleAnalyzeImage(request, response) {
       imageInput: imageDataUrl
     });
 
+    latestCaptureImageDataUrl = imageDataUrl;
     setLatestPerception(perception, {
       source: "manual_upload",
       imageName,

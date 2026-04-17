@@ -88,7 +88,8 @@ export function createAutoCaptureService({
         source: "auto_window",
         windowTitle: capture.windowTitle,
         bounds: capture.bounds,
-        analyzedAt
+        analyzedAt,
+        imageDataUrl: capture.imageDataUrl
       });
 
       emitState({

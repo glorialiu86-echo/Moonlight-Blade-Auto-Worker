@@ -23,7 +23,7 @@ const state = {
 };
 
 const VOICE_ACTIVITY_RMS_THRESHOLD = 0.009;
-const VOICE_AUTO_SEND_SILENCE_MS = 1000;
+const VOICE_AUTO_SEND_SILENCE_MS = 2000;
 const VOICE_MIN_SPEECH_MS = 450;
 
 const elements = {
@@ -96,9 +96,7 @@ function renderEmptyState() {
 }
 
 function replaceAssistantViewerReferences(text) {
-  return String(text || "")
-    .replaceAll("籽岷团队", "你")
-    .replaceAll("籽岷", "你");
+  return String(text || "");
 }
 
 function buildAssistantText(message) {
@@ -521,7 +519,7 @@ async function flushVoiceSegment({ autoSend = false, stopListening = false } = {
           flushVoiceSegment({ autoSend: true, stopListening: false }).catch(() => {});
         }
       }, 120);
-      updateVoiceStatus("正在听你说话，静音 1 秒会自动发送。");
+      updateVoiceStatus("正在听你说话，静音 2 秒会自动发送。");
     }
     syncUiState();
   }
@@ -602,7 +600,7 @@ async function startVoiceRecording() {
       }
     }, 120);
 
-    updateVoiceStatus("正在听你说话，静音 1 秒会自动发送。");
+    updateVoiceStatus("正在听你说话，静音 2 秒会自动发送。");
     syncUiState();
   } catch (error) {
     await releaseVoiceCapture();

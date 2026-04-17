@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 import traceback
 import wave
@@ -105,6 +106,35 @@ def load_wav_audio(audio_path):
     return samples, sample_rate
 
 
+def normalize_transcript(text):
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+
+    normalized = normalized.replace("\u3000", " ")
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", normalized)
+    normalized = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[，。！？；：、])", "", normalized)
+    normalized = re.sub(r"(?<=[，。！？；：、])\s+", "", normalized)
+    normalized = re.sub(r"([，。！？；：、,.!?])\1+", r"\1", normalized)
+    normalized = re.sub(r"(好的){2,}", "好的", normalized)
+    normalized = re.sub(r"(对){3,}", "对", normalized)
+    normalized = re.sub(r"(嗯){3,}", "嗯", normalized)
+    normalized = re.sub(r"(啊){3,}", "啊", normalized)
+
+    normalized = normalized.strip(" ，。！？；：、")
+    if not normalized:
+        return ""
+
+    if re.search(r"[，。！？；：、,.!?]$", normalized) is None:
+        if re.search(r"(吗|呢|吧|呀|啊|么)$", normalized):
+            normalized = f"{normalized}？"
+        elif len(normalized) >= 12:
+            normalized = f"{normalized}。"
+
+    return normalized
+
+
 def transcribe(model, request):
     language = request.get("language") or os.getenv("LOCAL_ASR_LANGUAGE", "zh")
     initial_prompt = os.getenv(
@@ -138,7 +168,7 @@ def transcribe(model, request):
     if not text:
         return ""
 
-    return rich_transcription_postprocess(text).strip()
+    return normalize_transcript(rich_transcription_postprocess(text).strip())
 
 
 def main():

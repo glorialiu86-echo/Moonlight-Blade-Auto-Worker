@@ -16,20 +16,19 @@ const state = {
     queue: [],
     queueProcessing: false,
     flushTimerId: null,
-    streamStartedAt: 0,
-    chunkFrameCount: 0,
-    activeFrameCount: 0,
+    voiceDetectedAt: 0,
+    lastVoiceAt: 0,
     maxChunkRms: 0,
     baseDraft: "",
     transcriptSegments: []
   }
 };
 
-const VOICE_STREAM_CHUNK_MS = 1200;
-const VOICE_MIN_CHUNK_MS = 350;
 const VOICE_ACTIVITY_RMS_THRESHOLD = 0.009;
-const VOICE_MIN_ACTIVE_FRAMES = 3;
-const VOICE_MIN_ACTIVE_RATIO = 0.2;
+const VOICE_MIN_ACTIVE_MS = 280;
+const VOICE_SILENCE_HOLD_MS = 520;
+const VOICE_MAX_SEGMENT_MS = 2600;
+const VOICE_TICK_MS = 120;
 
 const elements = {
   composerForm: document.querySelector("#composerForm"),
@@ -384,26 +383,19 @@ async function releaseVoiceCapture() {
   state.voice.processorNode = null;
 }
 
-function clearVoiceFlushTimer() {
-  if (!state.voice.flushTimerId) {
-    return;
-  }
-
-  window.clearInterval(state.voice.flushTimerId);
-  state.voice.flushTimerId = null;
-}
-
-function resetVoiceStreamState() {
+function resetVoiceSegmentationState({ preserveDraft = false } = {}) {
   state.voice.pcmChunks = [];
-  state.voice.streamStartedAt = 0;
-  state.voice.chunkFrameCount = 0;
-  state.voice.activeFrameCount = 0;
+  state.voice.voiceDetectedAt = 0;
+  state.voice.lastVoiceAt = 0;
   state.voice.maxChunkRms = 0;
-  state.voice.baseDraft = "";
-  state.voice.transcriptSegments = [];
+
+  if (!preserveDraft) {
+    state.voice.baseDraft = "";
+    state.voice.transcriptSegments = [];
+  }
 }
 
-function queueVoiceSegment(chunks, inputSampleRate, durationMs, analysis) {
+function queueVoiceSegment(chunks, inputSampleRate, durationMs) {
   if (!Array.isArray(chunks) || chunks.length === 0) {
     return;
   }
@@ -411,52 +403,29 @@ function queueVoiceSegment(chunks, inputSampleRate, durationMs, analysis) {
   state.voice.queue.push({
     chunks,
     inputSampleRate,
-    durationMs,
-    analysis
+    durationMs
   });
 }
 
 function flushVoiceSegment({ force = false } = {}) {
-  if (state.voice.pcmChunks.length === 0) {
+  if (state.voice.pcmChunks.length === 0 || !state.voice.voiceDetectedAt) {
+    resetVoiceSegmentationState({ preserveDraft: true });
     return false;
   }
 
-  const segmentDuration = state.voice.streamStartedAt ? Date.now() - state.voice.streamStartedAt : 0;
-  if (!force && segmentDuration < VOICE_MIN_CHUNK_MS) {
-    return false;
-  }
-
-  const activeRatio = state.voice.chunkFrameCount > 0
-    ? state.voice.activeFrameCount / state.voice.chunkFrameCount
-    : 0;
-  const hasSpeech = state.voice.activeFrameCount >= VOICE_MIN_ACTIVE_FRAMES
-    && activeRatio >= VOICE_MIN_ACTIVE_RATIO
-    && state.voice.maxChunkRms >= VOICE_ACTIVITY_RMS_THRESHOLD;
-
-  if (!hasSpeech) {
-    state.voice.pcmChunks = [];
-    state.voice.streamStartedAt = 0;
-    state.voice.chunkFrameCount = 0;
-    state.voice.activeFrameCount = 0;
-    state.voice.maxChunkRms = 0;
+  const now = Date.now();
+  const activeDuration = now - state.voice.voiceDetectedAt;
+  if (!force && activeDuration < VOICE_MIN_ACTIVE_MS) {
     return false;
   }
 
   queueVoiceSegment(
     state.voice.pcmChunks.map((chunk) => new Float32Array(chunk)),
     state.voice.inputSampleRate,
-    segmentDuration,
-    {
-      activeRatio,
-      maxRms: state.voice.maxChunkRms
-    }
+    activeDuration
   );
 
-  state.voice.pcmChunks = [];
-  state.voice.streamStartedAt = 0;
-  state.voice.chunkFrameCount = 0;
-  state.voice.activeFrameCount = 0;
-  state.voice.maxChunkRms = 0;
+  resetVoiceSegmentationState({ preserveDraft: true });
   return true;
 }
 
@@ -507,7 +476,8 @@ async function stopVoiceRecording() {
   }
 
   state.voice.recording = false;
-  clearVoiceFlushTimer();
+  window.clearInterval(state.voice.flushTimerId);
+  state.voice.flushTimerId = null;
   syncUiState();
   updateVoiceStatus("正在收尾最后一段语音...");
 
@@ -519,9 +489,26 @@ async function stopVoiceRecording() {
   } catch (error) {
     updateVoiceStatus(`语音转写失败：${error.message}`);
   } finally {
-    resetVoiceStreamState();
+    resetVoiceSegmentationState();
     state.voice.transcribing = false;
     syncUiState();
+  }
+}
+
+function maybeFlushVoiceSegment() {
+  if (!state.voice.recording || !state.voice.voiceDetectedAt) {
+    return;
+  }
+
+  const now = Date.now();
+  const silentFor = state.voice.lastVoiceAt ? now - state.voice.lastVoiceAt : 0;
+  const activeFor = now - state.voice.voiceDetectedAt;
+
+  if (activeFor >= VOICE_MAX_SEGMENT_MS || silentFor >= VOICE_SILENCE_HOLD_MS) {
+    const flushed = flushVoiceSegment();
+    if (flushed) {
+      processVoiceQueue().catch(() => {});
+    }
   }
 }
 
@@ -549,8 +536,8 @@ async function startVoiceRecording() {
     state.voice.audioContext = audioContext;
     state.voice.sourceNode = sourceNode;
     state.voice.processorNode = processorNode;
-    resetVoiceStreamState();
     state.voice.queue = [];
+    resetVoiceSegmentationState();
     state.voice.inputSampleRate = audioContext.sampleRate;
     state.voice.recording = true;
     state.voice.baseDraft = elements.instructionInput.value;
@@ -560,45 +547,48 @@ async function startVoiceRecording() {
         return;
       }
 
-      if (!state.voice.streamStartedAt) {
-        state.voice.streamStartedAt = Date.now();
-      }
-
       const samples = new Float32Array(event.inputBuffer.getChannelData(0));
       const rms = computeRms(samples);
-      state.voice.chunkFrameCount += 1;
+      const now = Date.now();
+
       if (rms >= VOICE_ACTIVITY_RMS_THRESHOLD) {
-        state.voice.activeFrameCount += 1;
+        if (!state.voice.voiceDetectedAt) {
+          state.voice.voiceDetectedAt = now;
+          state.voice.pcmChunks = [];
+        }
+
+        state.voice.lastVoiceAt = now;
       }
-      if (rms > state.voice.maxChunkRms) {
-        state.voice.maxChunkRms = rms;
+
+      if (state.voice.voiceDetectedAt) {
+        state.voice.pcmChunks.push(samples);
+        state.voice.maxChunkRms = Math.max(state.voice.maxChunkRms, rms);
       }
-      state.voice.pcmChunks.push(samples);
     };
 
     sourceNode.connect(processorNode);
     processorNode.connect(audioContext.destination);
 
+    window.clearInterval(state.voice.flushTimerId);
     state.voice.flushTimerId = window.setInterval(() => {
       if (!state.voice.recording) {
         return;
       }
 
-      const flushed = flushVoiceSegment();
-      if (flushed) {
-        processVoiceQueue().catch(() => {});
-      } else if (!state.voice.transcribing) {
+      maybeFlushVoiceSegment();
+      if (!state.voice.voiceDetectedAt && !state.voice.transcribing) {
         updateVoiceStatus("实时监听中，等待你说话...");
       }
-    }, VOICE_STREAM_CHUNK_MS);
+    }, VOICE_TICK_MS);
 
-    updateVoiceStatus("实时监听已开始，检测到说话后才会写入输入框");
+    updateVoiceStatus("实时监听已开始，检测到完整短句后会写入输入框");
     syncUiState();
   } catch (error) {
     await releaseVoiceCapture();
     state.voice.recording = false;
-    clearVoiceFlushTimer();
-    resetVoiceStreamState();
+    window.clearInterval(state.voice.flushTimerId);
+    state.voice.flushTimerId = null;
+    resetVoiceSegmentationState();
     syncUiState();
     updateVoiceStatus(`无法开始录音：${error.message}`);
   }

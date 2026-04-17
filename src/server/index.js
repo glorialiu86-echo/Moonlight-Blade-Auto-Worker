@@ -497,23 +497,25 @@ function perceptionSummaryBySource(perception, source) {
     .trim();
 }
 
-function buildWatchHistoryMessages(conversationMessages = [], rounds = 5) {
+function buildWatchHistoryMessages(
+  conversationMessages = [],
+  { rounds = 4, assistantOnlyWhenNoUser = false } = {}
+) {
   const filtered = conversationMessages
-    .filter((message) => message?.role === "user" || message?.role === "assistant");
+    .filter((message) => message?.role === "user" || message?.role === "assistant")
+    .filter((message) => String(message.text || "").trim());
+  const hasUserMessage = filtered.some((message) => message.role === "user");
+  const source = assistantOnlyWhenNoUser && !hasUserMessage
+    ? filtered.filter((message) => message.role === "assistant")
+    : filtered;
   const selected = [];
   let assistantCount = 0;
 
-  for (let index = filtered.length - 1; index >= 0; index -= 1) {
-    const message = filtered[index];
-    const content = String(message.text || "").trim();
-
-    if (!content) {
-      continue;
-    }
-
+  for (let index = source.length - 1; index >= 0; index -= 1) {
+    const message = source[index];
     selected.unshift({
       role: message.role,
-      content
+      content: String(message.text || "").trim()
     });
 
     if (message.role === "assistant") {
@@ -543,10 +545,13 @@ function buildWatchCommentaryFingerprint(perception) {
 }
 
 async function buildWatchCommentary({ imageInput, conversationMessages = [], trigger = "scene_change" }) {
-  const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
+  const historyMessages = buildWatchHistoryMessages(conversationMessages, {
+    rounds: 4,
+    assistantOnlyWhenNoUser: true
+  });
 
   const prompt = [
-    "你是籽小刀，现在处于观看模式。",
+    "你是籽小刀，现在处于观看模式，当前一直在和你说话的用户就是籽岷。",
     "籽岷正在主玩游戏，你不操作游戏，只根据当前这张游戏截图，在旁边像弹幕一样补一句看法。",
     "只用中文输出一句话，长度控制在12到28个字。",
     "语气要有主见、带一点邪门歪理、能增加节目效果，但不要提系统、截图、OCR、AI、模型。",
@@ -569,10 +574,10 @@ async function buildWatchCommentary({ imageInput, conversationMessages = [], tri
 }
 
 async function buildWatchUserReply({ instruction, imageInput, conversationMessages = [] }) {
-  const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
+  const historyMessages = buildWatchHistoryMessages(conversationMessages, 4);
 
   const prompt = [
-    "你是籽小刀，现在处于观看模式。",
+    "你是籽小刀，现在处于观看模式，当前一直在和你说话的用户就是籽岷。",
     "籽岷正在主玩游戏，你不操作游戏，只是作为搭档在旁边接话。",
     "籽岷刚刚主动和你说话了，你现在必须优先回他，再回去继续看戏。",
     "只用中文输出一句话，长度控制在12到32个字。",
@@ -594,10 +599,13 @@ async function buildWatchUserReply({ instruction, imageInput, conversationMessag
 }
 
 async function buildWatchCommentaryV2({ imageInput, conversationMessages = [], trigger = "scene_change" }) {
-  const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
+  const historyMessages = buildWatchHistoryMessages(conversationMessages, {
+    rounds: 4,
+    assistantOnlyWhenNoUser: true
+  });
 
   const prompt = [
-    "你是籽小刀，现在处于观看模式。",
+    "你是籽小刀，现在处于观看模式，当前一直在和你说话的用户就是籽岷。",
     "像 B 站弹幕那样接一句：短、口语、即时、顺着眼前画面来。",
     "像搭子在旁边顺口出声，偏描述、感叹、接话，不要写成点评稿。",
     "优先聊现在在干嘛、像什么、接下来可能要干嘛，也可以偶尔自然带半句小问句。",
@@ -619,7 +627,7 @@ async function buildWatchCommentaryV2({ imageInput, conversationMessages = [], t
     imageInput,
     historyMessages,
     prompt: prompt.join("\n"),
-    systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。回复像 B 站弹幕：短、即时、口语、有现场感。可以有少量情绪起伏，但不要固定重复某个口头禅。不要复读，不要总问问题，不要用“怕不是”句式。籽岷团队是主角名字，不要老盯着主角本人描述。",
+    systemPrompt: "你是籽小刀。当前一直在和你说话的用户就是籽岷。你在直播旁观位，只负责看图接话，不负责操作游戏。回复像 B 站弹幕：短、即时、口语、有现场感。可以有少量情绪起伏，但不要固定重复某个口头禅。不要复读，不要总问问题，不要用“怕不是”句式。籽岷团队是主角名字，不要老盯着主角本人描述。",
     maxTokens: 120,
     temperature: 0.9
   });
@@ -628,13 +636,13 @@ async function buildWatchCommentaryV2({ imageInput, conversationMessages = [], t
 }
 
 async function buildWatchUserReplyV2({ instruction, imageInput, conversationMessages = [] }) {
-  const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
+  const historyMessages = buildWatchHistoryMessages(conversationMessages, { rounds: 4 });
   const hasImage = Boolean(imageInput);
-  const systemPrompt = "??????????????????????";
+  const systemPrompt = "???????????????????????????????????????";
   const prompt = hasImage
-    ? `???????????????? 200 ????
+    ? `???????????????????? 200 ????
 ??????${instruction}`
-    : `?????????????? 200 ????
+    : `?????????????????? 200 ????
 ??????${instruction}`;
 
   if (!hasImage) {
@@ -936,7 +944,7 @@ async function buildNpcReply({ instruction, dialogText, conversationRounds = [] 
       .map((round, index) => `Round ${index + 1} NPC: ${round.dialogText}\nRound ${index + 1} Zixiaodao: ${round.replyText}`)
       .join("\n");
   const prompt = [
-    "You are Zi Xiaodao, chatting with an in-game NPC as Zimin's sharp, slightly crooked companion.",
+    "You are Zi Xiaodao, chatting with an in-game NPC as Zimin's sharp, slightly crooked companion. The user you serve is Zimin.",
     "Reply in Chinese only. Keep one single sentence, around 8 to 24 Chinese characters.",
     "Stay in character, sound natural, and continue the current topic instead of restarting it.",
     "Do not explain rules, do not mention AI, system prompts, or gameplay mechanics.",

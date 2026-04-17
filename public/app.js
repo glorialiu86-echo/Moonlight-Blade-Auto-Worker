@@ -13,22 +13,14 @@ const state = {
     processorNode: null,
     pcmChunks: [],
     inputSampleRate: 48000,
-    queue: [],
-    queueProcessing: false,
-    flushTimerId: null,
-    voiceDetectedAt: 0,
-    lastVoiceAt: 0,
-    maxChunkRms: 0,
-    baseDraft: "",
-    transcriptSegments: []
+    silenceTimerId: null,
+    speechDetected: false,
+    lastVoiceAt: 0
   }
 };
 
 const VOICE_ACTIVITY_RMS_THRESHOLD = 0.009;
-const VOICE_MIN_ACTIVE_MS = 280;
-const VOICE_SILENCE_HOLD_MS = 520;
-const VOICE_MAX_SEGMENT_MS = 2600;
-const VOICE_TICK_MS = 120;
+const VOICE_AUTO_SEND_SILENCE_MS = 3000;
 
 const elements = {
   composerForm: document.querySelector("#composerForm"),
@@ -81,7 +73,7 @@ function syncUiState() {
 
   if (elements.voiceButton) {
     elements.voiceButton.disabled = !state.voiceSupported || (!state.voice.recording && (state.submitting || state.voice.transcribing));
-    elements.voiceButton.textContent = state.voice.recording ? "停止听写" : "语音";
+    elements.voiceButton.textContent = state.voice.recording ? "停止语音" : "语音";
   }
 }
 
@@ -209,6 +201,37 @@ async function submitInstruction({ allowDuringTranscription = false } = {}) {
   }
 }
 
+async function submitVoiceInstruction(instruction) {
+  const text = String(instruction || "").trim();
+  if (!text) {
+    updateVoiceStatus("没有识别到有效语音，请重试。");
+    return;
+  }
+
+  state.submitting = true;
+  syncUiState();
+
+  try {
+    const payload = await request("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        instruction: text,
+        interactionMode: detectInteractionMode(text),
+        externalInputGuardEnabled: true
+      })
+    });
+
+    applyPayload(payload);
+    updateVoiceStatus("");
+  } catch (error) {
+    await refresh().catch(() => {});
+    updateVoiceStatus(`语音发送失败：${error.message}`);
+  } finally {
+    state.submitting = false;
+    syncUiState();
+  }
+}
+
 async function resumeFailedStep() {
   if (state.submitting || state.voice.recording || !state.resumeAvailable) {
     return;
@@ -234,17 +257,6 @@ async function resumeFailedStep() {
     state.submitting = false;
     syncUiState();
   }
-}
-
-function appendTranscriptToComposer(text) {
-  const transcript = String(text || "").trim();
-
-  if (!transcript) {
-    return;
-  }
-
-  state.voice.transcriptSegments.push(transcript);
-  elements.instructionInput.value = `${state.voice.baseDraft}${state.voice.transcriptSegments.join("")}`;
 }
 
 function blobToDataUrl(blob) {
@@ -357,6 +369,21 @@ function encodeWav(samples, sampleRate) {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
+function clearVoiceSilenceTimer() {
+  if (!state.voice.silenceTimerId) {
+    return;
+  }
+
+  window.clearInterval(state.voice.silenceTimerId);
+  state.voice.silenceTimerId = null;
+}
+
+function resetVoiceState() {
+  state.voice.pcmChunks = [];
+  state.voice.speechDetected = false;
+  state.voice.lastVoiceAt = 0;
+}
+
 async function releaseVoiceCapture() {
   const { sourceNode, processorNode, mediaStream, audioContext } = state.voice;
 
@@ -383,132 +410,63 @@ async function releaseVoiceCapture() {
   state.voice.processorNode = null;
 }
 
-function resetVoiceSegmentationState({ preserveDraft = false } = {}) {
-  state.voice.pcmChunks = [];
-  state.voice.voiceDetectedAt = 0;
-  state.voice.lastVoiceAt = 0;
-  state.voice.maxChunkRms = 0;
-
-  if (!preserveDraft) {
-    state.voice.baseDraft = "";
-    state.voice.transcriptSegments = [];
-  }
-}
-
-function queueVoiceSegment(chunks, inputSampleRate, durationMs) {
-  if (!Array.isArray(chunks) || chunks.length === 0) {
-    return;
+async function transcribeRecordedVoice(chunks, inputSampleRate) {
+  if (!chunks.length) {
+    throw new Error("没有采集到有效语音");
   }
 
-  state.voice.queue.push({
-    chunks,
-    inputSampleRate,
-    durationMs
+  const merged = mergeFloat32Chunks(chunks);
+  const downsampled = downsampleBuffer(merged, inputSampleRate, 16000);
+  const wavBlob = encodeWav(downsampled, 16000);
+  const audioDataUrl = await blobToDataUrl(wavBlob);
+  const payload = await request("/api/voice/transcribe", {
+    method: "POST",
+    body: JSON.stringify({ audioDataUrl })
   });
+
+  return String(payload.text || "").trim();
 }
 
-function flushVoiceSegment({ force = false } = {}) {
-  if (state.voice.pcmChunks.length === 0 || !state.voice.voiceDetectedAt) {
-    resetVoiceSegmentationState({ preserveDraft: true });
-    return false;
-  }
-
-  const now = Date.now();
-  const activeDuration = now - state.voice.voiceDetectedAt;
-  if (!force && activeDuration < VOICE_MIN_ACTIVE_MS) {
-    return false;
-  }
-
-  queueVoiceSegment(
-    state.voice.pcmChunks.map((chunk) => new Float32Array(chunk)),
-    state.voice.inputSampleRate,
-    activeDuration
-  );
-
-  resetVoiceSegmentationState({ preserveDraft: true });
-  return true;
-}
-
-async function processVoiceQueue() {
-  if (state.voice.queueProcessing) {
-    return;
-  }
-
-  state.voice.queueProcessing = true;
-
-  while (state.voice.queue.length > 0) {
-    const segment = state.voice.queue.shift();
-    state.voice.transcribing = true;
-    syncUiState();
-    updateVoiceStatus(state.voice.recording ? "正在实时转写..." : "正在完成最后一段转写...");
-
-    try {
-      const merged = mergeFloat32Chunks(segment.chunks);
-      const downsampled = downsampleBuffer(merged, segment.inputSampleRate, 16000);
-      const wavBlob = encodeWav(downsampled, 16000);
-      const audioDataUrl = await blobToDataUrl(wavBlob);
-      const payload = await request("/api/voice/transcribe", {
-        method: "POST",
-        body: JSON.stringify({ audioDataUrl })
-      });
-      const transcript = String(payload.text || "").trim();
-
-      if (!transcript) {
-        continue;
-      }
-
-      appendTranscriptToComposer(transcript);
-      updateVoiceStatus(state.voice.recording ? `实时转写中：${transcript}` : "语音转写完成");
-    } catch (error) {
-      updateVoiceStatus(`语音转写失败：${error.message}`);
-    } finally {
-      state.voice.transcribing = false;
-      syncUiState();
-    }
-  }
-
-  state.voice.queueProcessing = false;
-}
-
-async function stopVoiceRecording() {
+async function stopVoiceRecording({ autoSend = false } = {}) {
   if (!state.voice.recording) {
     return;
   }
 
+  const capturedChunks = state.voice.pcmChunks.map((chunk) => new Float32Array(chunk));
+  const inputSampleRate = state.voice.inputSampleRate;
+
   state.voice.recording = false;
-  window.clearInterval(state.voice.flushTimerId);
-  state.voice.flushTimerId = null;
+  clearVoiceSilenceTimer();
   syncUiState();
-  updateVoiceStatus("正在收尾最后一段语音...");
+  updateVoiceStatus("正在识别语音...");
 
   try {
-    flushVoiceSegment({ force: true });
     await releaseVoiceCapture();
-    await processVoiceQueue();
-    updateVoiceStatus("语音输入已停止");
-  } catch (error) {
-    updateVoiceStatus(`语音转写失败：${error.message}`);
-  } finally {
-    resetVoiceSegmentationState();
+
+    if (!state.voice.speechDetected || capturedChunks.length === 0) {
+      updateVoiceStatus("没有检测到有效语音。");
+      return;
+    }
+
+    state.voice.transcribing = true;
+    syncUiState();
+    const transcript = await transcribeRecordedVoice(capturedChunks, inputSampleRate);
     state.voice.transcribing = false;
     syncUiState();
-  }
-}
 
-function maybeFlushVoiceSegment() {
-  if (!state.voice.recording || !state.voice.voiceDetectedAt) {
-    return;
-  }
-
-  const now = Date.now();
-  const silentFor = state.voice.lastVoiceAt ? now - state.voice.lastVoiceAt : 0;
-  const activeFor = now - state.voice.voiceDetectedAt;
-
-  if (activeFor >= VOICE_MAX_SEGMENT_MS || silentFor >= VOICE_SILENCE_HOLD_MS) {
-    const flushed = flushVoiceSegment();
-    if (flushed) {
-      processVoiceQueue().catch(() => {});
+    if (autoSend) {
+      updateVoiceStatus("识别完成，正在发送...");
+      await submitVoiceInstruction(transcript);
+      return;
     }
+
+    updateVoiceStatus("识别完成");
+  } catch (error) {
+    state.voice.transcribing = false;
+    syncUiState();
+    updateVoiceStatus(`语音识别失败：${error.message}`);
+  } finally {
+    resetVoiceState();
   }
 }
 
@@ -536,11 +494,9 @@ async function startVoiceRecording() {
     state.voice.audioContext = audioContext;
     state.voice.sourceNode = sourceNode;
     state.voice.processorNode = processorNode;
-    state.voice.queue = [];
-    resetVoiceSegmentationState();
     state.voice.inputSampleRate = audioContext.sampleRate;
     state.voice.recording = true;
-    state.voice.baseDraft = elements.instructionInput.value;
+    resetVoiceState();
 
     processorNode.onaudioprocess = (event) => {
       if (!state.voice.recording) {
@@ -549,46 +505,38 @@ async function startVoiceRecording() {
 
       const samples = new Float32Array(event.inputBuffer.getChannelData(0));
       const rms = computeRms(samples);
-      const now = Date.now();
-
       if (rms >= VOICE_ACTIVITY_RMS_THRESHOLD) {
-        if (!state.voice.voiceDetectedAt) {
-          state.voice.voiceDetectedAt = now;
-          state.voice.pcmChunks = [];
-        }
-
-        state.voice.lastVoiceAt = now;
+        state.voice.speechDetected = true;
+        state.voice.lastVoiceAt = Date.now();
       }
 
-      if (state.voice.voiceDetectedAt) {
+      if (state.voice.speechDetected) {
         state.voice.pcmChunks.push(samples);
-        state.voice.maxChunkRms = Math.max(state.voice.maxChunkRms, rms);
       }
     };
 
     sourceNode.connect(processorNode);
     processorNode.connect(audioContext.destination);
 
-    window.clearInterval(state.voice.flushTimerId);
-    state.voice.flushTimerId = window.setInterval(() => {
-      if (!state.voice.recording) {
+    clearVoiceSilenceTimer();
+    state.voice.silenceTimerId = window.setInterval(() => {
+      if (!state.voice.recording || !state.voice.speechDetected || !state.voice.lastVoiceAt) {
         return;
       }
 
-      maybeFlushVoiceSegment();
-      if (!state.voice.voiceDetectedAt && !state.voice.transcribing) {
-        updateVoiceStatus("实时监听中，等待你说话...");
+      const silentFor = Date.now() - state.voice.lastVoiceAt;
+      if (silentFor >= VOICE_AUTO_SEND_SILENCE_MS) {
+        stopVoiceRecording({ autoSend: true }).catch(() => {});
       }
-    }, VOICE_TICK_MS);
+    }, 120);
 
-    updateVoiceStatus("实时监听已开始，检测到完整短句后会写入输入框");
+    updateVoiceStatus("正在听你说话，静音 3 秒会自动发送。");
     syncUiState();
   } catch (error) {
     await releaseVoiceCapture();
     state.voice.recording = false;
-    window.clearInterval(state.voice.flushTimerId);
-    state.voice.flushTimerId = null;
-    resetVoiceSegmentationState();
+    clearVoiceSilenceTimer();
+    resetVoiceState();
     syncUiState();
     updateVoiceStatus(`无法开始录音：${error.message}`);
   }
@@ -628,7 +576,7 @@ elements.resumeFailedStepButton?.addEventListener("click", async () => {
 
 elements.voiceButton?.addEventListener("click", async () => {
   if (state.voice.recording) {
-    await stopVoiceRecording();
+    await stopVoiceRecording({ autoSend: true });
     return;
   }
 

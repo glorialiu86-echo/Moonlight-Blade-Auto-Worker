@@ -55,7 +55,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../../public");
 const port = Number(process.env.PORT || 3000);
 const AUTONOMOUS_INTERVAL_MS = 3000;
-const SCRIPT_ARM_DELAY_MS = 5 * 60 * 1000;
+const INPUT_PROTECTION_DELAY_MS = 2 * 60 * 1000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 3000;
@@ -367,13 +367,17 @@ function advanceAutomationProgress(automationState) {
 function armAutomationScript(instruction) {
   clearPendingResumeContext();
   const now = new Date();
-  const startsAt = new Date(now.getTime() + SCRIPT_ARM_DELAY_MS);
+  const startsAt = new Date(now.getTime() + INPUT_PROTECTION_DELAY_MS);
+  autoCaptureService.stop();
 
   updateAutomation({
     status: "armed",
     instruction,
     armedAt: now.toISOString(),
+    armedActionKind: "script_start",
     startsAt: startsAt.toISOString(),
+    inputProtectionUntil: startsAt.toISOString(),
+    inputProtectionButton: "submit",
     startedAt: null,
     finishedAt: null,
     stageIndex: 0,
@@ -389,9 +393,38 @@ function armAutomationScript(instruction) {
   updateAgent({
     mode: "autonomous",
     phase: "armed",
-    currentObjective: "按既定安排等籽岷离开后再动手",
+    currentObjective: "先留两分钟鼠标脱离时间，之后再按既定安排动手",
     queuedUserObjective: instruction,
     lastUserInstruction: instruction
+  });
+}
+
+function armResumeFailedStep() {
+  const context = pendingResumeContext;
+  if (!context?.workerActions?.length) {
+    throw new Error("当前没有可继续的失败步骤。");
+  }
+
+  const now = new Date();
+  const startsAt = new Date(now.getTime() + INPUT_PROTECTION_DELAY_MS);
+  setStatus("running");
+  autoCaptureService.stop();
+  setLastError(null);
+  updateAutomation({
+    status: "armed",
+    armedAt: now.toISOString(),
+    armedActionKind: "resume_failed_step",
+    startsAt: startsAt.toISOString(),
+    inputProtectionUntil: startsAt.toISOString(),
+    inputProtectionButton: "resume",
+    resumeAvailable: false,
+    resumeFailedStepTitle: context.failedStepTitle || null
+  });
+  updateAgent({
+    mode: "autonomous",
+    phase: "armed",
+    currentObjective: `先留两分钟鼠标脱离时间，之后从「${context.failedStepTitle || "失败步骤"}」继续`,
+    lastAutonomousInstruction: context.plan?.intent || getState().agent.lastAutonomousInstruction
   });
 }
 
@@ -504,6 +537,9 @@ function clearPendingResumeContext({ preserveFailureMeta = false } = {}) {
   updateAutomation({
     resumeAvailable: false,
     resumeFailedStepTitle: null,
+    armedActionKind: null,
+    inputProtectionUntil: null,
+    inputProtectionButton: null,
     ...(preserveFailureMeta
       ? {}
       : {
@@ -855,6 +891,15 @@ function ensureAutoCaptureRunning() {
   if (!captureState.enabled || captureState.status === "idle" || captureState.status === "paused") {
     autoCaptureService.start();
   }
+}
+
+function syncAutoCaptureForInteractionMode(interactionMode) {
+  if (interactionMode === "watch") {
+    ensureAutoCaptureRunning();
+    return;
+  }
+
+  autoCaptureService.stop();
 }
 
 function buildAssistantMessage({ plan, execution, perceptionSummary }) {
@@ -1715,7 +1760,7 @@ async function resumeFailedAutomationStep() {
 
   setLastError(null);
   setStatus("running");
-  autoCaptureService.start();
+  autoCaptureService.stop();
   updateAutomation({
     status: "running"
   });
@@ -1757,9 +1802,9 @@ async function resumeFailedAutomationStep() {
     }
 
     setLastError(error.message);
-    updateAutomation({
-      status: "paused"
-    });
+      updateAutomation({
+        status: "paused"
+      });
     updateAgent({
       phase: "waiting"
     });
@@ -2024,8 +2069,24 @@ async function maybeRunAutonomousTurn() {
         return;
       }
 
+      const armedActionKind = String(automation.armedActionKind || "script_start");
+      if (armedActionKind === "resume_failed_step") {
+        updateAutomation({
+          status: "running",
+          armedActionKind: null,
+          inputProtectionUntil: null,
+          inputProtectionButton: null
+        });
+        appendLog("info", "失败恢复动作已结束鼠标脱离保护，开始执行");
+        await resumeFailedAutomationStep();
+        return;
+      }
+
       updateAutomation({
         status: "running",
+        armedActionKind: null,
+        inputProtectionUntil: null,
+        inputProtectionButton: null,
         startedAt: new Date().toISOString()
       });
       appendMessage({
@@ -2182,7 +2243,7 @@ async function handleControl(request, response) {
       appendLog("info", "运行上下文已清空");
     },
     resume_failed_step: async () => {
-      await resumeFailedAutomationStep();
+      armResumeFailedStep();
     }
   };
 
@@ -2232,6 +2293,7 @@ async function handleTurn(request, response) {
   const instruction = String(body.instruction || "").trim();
   const state = getState();
   const scene = body.scene || state.scene;
+  const effectiveInteractionMode = state.interactionMode || "act";
 
   if (!instruction) {
     return sendJson(response, 400, { ok: false, error: "Instruction is required" });
@@ -2247,7 +2309,7 @@ async function handleTurn(request, response) {
 
   if (state.status === "idle") {
     setStatus("running");
-    ensureAutoCaptureRunning();
+    syncAutoCaptureForInteractionMode(effectiveInteractionMode);
     appendLog("info", "系统从空闲状态自动进入运行状态");
   }
 
@@ -2414,13 +2476,15 @@ async function handleChat(request, response) {
     return sendJson(response, 400, { ok: false, error: "Unsupported interaction mode" });
   }
 
+  const effectiveInteractionMode = automationTriggered
+    ? "act"
+    : requestedInteractionMode || getState().interactionMode || "watch";
+
   setStatus("running");
-  ensureAutoCaptureRunning();
+  syncAutoCaptureForInteractionMode(effectiveInteractionMode);
   setLastError(null);
   clearPendingResumeContext();
-  if (requestedInteractionMode) {
-    setInteractionMode(requestedInteractionMode);
-  }
+  setInteractionMode(effectiveInteractionMode);
   if (requestedExternalInputGuardEnabled !== null) {
     setExternalInputGuardEnabled(requestedExternalInputGuardEnabled);
   }

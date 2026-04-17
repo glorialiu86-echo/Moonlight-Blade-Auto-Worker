@@ -136,6 +136,16 @@ body {
   background: linear-gradient(135deg, #d54a35 0%, #9d241c 100%);
 }
 
+.simple-composer-actions button.button-input-protected {
+  background: linear-gradient(135deg, #f2c14a 0%, #c8921d 100%);
+  color: #2d1b00;
+  box-shadow: 0 0 0 2px rgba(242, 193, 74, 0.22);
+}
+
+.simple-composer-actions button.button-input-protected:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f5c95d 0%, #d19a22 100%);
+}
+
 .simple-composer-actions .primary {
   min-width: 112px;
 }

@@ -4,6 +4,8 @@ const state = {
   interactionMode: "watch",
   resumeAvailable: false,
   resumeFailureCode: "",
+  inputProtectionUntil: "",
+  inputProtectionButton: "",
   voiceSupported: false,
   voice: {
     recording: false,
@@ -34,6 +36,7 @@ const elements = {
   composerForm: document.querySelector("#composerForm"),
   instructionInput: document.querySelector("#instructionInput"),
   messageList: document.querySelector("#messageList"),
+  submitButton: document.querySelector('#composerForm button[type="submit"]'),
   resumeFailedStepButton: document.querySelector("#resumeFailedStepButton"),
   voiceButton: document.querySelector("#voiceButton"),
   voiceStatus: document.querySelector("#voiceStatus"),
@@ -74,16 +77,28 @@ function updateVoiceStatus(message = "") {
 function syncUiState() {
   const busy = state.submitting || state.voice.transcribing;
   elements.instructionInput.disabled = state.submitting;
-  elements.composerForm.querySelector('button[type="submit"]').disabled = busy || state.voice.recording;
+  const protectionUntilMs = state.inputProtectionUntil ? new Date(state.inputProtectionUntil).getTime() : 0;
+  const protectionActive = Boolean(protectionUntilMs) && Date.now() < protectionUntilMs;
+
+  if (elements.submitButton) {
+    const submitProtected = protectionActive && state.inputProtectionButton === "submit";
+    elements.submitButton.disabled = busy || state.voice.recording || submitProtected;
+    elements.submitButton.classList.toggle("button-input-protected", submitProtected);
+  }
+
   if (elements.resumeFailedStepButton) {
-    elements.resumeFailedStepButton.disabled = busy || state.voice.recording || !state.resumeAvailable;
+    const resumeProtected = protectionActive && state.inputProtectionButton === "resume";
+    elements.resumeFailedStepButton.disabled = busy || state.voice.recording || !state.resumeAvailable || resumeProtected;
     elements.resumeFailedStepButton.classList.toggle(
       "resume-triangle-alert",
       state.resumeAvailable && Boolean(state.resumeFailureCode)
     );
+    elements.resumeFailedStepButton.classList.toggle("button-input-protected", resumeProtected);
     elements.resumeFailedStepButton.setAttribute(
       "aria-label",
-      state.resumeAvailable && state.resumeFailureCode
+      resumeProtected
+        ? "正在等待两分钟鼠标脱离保护结束"
+        : state.resumeAvailable && state.resumeFailureCode
         ? "存在失败恢复动作，点击继续"
         : "从失败步骤继续"
     );
@@ -173,6 +188,8 @@ function renderRuntimeState(runtimeState) {
   state.interactionMode = runtimeState.interactionMode || "watch";
   state.resumeAvailable = Boolean(runtimeState.automation?.resumeAvailable);
   state.resumeFailureCode = String(runtimeState.automation?.lastFailureCode || "");
+  state.inputProtectionUntil = String(runtimeState.automation?.inputProtectionUntil || "");
+  state.inputProtectionButton = String(runtimeState.automation?.inputProtectionButton || "");
   renderMessages(runtimeState.messages);
   syncUiState();
 }
@@ -747,6 +764,10 @@ initVoiceInput();
 refresh().catch(() => {
   renderEmptyState();
 });
+
+setInterval(() => {
+  syncUiState();
+}, 500);
 
 setInterval(() => {
   refresh().catch(() => {});

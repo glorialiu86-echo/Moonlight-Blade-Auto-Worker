@@ -56,7 +56,7 @@ export function getAliyunAsrConfig() {
   return {
     apiKey: optionalEnv("ALIYUN_ASR_API_KEY", process.env.LLM_API_KEY?.trim() || ""),
     model: optionalEnv("ALIYUN_ASR_MODEL", "qwen3-asr-flash"),
-    url: optionalEnv("ALIYUN_ASR_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1/audio/transcriptions"),
+    url: optionalEnv("ALIYUN_ASR_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"),
     language: optionalEnv("ALIYUN_ASR_LANGUAGE", "zh")
   };
 }

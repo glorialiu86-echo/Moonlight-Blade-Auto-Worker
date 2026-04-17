@@ -3753,6 +3753,284 @@ def run_stealth_knock_loot_flow(hwnd: int, action: dict[str, Any]) -> dict[str, 
     }
 
 
+def run_stealth_search_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_search_target")
+    search_timeout_ms = int(action.get("searchTimeoutMs") or 7000)
+    turn_pulse_ms = int(action.get("turnPulseMs") or 180)
+    move_settle_ms = int(action.get("moveSettleMs") or 80)
+    front_roi = action.get("frontRoi") or STEALTH_ROIS["front_name_band"]
+    roi = (
+        float(front_roi[0]),
+        float(front_roi[1]),
+        float(front_roi[2]),
+        float(front_roi[3]),
+    )
+
+    focus_window(hwnd)
+    deadline = time.time() + search_timeout_ms / 1000.0
+    search_pattern = ["left", "left", "right", "right"]
+    search_attempts: list[dict[str, Any]] = []
+    turn_attempts: list[dict[str, Any]] = []
+    target = find_stealth_front_target(hwnd, roi)
+
+    while time.time() <= deadline and target is None:
+        for key in search_pattern:
+            if time.time() > deadline:
+                break
+            INPUT_GUARD.check_or_raise(title)
+            turn_attempts.append(pulse_turn_key(hwnd, key, turn_pulse_ms, title))
+            INPUT_GUARD.guarded_sleep(move_settle_ms, title)
+            target = find_stealth_front_target(hwnd, roi)
+            search_attempts.append({"key": key, "target": target})
+            if target is not None:
+                break
+
+    if target is None:
+        raise RuntimeError("Stealth target search timed out before finding a front NPC name")
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Aligned to front target {target['text']}",
+        "input": {
+            "mode": "stealth_search_target",
+            "target": target,
+            "searchTimeoutMs": search_timeout_ms,
+            "turnPulseMs": turn_pulse_ms,
+            "searchAttempts": search_attempts,
+            "turnAttempts": turn_attempts,
+        },
+    }
+
+
+def run_stealth_select_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_select_target")
+    front_roi = action.get("frontRoi") or STEALTH_ROIS["front_name_band"]
+    roi = (
+        float(front_roi[0]),
+        float(front_roi[1]),
+        float(front_roi[2]),
+        float(front_roi[3]),
+    )
+
+    target = find_stealth_front_target(hwnd, roi)
+    if target is None:
+        raise RuntimeError("No front target was available to select")
+
+    click = click_screen_point(hwnd, int(target["screenX"]), int(target["screenY"]), "left")
+    INPUT_GUARD.guarded_sleep(60, title)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Selected front target {target['text']}",
+        "input": {
+            "mode": "stealth_select_target",
+            "target": target,
+            "click": click,
+        },
+    }
+
+
+def run_stealth_rush_knockout(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_rush_knockout")
+    knockout_timeout_ms = int(action.get("knockoutTimeoutMs") or 5000)
+    strike_interval_ms = int(action.get("strikeIntervalMs") or 0)
+    move_settle_ms = int(action.get("moveSettleMs") or 50)
+
+    knockout_state = detect_knockout_context(hwnd)
+    strike_count = 0
+    started_at = time.time()
+    INPUT_GUARD.check_or_raise(title)
+    pydirectinput.press("3")
+    INPUT_GUARD.refresh_baseline()
+    strike_count = 1
+
+    while (time.time() - started_at) * 1000 < knockout_timeout_ms:
+        INPUT_GUARD.guarded_sleep(max(40, strike_interval_ms), title)
+        knockout_state = detect_knockout_context(hwnd)
+        if knockout_state["visible"]:
+            break
+
+    if not knockout_state["visible"]:
+        raise RuntimeError("Did not reach knockout context before timeout")
+
+    INPUT_GUARD.guarded_sleep(move_settle_ms, title)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Reached knockout context",
+        "input": {
+            "mode": "stealth_rush_knockout",
+            "knockoutText": knockout_state["text"],
+            "strikeCount": strike_count,
+            "knockoutTimeoutMs": knockout_timeout_ms,
+            "strikeIntervalMs": strike_interval_ms,
+        },
+    }
+
+
+def run_stealth_carry_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_carry_target")
+    carry_settle_ms = int(action.get("carrySettleMs") or 120)
+    knockout_state = detect_knockout_context(hwnd)
+    if not knockout_state["visible"]:
+        raise RuntimeError("Cannot carry target because knockout context is not visible")
+    pydirectinput.press("2")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(carry_settle_ms, title)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Pressed 2 to carry target",
+        "input": {"mode": "stealth_carry_target", "knockoutText": knockout_state["text"]},
+    }
+
+
+def run_stealth_backstep_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_backstep_target")
+    backstep_ms = int(action.get("backstepMs") or 3000)
+    move_settle_ms = int(action.get("moveSettleMs") or 40)
+    pydirectinput.keyDown("s")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(backstep_ms, title)
+    pydirectinput.keyUp("s")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(move_settle_ms, title)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Backstepped with target for {backstep_ms}ms",
+        "input": {"mode": "stealth_backstep_target", "backstepMs": backstep_ms},
+    }
+
+
+def run_stealth_drop_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_drop_target")
+    drop_settle_ms = int(action.get("dropSettleMs") or 80)
+    click = click_named_point(hwnd, "drop_carried_target")
+    INPUT_GUARD.guarded_sleep(drop_settle_ms, title)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Dropped the carried target",
+        "input": {"mode": "stealth_drop_target", "click": click},
+    }
+
+
+def run_stealth_open_loot(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_open_loot")
+    loot_open_timeout_ms = int(action.get("lootOpenTimeoutMs") or 1200)
+    loot_settle_ms = int(action.get("lootSettleMs") or 40)
+    pydirectinput.press("4")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(loot_settle_ms, title)
+
+    loot_state = detect_loot_screen(hwnd)
+    deadline = time.time() + loot_open_timeout_ms / 1000.0
+    while time.time() <= deadline and not loot_state["visible"]:
+        INPUT_GUARD.guarded_sleep(40, title)
+        loot_state = detect_loot_screen(hwnd)
+
+    if not loot_state["visible"]:
+        raise RuntimeError("Loot panel did not appear after pressing 4")
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Opened loot panel",
+        "input": {"mode": "stealth_open_loot", "lootText": loot_state["text"]},
+    }
+
+
+def ensure_loot_panel_visible(hwnd: int, title: str) -> dict[str, Any]:
+    loot_state = detect_loot_screen(hwnd)
+    if not loot_state["visible"]:
+        raise RuntimeError(f"{title} requires the loot panel to stay visible")
+    return loot_state
+
+
+def run_loot_select_item_once(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "loot_select_item_once")
+    loot_settle_ms = int(action.get("lootSettleMs") or 20)
+    ensure_loot_panel_visible(hwnd, title)
+    click = click_named_point(hwnd, "loot_item_1")
+    INPUT_GUARD.guarded_sleep(loot_settle_ms, title)
+    ensure_loot_panel_visible(hwnd, title)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Selected the fixed loot item slot",
+        "input": {"mode": "loot_select_item_once", "click": click},
+    }
+
+
+def run_loot_put_in_once(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "loot_put_in_once")
+    loot_settle_ms = int(action.get("lootSettleMs") or 20)
+    ensure_loot_panel_visible(hwnd, title)
+    click = click_named_point(hwnd, "loot_put_in")
+    INPUT_GUARD.guarded_sleep(loot_settle_ms, title)
+    ensure_loot_panel_visible(hwnd, title)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Clicked put-in on loot panel",
+        "input": {"mode": "loot_put_in_once", "click": click},
+    }
+
+
+def run_loot_submit_once(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "loot_submit_once")
+    loot_settle_ms = int(action.get("lootSettleMs") or 40)
+    ensure_loot_panel_visible(hwnd, title)
+    click = click_named_point(hwnd, "loot_submit")
+    INPUT_GUARD.guarded_sleep(loot_settle_ms, title)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Submitted loot",
+        "input": {"mode": "loot_submit_once", "click": click},
+    }
+
+
+def run_loot_escape_forward(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "loot_escape_forward")
+    escape_forward_ms = int(action.get("escapeForwardMs") or 5000)
+    pydirectinput.keyDown("w")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(escape_forward_ms, title)
+    pydirectinput.keyUp("w")
+    INPUT_GUARD.refresh_baseline()
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Escaped forward for {escape_forward_ms}ms",
+        "input": {"mode": "loot_escape_forward", "escapeForwardMs": escape_forward_ms},
+    }
+
+
 
 
 def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
@@ -3801,6 +4079,39 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "stealth_front_arc_strike":
         return run_stealth_front_arc_strike(hwnd, action)
+
+    if action_type == "stealth_search_target":
+        return run_stealth_search_target(hwnd, action)
+
+    if action_type == "stealth_select_target":
+        return run_stealth_select_target(hwnd, action)
+
+    if action_type == "stealth_rush_knockout":
+        return run_stealth_rush_knockout(hwnd, action)
+
+    if action_type == "stealth_carry_target":
+        return run_stealth_carry_target(hwnd, action)
+
+    if action_type == "stealth_backstep_target":
+        return run_stealth_backstep_target(hwnd, action)
+
+    if action_type == "stealth_drop_target":
+        return run_stealth_drop_target(hwnd, action)
+
+    if action_type == "stealth_open_loot":
+        return run_stealth_open_loot(hwnd, action)
+
+    if action_type == "loot_select_item_once":
+        return run_loot_select_item_once(hwnd, action)
+
+    if action_type == "loot_put_in_once":
+        return run_loot_put_in_once(hwnd, action)
+
+    if action_type == "loot_submit_once":
+        return run_loot_submit_once(hwnd, action)
+
+    if action_type == "loot_escape_forward":
+        return run_loot_escape_forward(hwnd, action)
 
     if action_type == "stealth_knock_loot_flow":
         return run_stealth_knock_loot_flow(hwnd, action)

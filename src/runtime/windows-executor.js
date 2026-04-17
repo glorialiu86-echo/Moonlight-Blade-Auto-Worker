@@ -192,7 +192,7 @@ function createNpcStealActions(baseAction, options = {}) {
 }
 
 function createKnockLootActions(baseAction) {
-  return [
+  const actions = [
     {
       id: `${baseAction.id}-primitive-1`,
       title: "Route To Stealth Point",
@@ -244,22 +244,99 @@ function createKnockLootActions(baseAction) {
     },
     {
       id: `${baseAction.id}-primitive-7`,
-      title: "Stealth Knock And Loot",
-      type: "stealth_knock_loot_flow",
+      title: "Search Front Target",
+      type: "stealth_search_target",
       sourceType: baseAction.sourceType,
       searchTimeoutMs: 7000,
-      knockoutTimeoutMs: 5000,
       turnPulseMs: 180,
-      strikeIntervalMs: 120,
       moveSettleMs: 80,
-      carrySettleMs: 220,
-      backstepMs: 3000,
-      dropSettleMs: 220,
-      lootOpenTimeoutMs: 1600,
-      lootSettleMs: 160,
       frontRoi: [0.36, 0.18, 0.64, 0.42]
+    },
+    {
+      id: `${baseAction.id}-primitive-8`,
+      title: "Select Front Target",
+      type: "stealth_select_target",
+      sourceType: baseAction.sourceType,
+      frontRoi: [0.36, 0.18, 0.64, 0.42]
+    },
+    {
+      id: `${baseAction.id}-primitive-9`,
+      title: "Trigger Knockout",
+      type: "stealth_rush_knockout",
+      sourceType: baseAction.sourceType,
+      knockoutTimeoutMs: 5000,
+      strikeIntervalMs: 0,
+      moveSettleMs: 50
+    },
+    {
+      id: `${baseAction.id}-primitive-10`,
+      title: "Carry Target",
+      type: "stealth_carry_target",
+      sourceType: baseAction.sourceType,
+      carrySettleMs: 120
+    },
+    {
+      id: `${baseAction.id}-primitive-11`,
+      title: "Backstep With Target",
+      type: "stealth_backstep_target",
+      sourceType: baseAction.sourceType,
+      backstepMs: 3000,
+      moveSettleMs: 40
+    },
+    {
+      id: `${baseAction.id}-primitive-12`,
+      title: "Drop Carried Target",
+      type: "stealth_drop_target",
+      sourceType: baseAction.sourceType,
+      dropSettleMs: 80
+    },
+    {
+      id: `${baseAction.id}-primitive-13`,
+      title: "Open Loot Panel",
+      type: "stealth_open_loot",
+      sourceType: baseAction.sourceType,
+      lootOpenTimeoutMs: 1200,
+      lootSettleMs: 40
     }
   ];
+
+  for (let index = 0; index < 8; index += 1) {
+    actions.push(
+      {
+        id: `${baseAction.id}-primitive-${14 + index * 2}`,
+        title: `Loot Select Item ${index + 1}`,
+        type: "loot_select_item_once",
+        sourceType: baseAction.sourceType,
+        lootSettleMs: 20
+      },
+      {
+        id: `${baseAction.id}-primitive-${15 + index * 2}`,
+        title: `Loot Put In ${index + 1}`,
+        type: "loot_put_in_once",
+        sourceType: baseAction.sourceType,
+        lootSettleMs: 20
+      }
+    );
+  }
+
+  actions.push(
+    {
+      id: `${baseAction.id}-primitive-30`,
+      title: "Submit Loot",
+      type: "loot_submit_once",
+      sourceType: baseAction.sourceType,
+      lootSettleMs: 40
+    },
+    {
+      id: `${baseAction.id}-primitive-31`,
+      title: "Escape After Loot",
+      type: "loot_escape_forward",
+      sourceType: baseAction.sourceType,
+      escapeForwardMs: 5000
+    }
+  );
+
+  return actions;
 }
 
 function createWorkerActions(plan) {

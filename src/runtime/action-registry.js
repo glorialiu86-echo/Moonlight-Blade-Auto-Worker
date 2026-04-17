@@ -51,9 +51,9 @@ export const ACTION_REGISTRY = {
   steal: {
     key: "steal",
     label: "偷窃",
-    executorType: "npc_chat_entry_flow",
+    executorType: "npc_steal_flow",
     availability: "partial",
-    note: "我现在先只拆到接触目标并进交互链，偷窃专属动作还没补完。"
+    note: "我会拆成按 4 拉起妙取，再点右侧固定金色妙取按钮；潜行和靠近目标不归这一段管。"
   },
   strike: {
     key: "strike",

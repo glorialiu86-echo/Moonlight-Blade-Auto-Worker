@@ -170,6 +170,27 @@ function createNpcTradeActions(baseAction, options = {}) {
   ]);
 }
 
+function createNpcStealActions(baseAction, options = {}) {
+  return createNpcFlowActions(baseAction, [
+    {
+      title: "触发妙取",
+      type: "press_shortcut",
+      payload: {
+        shortcut: "steal",
+        postDelayMs: options.triggerDelayMs || 700
+      }
+    },
+    {
+      title: "点击右侧第一条金色妙取按钮",
+      type: "click_steal_button",
+      payload: {
+        buttonIndex: options.buttonIndex || 1,
+        postDelayMs: options.clickDelayMs || 500
+      }
+    }
+  ]);
+}
+
 function createWorkerActions(plan) {
   return plan.actions.flatMap((action, index) => {
     const actionDefinition = getActionDefinition(action.type);
@@ -212,12 +233,17 @@ function createWorkerActions(plan) {
           scanIntervalMs: 180
         });
       case "threaten":
-      case "steal":
       case "strike":
         return createNpcChatEntryActions(baseAction, {
           timeoutMs: 4500,
           movePulseMs: 160,
           scanIntervalMs: 180
+        });
+      case "steal":
+        return createNpcStealActions(baseAction, {
+          triggerDelayMs: 700,
+          clickDelayMs: 500,
+          buttonIndex: 1
         });
       case "escape":
         return {

@@ -38,6 +38,7 @@
 - `small_talk_confirm`
 - `chat_ready`
 - `gift_screen`
+- `steal_screen`
 - `trade_screen`
 - `none`
 
@@ -238,6 +239,19 @@
   - `pointName`
   - `click`
 
+### `click_steal_button`
+
+- 前置状态：`steal_screen`
+- 行为：点击右侧列表中的固定金色 `妙取` 按钮
+- 成功状态：离开 `steal_screen`
+- 失败：点击后仍停留在 `steal_screen`
+- 关键输出：
+  - `stage`
+  - `beforeText`
+  - `pointName`
+  - `buttonIndex`
+  - `click`
+
 ### `close_current_panel`
 
 - 前置状态：
@@ -296,7 +310,19 @@
 10. `trade_submit`
 11. `close_current_panel`
 
-### `threaten / steal / strike`
+### `steal`
+
+按顺序映射为：
+
+1. `press_shortcut(steal -> 4)`
+2. `click_steal_button`
+
+说明：
+
+- 这一层只覆盖 `4 -> 金色妙取按钮`。
+- `潜行(2)`、靠近目标、再次按 `4` 开下一轮，都不归 `steal` 这个语义动作接管。
+
+### `threaten / strike`
 
 当前仍临时复用 `talk` 同一套“接触目标并推进交互链”的原子动作序列。
 

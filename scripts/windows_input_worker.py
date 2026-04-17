@@ -233,6 +233,10 @@ ACTION_POINTS = {
     "hawking_max_quantity": (1464 / 2048, 661 / 1151),
     "hawking_stock_button": (1298 / 2048, 843 / 1151),
     "hawking_submit": (2459 / 2644, 1227 / 1399),
+    "steal_button_1": (1916 / 2048, 512 / 1360),
+    "steal_button_2": (1916 / 2048, 704 / 1360),
+    "steal_button_3": (1916 / 2048, 893 / 1360),
+    "steal_button_4": (1916 / 2048, 1085 / 1360),
     "gift_first_slot": (1721 / 2537, 580 / 1384),
     "gift_plus": (0.82, 0.92),
     "gift_submit": (2289 / 2537, 1216 / 1384),
@@ -320,6 +324,9 @@ SHORTCUT_KEYS = {
     "ganzhi": "3",
     "skill_3": "4",
     "jineng3": "4",
+    "steal": "4",
+    "miaoqu": "4",
+    "miaoqv": "4",
     "hawking": "4",
     "jiaomai": "4",
     "skill_4": "5",
@@ -432,6 +439,7 @@ SHORTCUT_KEYS = {
 CHAT_KEYWORDS = ["点击输入聊天", "发送", "第一次见面", "好感度"]
 GIFT_KEYWORDS = ["赠礼", "选择礼物", "赠送", "好感度"]
 TRADE_KEYWORDS = ["交易结果预览", "交易倒计时", "上架", "我的", "总价"]
+STEAL_KEYWORDS = ["妙取", "可妙取物品", "成功率", "用时"]
 CONFIRM_KEYWORDS = ["确认", "闲聊", "取消"]
 MAP_KEYWORDS = ["点击输入坐标寻路", "前往", "灵犀盏追踪目标", "通缉追踪目标"]
 VENDOR_PURCHASE_KEYWORDS = ["进货", "购买", "购买数量", "每日进货体力消耗上限", "单价", "总价"]
@@ -1046,6 +1054,14 @@ def detect_hawking_screen(hwnd: int) -> dict[str, Any]:
     }
 
 
+def detect_steal_screen(hwnd: int) -> dict[str, Any]:
+    panel_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
+    return {
+        "visible": count_keywords(panel_text, STEAL_KEYWORDS) >= 2,
+        "text": panel_text,
+    }
+
+
 def ensure_map_screen_open(hwnd: int, title: str, toggle_key: str = "m", timeout_ms: int = 2500) -> dict[str, Any]:
     focus_window(hwnd)
     current_state = detect_map_screen(hwnd)
@@ -1333,6 +1349,8 @@ def detect_npc_interaction_stage(hwnd: int) -> dict[str, Any]:
 
     if contains_any_keyword(gift_panel_text, GIFT_KEYWORDS) and not world_hud_visible:
         stage = "gift_screen"
+    elif count_keywords(trade_panel_text, STEAL_KEYWORDS) >= 2 and not world_hud_visible:
+        stage = "steal_screen"
     elif count_keywords(trade_panel_text, TRADE_KEYWORDS) >= 2 and not world_hud_visible:
         stage = "trade_screen"
     elif contains_any_keyword(chat_panel_text, CHAT_KEYWORDS) and not world_hud_visible:
@@ -3352,6 +3370,49 @@ def run_trade_click_step(
     }
 
 
+def run_click_steal_button(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "click_steal_button")
+    button_index = int(action.get("buttonIndex") or 1)
+    point_name = f"steal_button_{button_index}"
+    settle_ms = int(action.get("settleMs") or action.get("postDelayMs") or 450)
+
+    if point_name not in ACTION_POINTS:
+        raise RuntimeError(f"Unsupported steal button index: {button_index}")
+
+    stage_state = detect_npc_interaction_stage(hwnd)
+    if stage_state["stage"] != "steal_screen":
+        raise RuntimeError(
+            f"click_steal_button requires steal_screen. "
+            f"Detected stage: {stage_state['stage'] or 'none'}"
+        )
+
+    steal_state = detect_steal_screen(hwnd)
+    step_click = click_named_point(hwnd, point_name)
+    INPUT_GUARD.guarded_sleep(settle_ms, title)
+    next_stage_state = detect_npc_interaction_stage(hwnd)
+    if next_stage_state["stage"] == "steal_screen":
+        raise RuntimeError(
+            f"Steal button {point_name} did not close the steal panel. "
+            f"Last stage: {next_stage_state['stage'] or 'none'}"
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Clicked the gold steal button and left the steal panel",
+        "input": {
+            "mode": "click_steal_button",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "beforeText": steal_state["text"],
+            "pointName": point_name,
+            "buttonIndex": button_index,
+            "click": step_click,
+        },
+    }
+
+
 def run_close_current_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "close_current_panel")
@@ -3628,6 +3689,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "trade_submit":
         return run_trade_click_step(hwnd, action, "trade_final_submit_button", "Submitted the current trade", 380, True)
+
+    if action_type == "click_steal_button":
+        return run_click_steal_button(hwnd, action)
 
     if action_type == "close_current_panel":
         return run_close_current_panel(hwnd, action)

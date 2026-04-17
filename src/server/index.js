@@ -157,8 +157,7 @@ function handleExternalInputInterrupted(error, contextLabel) {
     return false;
   }
 
-  setStatus("paused");
-  autoCaptureService.pause();
+  setInteractionMode("watch");
   updateAutomation({
     status: "paused"
   });

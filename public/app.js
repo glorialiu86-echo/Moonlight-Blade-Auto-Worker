@@ -15,6 +15,7 @@ const state = {
     inputSampleRate: 48000,
     silenceTimerId: null,
     speechDetected: false,
+    speechStartedAt: 0,
     lastVoiceAt: 0,
     activityNotified: false,
     sending: false
@@ -22,7 +23,8 @@ const state = {
 };
 
 const VOICE_ACTIVITY_RMS_THRESHOLD = 0.009;
-const VOICE_AUTO_SEND_SILENCE_MS = 3000;
+const VOICE_AUTO_SEND_SILENCE_MS = 1000;
+const VOICE_MIN_SPEECH_MS = 450;
 
 const elements = {
   composerForm: document.querySelector("#composerForm"),
@@ -394,6 +396,7 @@ function clearVoiceSilenceTimer() {
 function resetVoiceState() {
   state.voice.pcmChunks = [];
   state.voice.speechDetected = false;
+  state.voice.speechStartedAt = 0;
   state.voice.lastVoiceAt = 0;
   state.voice.activityNotified = false;
 }
@@ -449,16 +452,32 @@ async function flushVoiceSegment({ autoSend = false, stopListening = false } = {
   const capturedChunks = state.voice.pcmChunks.map((chunk) => new Float32Array(chunk));
   const inputSampleRate = state.voice.inputSampleRate;
   const hadSpeech = state.voice.speechDetected;
+  const speechStartedAt = state.voice.speechStartedAt;
+  const lastVoiceAt = state.voice.lastVoiceAt;
+  const speechDuration = speechStartedAt && lastVoiceAt ? Math.max(0, lastVoiceAt - speechStartedAt) : 0;
 
   clearVoiceSilenceTimer();
   resetVoiceState();
   syncUiState();
 
-  if (!hadSpeech || capturedChunks.length === 0) {
+  if (!hadSpeech || capturedChunks.length === 0 || speechDuration < VOICE_MIN_SPEECH_MS) {
     if (stopListening) {
       state.voice.recording = false;
       await releaseVoiceCapture();
       updateVoiceStatus("语音监听已停止");
+      syncUiState();
+    } else if (hadSpeech && speechDuration > 0) {
+      updateVoiceStatus("已忽略短促杂音，继续听你说话");
+      state.voice.silenceTimerId = window.setInterval(() => {
+        if (!state.voice.recording || state.voice.sending || !state.voice.speechDetected || !state.voice.lastVoiceAt) {
+          return;
+        }
+
+        const silentFor = Date.now() - state.voice.lastVoiceAt;
+        if (silentFor >= VOICE_AUTO_SEND_SILENCE_MS) {
+          flushVoiceSegment({ autoSend: true, stopListening: false }).catch(() => {});
+        }
+      }, 120);
       syncUiState();
     }
     return;
@@ -502,7 +521,7 @@ async function flushVoiceSegment({ autoSend = false, stopListening = false } = {
           flushVoiceSegment({ autoSend: true, stopListening: false }).catch(() => {});
         }
       }, 120);
-      updateVoiceStatus("正在听你说话，静音 3 秒会自动发送。");
+      updateVoiceStatus("正在听你说话，静音 1 秒会自动发送。");
     }
     syncUiState();
   }
@@ -552,6 +571,9 @@ async function startVoiceRecording() {
       const samples = new Float32Array(event.inputBuffer.getChannelData(0));
       const rms = computeRms(samples);
       if (rms >= VOICE_ACTIVITY_RMS_THRESHOLD) {
+        if (!state.voice.speechDetected) {
+          state.voice.speechStartedAt = Date.now();
+        }
         state.voice.speechDetected = true;
         state.voice.lastVoiceAt = Date.now();
         if (!state.voice.activityNotified) {
@@ -580,7 +602,7 @@ async function startVoiceRecording() {
       }
     }, 120);
 
-    updateVoiceStatus("正在听你说话，静音 3 秒会自动发送。");
+    updateVoiceStatus("正在听你说话，静音 1 秒会自动发送。");
     syncUiState();
   } catch (error) {
     await releaseVoiceCapture();

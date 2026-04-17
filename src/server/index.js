@@ -629,26 +629,31 @@ async function buildWatchCommentaryV2({ imageInput, conversationMessages = [], t
 
 async function buildWatchUserReplyV2({ instruction, imageInput, conversationMessages = [] }) {
   const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
+  const hasImage = Boolean(imageInput);
+  const prompt = hasImage
+    ? `你是籽小刀，是和籽岷一起玩天涯明月刀的损友。结合图片回复用户消息。
+用户刚刚说：${instruction}`
+    : `你是籽小刀，是和籽岷一起玩天涯明月刀的损友。回复用户消息。
+用户刚刚说：${instruction}`;
 
-  const prompt = [
-    "你是籽小刀，现在处于观看模式。",
-    "籽岷正在自己玩游戏，你只是作为搭档在旁边接话。",
-    "优先自然回他这一句，风格像 B 站弹幕，短、顺口、有现场感。",
-    "可以顺着他的话接，也可以轻轻带到眼前玩法、任务、目标或新画面上。",
-    "只输出一句中文，不要分成多句，不要加引号。",
-    "不要进入任务规划，不要说你要接管游戏，不要提系统、截图、OCR、AI、模型。",
-    "籽岷团队是主角名字，不要老是围着主角本人打转，优先接眼前发生的事。",
-    "不要用“怕不是”这个句式，也不要复读前面聊过的梗。",
-    "可以有少量情绪起伏，但不要固定重复某个口头禅。",
-    `籽岷刚刚说：${instruction}`
-  ];
+  if (!hasImage) {
+    const result = await generateText({
+      systemPrompt: "你是籽小刀，是和籽岷一起玩天涯明月刀的损友。",
+      historyMessages,
+      userPrompt: prompt,
+      maxTokens: 400,
+      temperature: 0.85
+    });
+
+    return String(result.text || "").replace(/\s+/g, " ").trim();
+  }
 
   const result = await analyzeImageWithHistory({
     imageInput,
     historyMessages,
-    prompt: prompt.join("\n"),
-    systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。优先像搭档一样自然回话，风格像 B 站弹幕：短、顺口、有现场感。可以有少量情绪起伏，但不要固定重复某个口头禅。不要复读，不要总问问题，不要用“怕不是”句式。籽岷团队是主角名字，不要老盯着主角本人描述。",
-    maxTokens: 120,
+    prompt,
+    systemPrompt: "你是籽小刀，是和籽岷一起玩天涯明月刀的损友。",
+    maxTokens: 400,
     temperature: 0.85
   });
 
@@ -757,7 +762,17 @@ async function runWatchUserReplyTurn({ instruction, scene, perception, conversat
   });
 
   try {
-    const replyImageInput = await captureReplyImageOrThrow();
+    let replyImageInput = null;
+
+    try {
+      replyImageInput = await captureReplyImageOrThrow();
+    } catch (captureError) {
+      appendLog("warn", "watch mode reply capture unavailable, fallback to text-only", {
+        instruction,
+        error: captureError.message
+      });
+    }
+
     const replyText = await buildWatchUserReplyV2({
       instruction,
       imageInput: replyImageInput,
@@ -779,10 +794,10 @@ async function runWatchUserReplyTurn({ instruction, scene, perception, conversat
       decide: ""
     });
 
-    appendLog("info", "watch mode replied to user with fresh screenshot", {
+    appendLog("info", "watch mode replied to user", {
       instruction,
       replyText,
-      imageSource: "reply_capture"
+      imageSource: replyImageInput ? "reply_capture" : "text_only"
     });
 
     updateAgent({

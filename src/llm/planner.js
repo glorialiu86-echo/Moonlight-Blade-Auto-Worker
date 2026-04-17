@@ -8,6 +8,7 @@ import { ALLOWED_ACTIONS } from "../runtime/action-registry.js";
 const plannerSystemPrompt = `
 你是《天涯明月刀》里的籽小刀。
 当前和你对话、给你下指令的用户就是籽岷。
+他的角色ID是“籽岷团队”。
 你的口吻固定为：
 - 邪恶
 - 主动
@@ -99,7 +100,7 @@ function buildTurnUserPrompt({ instruction, scene, perception, isLatest = false 
   return [
     isLatest ? "这是当前最新一轮，请返回本轮 JSON 规划。" : "这是历史轮次，请按当时上下文理解。",
     `当前场景：${sceneDescription(scene)}`,
-    `用户是籽岷。本轮籽岷指令：${instruction}`,
+    `用户是籽岷，他的角色ID是“籽岷团队”。本轮籽岷指令：${instruction}`,
     "最近一张截图识别结果：",
     buildPerceptionContext(perception)
   ].join("\n");

@@ -198,8 +198,8 @@ function createKnockLootActions(baseAction) {
       title: "Route To Stealth Point",
       type: "map_route_to_coordinate",
       sourceType: baseAction.sourceType,
-      xCoordinate: 740,
-      yCoordinate: 944,
+      xCoordinate: 742,
+      yCoordinate: 946,
       postDelayMs: 1000,
       waitAfterGoMs: 800
     },
@@ -570,8 +570,8 @@ function createStealthPrimitiveActions() {
       id: "primitive-1",
       title: "Route To Stealth Point",
       type: "map_route_to_coordinate",
-      xCoordinate: 740,
-      yCoordinate: 944,
+      xCoordinate: 742,
+      yCoordinate: 946,
       postDelayMs: 1000,
       waitAfterGoMs: 800
     },

@@ -3808,6 +3808,8 @@ def run_stealth_search_target(hwnd: int, action: dict[str, Any]) -> dict[str, An
 def run_stealth_select_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "stealth_select_target")
+    selection_timeout_ms = int(action.get("selectionTimeoutMs") or 2200)
+    selection_settle_ms = int(action.get("selectionSettleMs") or 120)
     front_roi = action.get("frontRoi") or STEALTH_ROIS["front_name_band"]
     roi = (
         float(front_roi[0]),
@@ -3820,8 +3822,20 @@ def run_stealth_select_target(hwnd: int, action: dict[str, Any]) -> dict[str, An
     if target is None:
         raise RuntimeError("No front target was available to select")
 
-    click = click_screen_point(hwnd, int(target["screenX"]), int(target["screenY"]), "left")
-    INPUT_GUARD.guarded_sleep(60, title)
+    started_at = time.time()
+    click_attempts: list[dict[str, Any]] = []
+    stage_state = detect_npc_interaction_stage(hwnd)
+    while (time.time() - started_at) * 1000 < selection_timeout_ms:
+        click = click_screen_point(hwnd, int(target["screenX"]), int(target["screenY"]), "left")
+        click_attempts.append(click)
+        INPUT_GUARD.guarded_sleep(selection_settle_ms, title)
+        stage_state = detect_npc_interaction_stage(hwnd)
+        if stage_state["stage"] == "npc_selected" or contains_any_keyword(stage_state["texts"].get("look_button", ""), ["查看"]):
+            break
+
+    if stage_state["stage"] != "npc_selected" and not contains_any_keyword(stage_state["texts"].get("look_button", ""), ["查看"]):
+        raise RuntimeError("Failed to reach selected NPC state with 查看/放大镜 visible")
+
     return {
         "id": action_id,
         "title": title,
@@ -3830,7 +3844,10 @@ def run_stealth_select_target(hwnd: int, action: dict[str, Any]) -> dict[str, An
         "input": {
             "mode": "stealth_select_target",
             "target": target,
-            "click": click,
+            "click": click_attempts[-1] if click_attempts else None,
+            "clickAttempts": click_attempts,
+            "stage": stage_state["stage"],
+            "stageTexts": stage_state["texts"],
         },
     }
 
@@ -4028,6 +4045,60 @@ def run_loot_escape_forward(hwnd: int, action: dict[str, Any]) -> dict[str, Any]
         "status": "performed",
         "detail": f"Escaped forward for {escape_forward_ms}ms",
         "input": {"mode": "loot_escape_forward", "escapeForwardMs": escape_forward_ms},
+    }
+
+
+def run_stealth_trigger_miaoqu(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_trigger_miaoqu")
+    trigger_timeout_ms = int(action.get("triggerTimeoutMs") or 5000)
+    trigger_settle_ms = int(action.get("triggerSettleMs") or 40)
+    pydirectinput.press("4")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(trigger_settle_ms, title)
+
+    steal_state = detect_steal_screen(hwnd)
+    deadline = time.time() + trigger_timeout_ms / 1000.0
+    while time.time() <= deadline and not steal_state["visible"]:
+        INPUT_GUARD.guarded_sleep(40, title)
+        steal_state = detect_steal_screen(hwnd)
+
+    if not steal_state["visible"]:
+        raise RuntimeError("Steal panel did not appear after pressing 4")
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Opened miaoqu panel after pressing 4 once",
+        "input": {
+            "mode": "stealth_trigger_miaoqu",
+            "text": steal_state["text"],
+            "triggerTimeoutMs": trigger_timeout_ms,
+        },
+    }
+
+
+def run_stealth_escape_backward(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_escape_backward")
+    backstep_ms = int(action.get("backstepMs") or 3000)
+    move_settle_ms = int(action.get("moveSettleMs") or 40)
+    pydirectinput.keyDown("s")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(backstep_ms, title)
+    pydirectinput.keyUp("s")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(move_settle_ms, title)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Escaped backward for {backstep_ms}ms",
+        "input": {
+            "mode": "stealth_escape_backward",
+            "backstepMs": backstep_ms,
+        },
     }
 
 

@@ -191,8 +191,8 @@ function createNpcStealActions(baseAction, options = {}) {
   ]);
 }
 
-function createKnockLootActions(baseAction) {
-  const actions = [
+function createStealthSetupActions(baseAction) {
+  return [
     {
       id: `${baseAction.id}-primitive-1`,
       title: "Route To Stealth Point",
@@ -260,7 +260,44 @@ function createKnockLootActions(baseAction) {
       selectionTimeoutMs: 2200,
       selectionSettleMs: 120,
       frontRoi: [0.36, 0.18, 0.64, 0.42]
+    }
+  ];
+}
+
+function createStealthMiaoquActions(baseAction) {
+  return [
+    ...createStealthSetupActions(baseAction),
+    {
+      id: `${baseAction.id}-primitive-9`,
+      title: "Trigger Miaoqu",
+      type: "stealth_trigger_miaoqu",
+      sourceType: baseAction.sourceType,
+      triggerTimeoutMs: 5000,
+      triggerSettleMs: 40
     },
+    {
+      id: `${baseAction.id}-primitive-10`,
+      title: "Click Fixed Miaoqu Button",
+      type: "click_steal_button",
+      sourceType: baseAction.sourceType,
+      buttonIndex: 3,
+      settleMs: 1500,
+      postDelayMs: 1500
+    },
+    {
+      id: `${baseAction.id}-primitive-11`,
+      title: "Escape Backward",
+      type: "stealth_escape_backward",
+      sourceType: baseAction.sourceType,
+      backstepMs: 3000,
+      moveSettleMs: 40
+    }
+  ];
+}
+
+function createKnockLootActions(baseAction) {
+  const actions = [
+    ...createStealthSetupActions(baseAction),
     {
       id: `${baseAction.id}-primitive-9`,
       title: "Trigger Knockout",
@@ -355,6 +392,16 @@ function createWorkerActions(plan) {
 
     const nextAction = plan.actions[index + 1];
     const nextNextAction = plan.actions[index + 2];
+    if (
+      action.type === "stealth"
+      && nextAction?.type === "steal"
+      && nextNextAction?.type !== "strike"
+    ) {
+      workerActions.push(...createStealthMiaoquActions(baseAction));
+      index += 1;
+      continue;
+    }
+
     if (
       action.type === "stealth"
       && nextAction?.type === "strike"

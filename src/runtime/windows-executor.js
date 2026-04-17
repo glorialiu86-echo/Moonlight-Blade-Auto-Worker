@@ -268,6 +268,15 @@ function createStealthMiaoquActions(baseAction) {
     ...createStealthSetupActions(baseAction),
     {
       id: `${baseAction.id}-primitive-9`,
+      title: "Trigger Knockout",
+      type: "stealth_rush_knockout",
+      sourceType: baseAction.sourceType,
+      knockoutTimeoutMs: 5000,
+      strikeIntervalMs: 0,
+      moveSettleMs: 50
+    },
+    {
+      id: `${baseAction.id}-primitive-10`,
       title: "Trigger Miaoqu",
       type: "stealth_trigger_miaoqu",
       sourceType: baseAction.sourceType,
@@ -275,7 +284,7 @@ function createStealthMiaoquActions(baseAction) {
       triggerSettleMs: 40
     },
     {
-      id: `${baseAction.id}-primitive-10`,
+      id: `${baseAction.id}-primitive-11`,
       title: "Click Fixed Miaoqu Button",
       type: "click_steal_button",
       sourceType: baseAction.sourceType,
@@ -284,7 +293,7 @@ function createStealthMiaoquActions(baseAction) {
       postDelayMs: 1500
     },
     {
-      id: `${baseAction.id}-primitive-11`,
+      id: `${baseAction.id}-primitive-12`,
       title: "Escape Backward",
       type: "stealth_escape_backward",
       sourceType: baseAction.sourceType,

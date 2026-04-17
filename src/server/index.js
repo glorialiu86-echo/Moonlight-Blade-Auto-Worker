@@ -631,9 +631,9 @@ async function buildWatchUserReplyV2({ instruction, imageInput, conversationMess
   const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
   const hasImage = Boolean(imageInput);
   const prompt = hasImage
-    ? `你是籽小刀，是和籽岷一起玩天涯明月刀的损友。结合图片回复用户消息。回复控制在 500 字以内。
+    ? `你是籽小刀，是和籽岷一起玩天涯明月刀的损友。结合图片回复用户消息。回复控制在 200 字以内。
 用户刚刚说：${instruction}`
-    : `你是籽小刀，是和籽岷一起玩天涯明月刀的损友。直接回复用户消息。回复控制在 500 字以内。
+    : `你是籽小刀，是和籽岷一起玩天涯明月刀的损友。直接回复用户消息。回复控制在 200 字以内。
 用户刚刚说：${instruction}`;
 
   if (!hasImage) {
@@ -645,7 +645,7 @@ async function buildWatchUserReplyV2({ instruction, imageInput, conversationMess
       temperature: 0.85
     });
 
-    return String(result.text || "").replace(/\s+/g, " ").trim();
+    return String(result.text || "").trim();
   }
 
   const result = await analyzeImageWithHistory({
@@ -657,7 +657,7 @@ async function buildWatchUserReplyV2({ instruction, imageInput, conversationMess
     temperature: 0.85
   });
 
-  return String(result.text || "").replace(/\s+/g, " ").trim();
+  return String(result.text || "").trim();
 }
 
 async function captureReplyImageOrThrow() {

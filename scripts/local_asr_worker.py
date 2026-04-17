@@ -41,18 +41,28 @@ def build_model():
     if model_cache_dir and "faster-whisper" in model_cache_dir.lower():
         model_cache_dir = None
 
-    model = AutoModel(
-        model=model_name,
-        vad_model=os.getenv("LOCAL_ASR_VAD_MODEL", "fsmn-vad"),
-        punc_model=os.getenv("LOCAL_ASR_PUNC_MODEL", "ct-punc-c"),
-        device=device,
-        disable_update=disable_update,
-        hub="ms",
-        model_revision=os.getenv("LOCAL_ASR_MODEL_REVISION", "master"),
-        vad_model_revision=os.getenv("LOCAL_ASR_VAD_MODEL_REVISION", "master"),
-        punc_model_revision=os.getenv("LOCAL_ASR_PUNC_MODEL_REVISION", "master"),
-        model_dir=model_cache_dir,
-    )
+    model_kwargs = {
+        "model": model_name,
+        "device": device,
+        "disable_update": disable_update,
+        "hub": "ms",
+        "model_revision": os.getenv("LOCAL_ASR_MODEL_REVISION", "master"),
+    }
+
+    if model_cache_dir:
+        model_kwargs["model_dir"] = model_cache_dir
+
+    vad_model = (os.getenv("LOCAL_ASR_VAD_MODEL") or "").strip()
+    if vad_model:
+        model_kwargs["vad_model"] = vad_model
+        model_kwargs["vad_model_revision"] = os.getenv("LOCAL_ASR_VAD_MODEL_REVISION", "master")
+
+    punc_model = (os.getenv("LOCAL_ASR_PUNC_MODEL") or "").strip()
+    if punc_model:
+        model_kwargs["punc_model"] = punc_model
+        model_kwargs["punc_model_revision"] = os.getenv("LOCAL_ASR_PUNC_MODEL_REVISION", "master")
+
+    model = AutoModel(**model_kwargs)
 
     try:
         import torch
@@ -80,15 +90,21 @@ def transcribe(model, request):
         "以下内容是简体中文普通话口语转写，可能涉及《天涯明月刀》的任务名、NPC 名称、地名和玩家口语，请尽量按发音准确转写。",
     )
 
-    result = model.generate(
-        input=request["audio_path"],
-        language=language,
-        batch_size_s=30,
-        use_itn=True,
-        merge_vad=True,
-        merge_length_s=12,
-        hotword=initial_prompt,
-    )
+    generate_kwargs = {
+        "input": request["audio_path"],
+        "language": language,
+        "batch_size_s": 30,
+        "use_itn": True,
+    }
+
+    if initial_prompt:
+        generate_kwargs["hotword"] = initial_prompt
+
+    if (os.getenv("LOCAL_ASR_VAD_MODEL") or "").strip():
+        generate_kwargs["merge_vad"] = True
+        generate_kwargs["merge_length_s"] = 12
+
+    result = model.generate(**generate_kwargs)
 
     if not result:
         return ""

@@ -24,7 +24,7 @@ const state = {
   }
 };
 
-const VOICE_ACTIVITY_THRESHOLD = 0.015;
+const VOICE_ACTIVITY_THRESHOLD = 0.003;
 const VOICE_SILENCE_MS = 1000;
 const VOICE_MIN_SEGMENT_MS = 700;
 
@@ -71,7 +71,7 @@ function updateVoiceStatus(message = "") {
 
 function syncUiState() {
   const busy = state.submitting || state.voice.transcribing;
-  elements.instructionInput.disabled = busy || state.voice.recording;
+  elements.instructionInput.disabled = state.submitting;
   elements.composerForm.querySelector('button[type="submit"]').disabled = busy || state.voice.recording;
   if (elements.resumeFailedStepButton) {
     elements.resumeFailedStepButton.disabled = busy || state.voice.recording || !state.resumeAvailable;

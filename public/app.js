@@ -69,6 +69,7 @@ function scrollMessagesToBottom() {
 function renderEmptyState() {
   elements.messageList.innerHTML = `
     <article class="chat-message chat-message-assistant chat-empty">
+      <div class="chat-role">籽小刀</div>
       <p class="chat-text">你说，我听着。</p>
     </article>
   `;

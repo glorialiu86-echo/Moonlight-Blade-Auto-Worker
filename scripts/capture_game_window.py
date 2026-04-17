@@ -13,11 +13,13 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
 
 SM_XVIRTUALSCREEN = 76
 SM_YVIRTUALSCREEN = 77
 SM_CXVIRTUALSCREEN = 78
 SM_CYVIRTUALSCREEN = 79
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 
 class RECT(ctypes.Structure):
@@ -58,6 +60,19 @@ user32.SetProcessDPIAware.argtypes = []
 user32.SetProcessDPIAware.restype = wintypes.BOOL
 user32.GetSystemMetrics.argtypes = [ctypes.c_int]
 user32.GetSystemMetrics.restype = ctypes.c_int
+user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+kernel32.CloseHandle.restype = wintypes.BOOL
+kernel32.QueryFullProcessImageNameW.argtypes = [
+    wintypes.HANDLE,
+    wintypes.DWORD,
+    wintypes.LPWSTR,
+    ctypes.POINTER(wintypes.DWORD),
+]
+kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
 
 
 def emit(payload):
@@ -87,6 +102,31 @@ def get_virtual_screen():
     }
 
 
+def get_window_process_name(hwnd):
+    process_id = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(process_id))
+    if process_id.value == 0:
+        return ""
+
+    process_handle = kernel32.OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION, False, process_id.value
+    )
+    if not process_handle:
+        return ""
+
+    try:
+        buffer_size = wintypes.DWORD(1024)
+        buffer = ctypes.create_unicode_buffer(buffer_size.value)
+        if not kernel32.QueryFullProcessImageNameW(
+            process_handle, 0, buffer, ctypes.byref(buffer_size)
+        ):
+            return ""
+        full_path = buffer.value[: buffer_size.value]
+        return full_path.rsplit("\\", 1)[-1].lower()
+    finally:
+        kernel32.CloseHandle(process_handle)
+
+
 def collect_matching_windows(title_keyword):
     matches = []
 
@@ -96,7 +136,10 @@ def collect_matching_windows(title_keyword):
             return True
 
         title = get_window_text(hwnd)
-        if not title or title_keyword not in title:
+        process_name = get_window_process_name(hwnd)
+        title_match = bool(title and title_keyword in title)
+        process_match = process_name == "qsgame.exe"
+        if not title_match and not process_match:
             return True
 
         window_rect = RECT()
@@ -129,6 +172,9 @@ def collect_matching_windows(title_keyword):
                 "client_height": client_height,
                 "area": width * height,
                 "exact_title_match": title == title_keyword,
+                "title_match": title_match,
+                "process_name": process_name,
+                "process_match": process_match,
             }
         )
         return True
@@ -175,7 +221,12 @@ def main():
 
     selected = sorted(
         matches,
-        key=lambda item: (1 if item["exact_title_match"] else 0, item["area"]),
+        key=lambda item: (
+            1 if item["exact_title_match"] else 0,
+            1 if item["title_match"] else 0,
+            1 if item["process_match"] else 0,
+            item["area"],
+        ),
         reverse=True,
     )[0]
 
@@ -186,6 +237,7 @@ def main():
                 "errorCode": "WINDOW_MINIMIZED",
                 "message": "The target window is minimized and cannot be captured.",
                 "windowTitle": selected["title"],
+                "processName": selected["process_name"],
             }
         )
         return 0
@@ -197,6 +249,7 @@ def main():
                 "errorCode": "INVALID_BOUNDS",
                 "message": "The target client area is smaller than the minimum capture size.",
                 "windowTitle": selected["title"],
+                "processName": selected["process_name"],
                 "bounds": {
                     "left": selected["client_left"],
                     "top": selected["client_top"],
@@ -222,6 +275,7 @@ def main():
                 "errorCode": "INVALID_BOUNDS",
                 "message": "The visible area of the target client area is too small to capture.",
                 "windowTitle": selected["title"],
+                "processName": selected["process_name"],
                 "bounds": {
                     "left": left,
                     "top": top,
@@ -236,6 +290,7 @@ def main():
         {
             "ok": True,
             "windowTitle": selected["title"],
+            "processName": selected["process_name"],
             "bounds": {
                 "left": left,
                 "top": top,

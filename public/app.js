@@ -1,13 +1,26 @@
 const state = {
   submitting: false,
   runtimeStatus: "idle",
-  interactionMode: "watch"
+  interactionMode: "watch",
+  voiceSupported: false,
+  voice: {
+    recording: false,
+    transcribing: false,
+    mediaStream: null,
+    audioContext: null,
+    sourceNode: null,
+    processorNode: null,
+    pcmChunks: [],
+    inputSampleRate: 48000
+  }
 };
 
 const elements = {
   composerForm: document.querySelector("#composerForm"),
   instructionInput: document.querySelector("#instructionInput"),
   messageList: document.querySelector("#messageList"),
+  voiceButton: document.querySelector("#voiceButton"),
+  voiceStatus: document.querySelector("#voiceStatus"),
   userMessageTemplate: document.querySelector("#userMessageTemplate"),
   assistantMessageTemplate: document.querySelector("#assistantMessageTemplate")
 };
@@ -32,9 +45,21 @@ function detectInteractionMode(instruction) {
   return String(instruction || "").includes("加油") ? "act" : "watch";
 }
 
+function updateVoiceStatus(message = "") {
+  const text = String(message || "").trim();
+  elements.voiceStatus.textContent = text;
+  elements.voiceStatus.hidden = !text;
+}
+
 function syncUiState() {
-  elements.instructionInput.disabled = state.submitting;
-  elements.composerForm.querySelector('button[type="submit"]').disabled = state.submitting;
+  const busy = state.submitting || state.voice.transcribing;
+  elements.instructionInput.disabled = busy || state.voice.recording;
+  elements.composerForm.querySelector('button[type="submit"]').disabled = busy || state.voice.recording;
+
+  if (elements.voiceButton) {
+    elements.voiceButton.disabled = state.submitting || state.voice.transcribing || !state.voiceSupported;
+    elements.voiceButton.textContent = state.voice.recording ? "停止" : "语音";
+  }
 }
 
 function scrollMessagesToBottom() {
@@ -121,10 +146,10 @@ async function refresh() {
   applyPayload(payload);
 }
 
-async function submitInstruction() {
+async function submitInstruction({ allowDuringTranscription = false } = {}) {
   const instruction = elements.instructionInput.value.trim();
 
-  if (!instruction || state.submitting) {
+  if (!instruction || state.submitting || state.voice.recording || (state.voice.transcribing && !allowDuringTranscription)) {
     return;
   }
 
@@ -143,6 +168,7 @@ async function submitInstruction() {
 
     elements.instructionInput.value = "";
     applyPayload(payload);
+    updateVoiceStatus("");
   } catch (error) {
     await refresh().catch(() => {});
     window.alert(error.message);
@@ -152,11 +178,262 @@ async function submitInstruction() {
   }
 }
 
+function appendTranscriptToComposer(text) {
+  const transcript = String(text || "").trim();
+
+  if (!transcript) {
+    return;
+  }
+
+  const current = elements.instructionInput.value.trim();
+  elements.instructionInput.value = current
+    ? `${current}${current.endsWith("。") ? "" : "，"}${transcript}`
+    : transcript;
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("文件读取失败"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function mergeFloat32Chunks(chunks) {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const merged = new Float32Array(totalLength);
+  let offset = 0;
+
+  chunks.forEach((chunk) => {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  });
+
+  return merged;
+}
+
+function downsampleBuffer(buffer, inputSampleRate, outputSampleRate) {
+  if (outputSampleRate >= inputSampleRate) {
+    return buffer;
+  }
+
+  const sampleRateRatio = inputSampleRate / outputSampleRate;
+  const newLength = Math.round(buffer.length / sampleRateRatio);
+  const result = new Float32Array(newLength);
+  let offsetResult = 0;
+  let offsetBuffer = 0;
+
+  while (offsetResult < result.length) {
+    const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+    let accum = 0;
+    let count = 0;
+
+    for (let index = offsetBuffer; index < nextOffsetBuffer && index < buffer.length; index += 1) {
+      accum += buffer[index];
+      count += 1;
+    }
+
+    result[offsetResult] = count > 0 ? accum / count : 0;
+    offsetResult += 1;
+    offsetBuffer = nextOffsetBuffer;
+  }
+
+  return result;
+}
+
+function encodeWav(samples, sampleRate) {
+  const bytesPerSample = 2;
+  const blockAlign = bytesPerSample;
+  const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
+  const view = new DataView(buffer);
+  let offset = 0;
+
+  function writeString(value) {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset, value.charCodeAt(index));
+      offset += 1;
+    }
+  }
+
+  writeString("RIFF");
+  view.setUint32(offset, 36 + samples.length * bytesPerSample, true);
+  offset += 4;
+  writeString("WAVE");
+  writeString("fmt ");
+  view.setUint32(offset, 16, true);
+  offset += 4;
+  view.setUint16(offset, 1, true);
+  offset += 2;
+  view.setUint16(offset, 1, true);
+  offset += 2;
+  view.setUint32(offset, sampleRate, true);
+  offset += 4;
+  view.setUint32(offset, sampleRate * blockAlign, true);
+  offset += 4;
+  view.setUint16(offset, blockAlign, true);
+  offset += 2;
+  view.setUint16(offset, 16, true);
+  offset += 2;
+  writeString("data");
+  view.setUint32(offset, samples.length * bytesPerSample, true);
+  offset += 4;
+
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[index]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    offset += 2;
+  }
+
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+async function releaseVoiceCapture() {
+  const { sourceNode, processorNode, mediaStream, audioContext } = state.voice;
+
+  if (sourceNode) {
+    sourceNode.disconnect();
+  }
+
+  if (processorNode) {
+    processorNode.disconnect();
+    processorNode.onaudioprocess = null;
+  }
+
+  if (mediaStream) {
+    mediaStream.getTracks().forEach((track) => track.stop());
+  }
+
+  if (audioContext) {
+    await audioContext.close().catch(() => {});
+  }
+
+  state.voice.mediaStream = null;
+  state.voice.audioContext = null;
+  state.voice.sourceNode = null;
+  state.voice.processorNode = null;
+}
+
+async function stopVoiceRecording() {
+  if (!state.voice.recording) {
+    return;
+  }
+
+  state.voice.recording = false;
+  state.voice.transcribing = true;
+  syncUiState();
+  updateVoiceStatus("正在转写…");
+
+  try {
+    const pcmChunks = [...state.voice.pcmChunks];
+    const inputSampleRate = state.voice.inputSampleRate;
+    await releaseVoiceCapture();
+    state.voice.pcmChunks = [];
+
+    if (pcmChunks.length === 0) {
+      throw new Error("没有采集到有效语音，请重试。");
+    }
+
+    const merged = mergeFloat32Chunks(pcmChunks);
+    const downsampled = downsampleBuffer(merged, inputSampleRate, 16000);
+    const wavBlob = encodeWav(downsampled, 16000);
+    const audioDataUrl = await blobToDataUrl(wavBlob);
+    const payload = await request("/api/voice/transcribe", {
+      method: "POST",
+      body: JSON.stringify({ audioDataUrl })
+    });
+
+    appendTranscriptToComposer(payload.text);
+    updateVoiceStatus("语音已转成文字，正在发送…");
+    await submitInstruction({ allowDuringTranscription: true });
+  } catch (error) {
+    updateVoiceStatus(`语音失败：${error.message}`);
+  } finally {
+    state.voice.transcribing = false;
+    syncUiState();
+  }
+}
+
+async function startVoiceRecording() {
+  if (!state.voiceSupported || state.submitting || state.voice.transcribing || state.voice.recording) {
+    return;
+  }
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+  try {
+    const mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true
+      }
+    });
+    const audioContext = new AudioContextClass();
+    await audioContext.resume();
+    const sourceNode = audioContext.createMediaStreamSource(mediaStream);
+    const processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+
+    state.voice.mediaStream = mediaStream;
+    state.voice.audioContext = audioContext;
+    state.voice.sourceNode = sourceNode;
+    state.voice.processorNode = processorNode;
+    state.voice.pcmChunks = [];
+    state.voice.inputSampleRate = audioContext.sampleRate;
+    state.voice.recording = true;
+
+    processorNode.onaudioprocess = (event) => {
+      if (!state.voice.recording) {
+        return;
+      }
+
+      const channelData = event.inputBuffer.getChannelData(0);
+      state.voice.pcmChunks.push(new Float32Array(channelData));
+    };
+
+    sourceNode.connect(processorNode);
+    processorNode.connect(audioContext.destination);
+
+    updateVoiceStatus("录音中，再点一次结束。");
+    syncUiState();
+  } catch (error) {
+    await releaseVoiceCapture();
+    state.voice.recording = false;
+    state.voice.pcmChunks = [];
+    syncUiState();
+    updateVoiceStatus(`无法开始录音：${error.message}`);
+  }
+}
+
+function initVoiceInput() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  const mediaDevices = navigator.mediaDevices;
+
+  if (!AudioContextClass || !mediaDevices?.getUserMedia) {
+    updateVoiceStatus("当前浏览器不支持语音输入。");
+    syncUiState();
+    return;
+  }
+
+  state.voiceSupported = true;
+  syncUiState();
+}
+
 elements.composerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await submitInstruction();
 });
 
+elements.voiceButton?.addEventListener("click", async () => {
+  if (state.voice.recording) {
+    await stopVoiceRecording();
+    return;
+  }
+
+  await startVoiceRecording();
+});
+
+initVoiceInput();
 refresh().catch(() => {
   renderEmptyState();
 });

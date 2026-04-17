@@ -81,12 +81,24 @@ body {
 
 .simple-composer-actions {
   display: flex;
+  gap: 10px;
   justify-content: flex-end;
+}
+
+.simple-composer-actions button {
+  min-width: 96px;
+  min-height: 48px;
 }
 
 .simple-composer-actions .primary {
   min-width: 112px;
-  min-height: 48px;
+}
+
+.simple-voice-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
 }
 
 a {

@@ -421,6 +421,37 @@ function setPendingResumeContext(context) {
   });
 }
 
+function cancelArmedAutomation(reasonInstruction = "") {
+  const automation = getState().automation;
+  if (automation.status !== "armed") {
+    return false;
+  }
+
+  updateAutomation({
+    status: "idle",
+    instruction: null,
+    armedAt: null,
+    startsAt: null,
+    startedAt: null,
+    finishedAt: null,
+    ignoreExternalInputUntilStart: false,
+    stageIndex: 0,
+    completedRoundsInStage: 0,
+    totalTurns: 0,
+    lastThought: null,
+    lastOutcome: null
+  });
+
+  updateAgent({
+    mode: "user_priority",
+    phase: "waiting",
+    currentObjective: "等待新的明确安排",
+    queuedUserObjective: reasonInstruction || null
+  });
+
+  return true;
+}
+
 function getFailedStepTitle(error) {
   return String(
     error?.workerPayload?.failedStep?.title
@@ -2244,6 +2275,7 @@ async function handleChat(request, response) {
   const body = await readRequestBody(request);
   const instruction = String(body.instruction || "").trim();
   const automationTriggered = hasAutomationTrigger(instruction);
+  const previousAutomation = getState().automation;
   const requestedInteractionMode = typeof body.interactionMode === "string"
     ? body.interactionMode.trim()
     : "";
@@ -2276,6 +2308,17 @@ async function handleChat(request, response) {
     perception: getState().latestPerception,
     origin: "user"
   }));
+
+  if (previousAutomation.status === "armed") {
+    cancelArmedAutomation(instruction);
+    appendLog("info", automationTriggered
+      ? "等待中的固定剧本已取消并按新消息重新布置"
+      : "等待中的固定剧本已因新用户消息取消", {
+      instruction,
+      previousStartsAt: previousAutomation.startsAt,
+      triggerWord: "加油"
+    });
+  }
 
   if (automationTriggered) {
     armAutomationScript(instruction);

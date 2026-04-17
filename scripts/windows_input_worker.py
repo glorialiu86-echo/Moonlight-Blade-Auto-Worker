@@ -212,7 +212,7 @@ ACTION_POINTS = {
     "view": (0.32, 0.57),
     "talk": (1562 / 2048, 1042 / 1152),
     "small_talk": (1446 / 2048, 904 / 1152),
-    "confirm_small_talk": (1481 / 2537, 1018 / 1384),
+    "confirm_small_talk": (1237 / 2048, 799 / 1152),
     "trade": (1735 / 2048, 1033 / 1152),
     "gift": (1910 / 2048, 1031 / 1152),
     "target_close": (1115 / 2537, 691 / 1384),
@@ -244,13 +244,13 @@ ACTION_POINTS = {
     "gift_first_slot": (1423 / 2048, 445 / 1152),
     "gift_plus": (0.82, 0.92),
     "gift_submit": (1813 / 2048, 968 / 1152),
-    "small_talk_confirm_dialog": (0.581, 0.746),
-    "chat_input": (652 / 2537, 1294 / 1384),
+    "small_talk_confirm_dialog": (1224 / 2048, 801 / 1152),
+    "chat_input": (318 / 2048, 1005 / 1152),
     # Send is fixed UI, but it only becomes actionable after valid text input.
     # Keep the point calibrated now; do not assume the button is clickable
     # until the text-entry chain is wired in.
     "chat_send": (938 / 2537, 1289 / 1384),
-    "chat_exit": (0.425, 0.508),
+    "chat_exit": (872 / 2048, 536 / 1152),
     "map_coord_y_input": (1300 / 1870, 843 / 976),
     "map_coord_x_input": (1971 / 2643, 1213 / 1398),
     "map_go": (0.808551, 0.864807),

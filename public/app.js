@@ -77,9 +77,9 @@ function syncUiState() {
   const recording = state.voice.recording;
   const running = isRunningStatus(state.runtimeStatus);
 
-  elements.instructionInput.disabled = busy || !running;
-  elements.composerForm.querySelector('button[type="submit"]').disabled = busy || recording || !running;
-  elements.voiceStartButton.disabled = !state.voiceSupported || busy || recording || !running;
+  elements.instructionInput.disabled = busy;
+  elements.composerForm.querySelector('button[type="submit"]').disabled = busy || recording;
+  elements.voiceStartButton.disabled = !state.voiceSupported || busy || recording;
   elements.voiceStopButton.disabled = !recording;
   elements.runToggleButton.disabled = busy || recording || state.voice.transcribing;
   elements.watchModeButton.disabled = busy || recording || state.voice.transcribing;
@@ -173,14 +173,29 @@ function buildActionChainText(runtimeState) {
   }
 
   const labels = actions.map((actionKey) => {
-    const definition = state.actionCatalog.find((item) => item.key === actionKey);
-    return definition?.label || actionKey;
+    const actionType = typeof actionKey === "string" ? actionKey : actionKey?.type;
+    const definition = state.actionCatalog.find((item) => item.key === actionType);
+    return definition?.label || actionType || "未命名动作";
   });
 
   return `我准备按这条顺序往下走：${labels.join(" -> ")}`;
 }
 
 function buildStatusSummary(runtimeState) {
+  const automationStatus = runtimeState.automation?.status || "idle";
+
+  if (automationStatus === "armed") {
+    return "我已经接住这套安排了，先等籽岷走开，再自己往下做。";
+  }
+
+  if (automationStatus === "paused") {
+    return "你一碰鼠标键盘，我就先把手收住了。";
+  }
+
+  if (automationStatus === "completed") {
+    return "这套安排我已经顺着做完了，现在先收手等你。";
+  }
+
   if (runtimeState.status !== "running") {
     return "我先稳着，等籽岷一句话。";
   }
@@ -256,18 +271,27 @@ function renderRunState(runtimeState) {
   state.interactionMode = runtimeState.interactionMode || "act";
   state.externalInputGuardEnabled = runtimeState.externalInputGuardEnabled !== false;
   const running = isRunningStatus(state.runtimeStatus);
+  const automationStatus = runtimeState.automation?.status || "idle";
 
-  elements.runStatusText.textContent = running
-    ? "我已开工"
-    : state.runtimeStatus === "paused"
+  elements.runStatusText.textContent = automationStatus === "armed"
+    ? "我先含着"
+    : automationStatus === "paused" || state.runtimeStatus === "paused"
       ? "我先停着"
-      : "我在待命";
+      : automationStatus === "completed"
+        ? "我做完了"
+        : running
+          ? "我已开工"
+          : "我在待命";
 
-  elements.runStatusHint.textContent = running
-    ? (isWatchMode()
-      ? "我现在只看屏幕和局面，先陪籽岷看，不往下动手。"
-      : `我现在会顺着动作链往下推。${isExternalInputGuardEnabled() ? " 籽岷一碰鼠标或键盘，我就立刻停手。" : ""}`)
-    : "我现在还没往下动，只在前面等籽岷发话。";
+  elements.runStatusHint.textContent = automationStatus === "armed"
+    ? "我已经把整套安排收住了，等籽岷走开后再自己往下做。"
+    : automationStatus === "completed"
+      ? "这套安排已经走完，我现在不再继续乱动。"
+      : running
+        ? (isWatchMode()
+          ? "我现在只看屏幕和局面，先陪籽岷看，不往下动手。"
+          : `我现在会顺着已经接住的安排往下推。${isExternalInputGuardEnabled() ? " 籽岷一碰鼠标或键盘，我就立刻停手。" : ""}`)
+        : "我现在还没接到要往下做的整套安排。";
 }
 
 function renderRuntimeState(runtimeState) {
@@ -327,7 +351,7 @@ function appendTranscriptToComposer(text) {
 async function submitComposerInstruction({ source = "text" } = {}) {
   const instruction = elements.instructionInput.value.trim();
 
-  if (!instruction || state.submitting || state.voice.recording || state.voice.transcribing || !isRunningStatus(state.runtimeStatus)) {
+  if (!instruction || state.submitting || state.voice.recording || state.voice.transcribing) {
     return false;
   }
 
@@ -527,7 +551,7 @@ async function stopVoiceRecording() {
 }
 
 async function startVoiceRecording() {
-  if (!state.voiceSupported || state.submitting || state.voice.transcribing || state.voice.recording || !isRunningStatus(state.runtimeStatus)) {
+  if (!state.voiceSupported || state.submitting || state.voice.transcribing || state.voice.recording) {
     return;
   }
 
@@ -599,7 +623,7 @@ elements.runToggleButton.addEventListener("click", async () => {
 
   try {
     await sendControlAction(running ? "stop" : "start");
-    updateVoiceStatus(running ? "我先把手收住了。" : "我已经开工，籽岷可以直接吩咐我。");
+    updateVoiceStatus(running ? "我先把手收住了。" : "我已经就位，籽岷可以把整套安排递给我。");
     await refresh();
   } catch (error) {
     updateVoiceStatus(`我这次没切稳状态：${error.message}`);

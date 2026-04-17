@@ -36,7 +36,8 @@ import {
   setLatestPerception,
   setScene,
   setStatus,
-  updateAgent
+  updateAgent,
+  updateAutomation
 } from "../runtime/store.js";
 import { runWindowsActions } from "../runtime/windows-executor.js";
 
@@ -44,20 +45,70 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../../public");
 const port = Number(process.env.PORT || 3000);
 const AUTONOMOUS_INTERVAL_MS = 3000;
-const AUTONOMOUS_START_DELAY_MS = 3000;
-const USER_PRIORITY_COOLDOWN_MS = 60000;
+const SCRIPT_ARM_DELAY_MS = 5 * 60 * 1000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 3000;
 const NPC_CHAT_MAX_ROUNDS = 4;
 const NPC_CHAT_POLL_DELAY_MS = 1200;
 const WATCH_COMMENTARY_MIN_INTERVAL_MS = 3000;
-const WATCH_MODE_USER_PRIORITY_COOLDOWN_MS = 3000;
-const AUTONOMOUS_OBJECTIVE_POOL = [
-  "去找一个看起来最容易闹出后果的 NPC，先试探对方底线。",
-  "找一个能把‘一技之长’理解歪掉的切入口，先观察再出手。",
-  "看看附近有没有能快速制造秩序变化、关系变化或利益变化的机会。",
-  "别原地发呆，去找一个能拍出反差感的互动场景。"
+const FIXED_SCRIPT_STAGES = [
+  {
+    key: "sell_loop",
+    rounds: 3,
+    instructionLabel: "先走正路买货叫卖，看看这条钱路能不能撑起来。",
+    riskLevel: "low",
+    actionTypes: ["sale"],
+    thinkingFactory: () => ([
+      "先别急着翻脸，正路还能再榨一轮。",
+      "买货叫卖虽然笨，但至少还能看见进账。",
+      "要是这条路都撑不住，后面再换更歪的法子。"
+    ]),
+    decideFactory: () => "我先去买货，再把摊子顶起来试三轮。",
+    personaFactory: () => "先按老实财路做一遍。"
+  },
+  {
+    key: "social_warm",
+    rounds: 2,
+    instructionLabel: "先装得正常点，买礼、送礼、聊天，顺手把话套出来。",
+    riskLevel: "low",
+    actionTypes: ["trade", "gift", "talk"],
+    thinkingFactory: () => ([
+      "硬抢太早了，先拿人情把嘴撬开。",
+      "买礼送礼不算吃亏，关键是能换到对方松口。",
+      "只要他愿意多说两句，后面的路就好掏了。"
+    ]),
+    decideFactory: () => "我先拿礼数开门，再顺着话头把路子套出来。",
+    personaFactory: () => "先装好人，把门路哄出来。"
+  },
+  {
+    key: "social_dark",
+    rounds: 2,
+    instructionLabel: "继续买礼送礼和聊天，但说话开始阴一点，边套话边压低好感。",
+    riskLevel: "medium",
+    actionTypes: ["trade", "gift", "talk"],
+    thinkingFactory: () => ([
+      "光靠装热络太慢了，该往话里掺点刺。",
+      "先把礼递过去，再拿阴话试对方底线。",
+      "他越不舒服，越容易露出真东西。"
+    ]),
+    decideFactory: () => "我继续装熟，但这回套话的时候顺手给他添点堵。",
+    personaFactory: () => "该把笑脸里那点坏心思露出来了。"
+  },
+  {
+    key: "dark_close",
+    rounds: 1,
+    instructionLabel: "正常路已经太慢了，直接潜行、闷棍、偷窃。",
+    riskLevel: "high",
+    actionTypes: ["stealth", "strike", "steal"],
+    thinkingFactory: () => ([
+      "该摸的路子已经摸完，剩下的只会更慢。",
+      "既然正门不开，那就从背后把门砸开。",
+      "潜进去、敲闷棍、下手，这才像真本事。"
+    ]),
+    decideFactory: () => "我不再陪他们磨嘴皮，直接潜进去狠狠干一手。",
+    personaFactory: () => "正常路走到头了，我该换黑的。"
+  }
 ];
 
 let turnInFlight = false;
@@ -101,6 +152,9 @@ function handleExternalInputInterrupted(error, contextLabel) {
 
   setStatus("paused");
   autoCaptureService.pause();
+  updateAutomation({
+    status: "paused"
+  });
   updateAgent({
     phase: "waiting"
   });
@@ -194,6 +248,115 @@ function statePayload() {
     state: getState(),
     actionCatalog: buildActionCatalog()
   };
+}
+
+function createActionSteps(actionTypes, decide) {
+  return actionTypes.map((actionType, index) => ({
+    id: `script-plan-${index + 1}`,
+    type: actionType,
+    title: actionType,
+    reason: decide,
+    detail: decide
+  }));
+}
+
+function buildFixedScriptPlan({ stage, roundNumber, scene, userInstruction }) {
+  const thinkingChain = stage.thinkingFactory({ roundNumber, userInstruction });
+  const decide = String(stage.decideFactory({ roundNumber, userInstruction }) || "").trim();
+  const personaInterpretation = String(stage.personaFactory({ roundNumber, userInstruction }) || decide).trim();
+  const actionTypes = [...stage.actionTypes];
+
+  return {
+    intent: `${stage.instructionLabel} 第 ${roundNumber} 轮`,
+    personaInterpretation,
+    environment: sceneDescription(scene),
+    candidateStrategies: actionTypes,
+    selectedStrategy: actionTypes.join(" -> "),
+    riskLevel: stage.riskLevel,
+    thinkingChain,
+    recoveryLine: "这一步要是没走通，我就先把现场留住，再按既定顺序补上。",
+    actions: createActionSteps(actionTypes, decide),
+    decide,
+    scriptKey: stage.key,
+    scriptRoundNumber: roundNumber,
+    userInstruction
+  };
+}
+
+function getUpcomingScriptTurn(automationState) {
+  const stage = FIXED_SCRIPT_STAGES[automationState.stageIndex];
+
+  if (!stage) {
+    return null;
+  }
+
+  return {
+    stage,
+    roundNumber: automationState.completedRoundsInStage + 1
+  };
+}
+
+function advanceAutomationProgress(automationState) {
+  const stage = FIXED_SCRIPT_STAGES[automationState.stageIndex];
+
+  if (!stage) {
+    return {
+      status: "completed",
+      finishedAt: new Date().toISOString()
+    };
+  }
+
+  const completedRoundsInStage = automationState.completedRoundsInStage + 1;
+
+  if (completedRoundsInStage < stage.rounds) {
+    return {
+      stageIndex: automationState.stageIndex,
+      completedRoundsInStage
+    };
+  }
+
+  const nextStageIndex = automationState.stageIndex + 1;
+
+  if (!FIXED_SCRIPT_STAGES[nextStageIndex]) {
+    return {
+      stageIndex: nextStageIndex,
+      completedRoundsInStage: 0,
+      status: "completed",
+      finishedAt: new Date().toISOString()
+    };
+  }
+
+  return {
+    stageIndex: nextStageIndex,
+    completedRoundsInStage: 0
+  };
+}
+
+function armAutomationScript(instruction) {
+  const now = new Date();
+  const startsAt = new Date(now.getTime() + SCRIPT_ARM_DELAY_MS);
+
+  updateAutomation({
+    status: "armed",
+    instruction,
+    armedAt: now.toISOString(),
+    startsAt: startsAt.toISOString(),
+    startedAt: null,
+    finishedAt: null,
+    stageIndex: 0,
+    completedRoundsInStage: 0,
+    totalTurns: 0,
+    lastThought: null,
+    lastOutcome: null
+  });
+
+  updateAgent({
+    mode: "autonomous",
+    phase: "armed",
+    currentObjective: "按既定安排等籽岷离开后再动手",
+    queuedUserObjective: instruction,
+    lastUserInstruction: instruction
+  });
 }
 
 function sleep(ms) {
@@ -767,34 +930,195 @@ async function recordMotionReviewSamples({
   }
 }
 
-function pickAutonomousObjective(runtimeState) {
-  const nextIndex = runtimeState.agent.autonomousTurnCount % AUTONOMOUS_OBJECTIVE_POOL.length;
-  return AUTONOMOUS_OBJECTIVE_POOL[nextIndex];
-}
+async function runFixedScriptTurn({
+  stage,
+  roundNumber,
+  userInstruction,
+  scene,
+  perception,
+  interactionMode = "act",
+  externalInputGuardEnabled = true
+}) {
+  const plan = buildFixedScriptPlan({
+    stage,
+    roundNumber,
+    scene,
+    userInstruction
+  });
+  const perceptionSummary = perceptionSummaryBySource(perception, "agent");
 
-function shouldRunAutonomousTurn(runtimeState) {
-  if (!runtimeState.agent.autonomousEnabled) {
-    return false;
+  appendMessage({
+    role: "assistant",
+    text: plan.personaInterpretation,
+    thinkingChain: plan.thinkingChain,
+    perceptionSummary,
+    sceneLabel: plan.environment,
+    riskLevel: plan.riskLevel,
+    actions: [],
+    decide: plan.decide
+  });
+  appendLog("info", "固定剧本思考已输出", {
+    scriptKey: stage.key,
+    roundNumber,
+    selectedStrategy: plan.selectedStrategy
+  });
+
+  updateAutomation({
+    lastThought: plan.decide
+  });
+  updateAgent({
+    mode: "autonomous",
+    phase: "autonomous",
+    currentObjective: "按既定安排继续往下做",
+    lastAutonomousInstruction: plan.intent
+  });
+
+  let execution;
+  if (interactionMode === "watch") {
+    execution = {
+      executor: "WatchMode",
+      steps: [],
+      rawSteps: [],
+      durationMs: 0,
+      outcome: "当前处于观看模式，本轮只展示思考，不执行实际动作。"
+    };
+  } else {
+    try {
+      execution = await runWindowsExecution(plan, {
+        interruptOnExternalInput: externalInputGuardEnabled
+      });
+    } catch (error) {
+      const failedExecution = {
+        rawSteps: Array.isArray(error.workerPayload?.steps) ? error.workerPayload.steps : [],
+        durationMs: error.durationMs || null
+      };
+
+      await recordMotionReviewSamples({
+        instruction: plan.intent,
+        source: "agent",
+        scene,
+        plan,
+        perception,
+        execution: failedExecution,
+        error
+      });
+
+      await recordInteractionLearningSample({
+        instruction: plan.intent,
+        source: "agent",
+        scene,
+        plan,
+        perception,
+        execution: failedExecution,
+        error
+      });
+      throw error;
+    }
+
+    await recordMotionReviewSamples({
+      instruction: plan.intent,
+      source: "agent",
+      scene,
+      plan,
+      perception,
+      execution
+    });
+
+    await recordInteractionLearningSample({
+      instruction: plan.intent,
+      source: "agent",
+      scene,
+      plan,
+      perception,
+      execution
+    });
+
+    const replyResult = await maybeSendNpcReply({
+      instruction: plan.intent,
+      plan,
+      execution,
+      externalInputGuardEnabled
+    });
+
+    if (replyResult) {
+      execution = {
+        ...execution,
+        steps: [
+          ...execution.steps,
+          ...replyResult.execution.steps
+        ],
+        rawSteps: [
+          ...execution.rawSteps,
+          ...replyResult.execution.rawSteps
+        ],
+        durationMs: execution.durationMs + replyResult.execution.durationMs,
+        outcome: `${execution.outcome} 已顺着这一轮又多聊了 ${replyResult.rounds.length} 轮。`,
+        replyText: replyResult.replyText,
+        replyRounds: replyResult.rounds
+      };
+    }
   }
 
-  if (runtimeState.status !== "running") {
-    return false;
-  }
+  const turn = {
+    id: `turn-${Date.now()}`,
+    instruction: "按刚才那套安排继续推进",
+    scene,
+    createdAt: new Date().toISOString(),
+    source: "agent",
+    interactionMode,
+    externalInputGuardEnabled,
+    plan,
+    execution,
+    perception: perception || null
+  };
 
-  if (runtimeState.status === "paused" || runtimeState.status === "stopped") {
-    return false;
-  }
+  setCurrentTurn(turn);
 
-  const interactionMode = runtimeState.interactionMode || "act";
-  const cooldownMs = interactionMode === "watch"
-    ? WATCH_MODE_USER_PRIORITY_COOLDOWN_MS
-    : USER_PRIORITY_COOLDOWN_MS;
+  appendMessage({
+    role: "assistant",
+    text: `我先照这路做了一轮。${execution.outcome}`,
+    thinkingChain: [],
+    recoveryLine: plan.recoveryLine,
+    perceptionSummary,
+    sceneLabel: plan.environment,
+    riskLevel: plan.riskLevel,
+    actions: execution.steps,
+    decide: ""
+  });
 
-  if (runtimeState.agent.lastTurnSource === "user") {
-    return Date.now() - new Date(runtimeState.agent.lastTurnAt).getTime() >= cooldownMs;
-  }
+  appendExperiment(buildExperimentRecord({
+    instruction: "按既定安排继续推进",
+    source: "agent",
+    scene,
+    plan,
+    execution,
+    perception,
+    perceptionSummary
+  }));
 
-  return true;
+  appendLog("info", "固定剧本动作已执行", {
+    scriptKey: stage.key,
+    roundNumber,
+    outcome: execution.outcome
+  });
+
+  updateAutomation({
+    lastOutcome: execution.outcome
+  });
+  updateAgent({
+    mode: "autonomous",
+    phase: "autonomous",
+    currentObjective: "按既定安排继续往下做",
+    queuedUserObjective: null,
+    lastTurnSource: "agent",
+    lastTurnAt: new Date().toISOString(),
+    autonomousTurnCount: (getState().agent?.autonomousTurnCount || 0) + 1
+  });
+
+  return {
+    plan,
+    execution
+  };
 }
 
 async function runPlannedTurn({
@@ -1004,46 +1328,100 @@ async function maybeRunAutonomousTurn() {
   }
 
   const runtimeState = getState();
+  const automation = runtimeState.automation;
 
-  if (!shouldRunAutonomousTurn(runtimeState)) {
+  if (!runtimeState.agent.autonomousEnabled) {
+    return;
+  }
+
+  if (runtimeState.status !== "running") {
+    return;
+  }
+
+  if (runtimeState.status === "paused" || runtimeState.status === "stopped") {
+    return;
+  }
+
+  if (!automation || ["idle", "paused", "completed"].includes(automation.status)) {
+    if ((runtimeState.interactionMode || "act") === "watch") {
+      await maybeRunWatchCommentaryTurn(runtimeState);
+    }
     return;
   }
 
   turnInFlight = true;
 
   try {
-    if (runtimeState.status === "idle") {
-      setStatus("running");
-      ensureAutoCaptureRunning();
-      appendLog("info", "系统进入自主运行模式");
+    if (automation.status === "armed") {
+      const startsAtMs = automation.startsAt ? new Date(automation.startsAt).getTime() : 0;
+
+      if (!startsAtMs || Date.now() < startsAtMs) {
+        return;
+      }
+
+      updateAutomation({
+        status: "running",
+        startedAt: new Date().toISOString()
+      });
+      appendMessage({
+        role: "assistant",
+        text: "行，我现在顺着刚才那套安排往下做。",
+        thinkingChain: [],
+        perceptionSummary: "自动化已从等待切到执行。",
+        sceneLabel: runtimeState.latestPerception?.sceneLabel || "自动运行",
+        riskLevel: "low",
+        actions: []
+      });
+      appendLog("info", "固定剧本自动化已开始执行");
     }
 
-    const scene = runtimeState.scene;
-    const instruction = pickAutonomousObjective(runtimeState);
-    updateAgent({
-      mode: "autonomous",
-      phase: "autonomous",
-      currentObjective: instruction
-    });
+    const latestState = getState();
+    const upcomingTurn = getUpcomingScriptTurn(latestState.automation);
 
-    if ((runtimeState.interactionMode || "act") === "watch") {
-      await maybeRunWatchCommentaryTurn(runtimeState);
+    if (!upcomingTurn) {
+      updateAutomation({
+        status: "completed",
+        finishedAt: new Date().toISOString()
+      });
+      updateAgent({
+        phase: "waiting",
+        currentObjective: "这套安排已经做完"
+      });
+      appendMessage({
+        role: "assistant",
+        text: "这套安排我已经按顺序做完了，先收手等你回来。",
+        thinkingChain: [],
+        perceptionSummary: "固定剧本已执行完毕。",
+        sceneLabel: latestState.latestPerception?.sceneLabel || "自动运行结束",
+        riskLevel: "low",
+        actions: []
+      });
       return;
     }
 
-    await runPlannedTurn({
-      instruction,
-      scene,
-      perception: runtimeState.latestPerception,
-      source: "agent",
-      interactionMode: runtimeState.interactionMode || "act",
-      externalInputGuardEnabled: runtimeState.externalInputGuardEnabled !== false
+    await runFixedScriptTurn({
+      stage: upcomingTurn.stage,
+      roundNumber: upcomingTurn.roundNumber,
+      userInstruction: latestState.automation.instruction || "",
+      scene: latestState.scene,
+      perception: latestState.latestPerception,
+      interactionMode: latestState.interactionMode || "act",
+      externalInputGuardEnabled: latestState.externalInputGuardEnabled !== false
+    });
+
+    const progressedState = getState();
+    updateAutomation({
+      ...advanceAutomationProgress(progressedState.automation),
+      totalTurns: progressedState.automation.totalTurns + 1
     });
   } catch (error) {
     if (handleExternalInputInterrupted(error, "自主回合")) {
       return;
     }
     setLastError(error.message);
+    updateAutomation({
+      status: "paused"
+    });
     updateAgent({
       phase: "waiting"
     });
@@ -1100,14 +1478,35 @@ async function handleControl(request, response) {
       setStatus("running");
       autoCaptureService.start();
     },
-    pause: () => setStatus("paused"),
+    pause: () => {
+      setStatus("paused");
+      autoCaptureService.pause();
+      const automation = getState().automation;
+      if (automation.status === "armed" || automation.status === "running") {
+        updateAutomation({
+          status: "paused"
+        });
+      }
+    },
     resume: () => {
       setStatus("running");
       autoCaptureService.resume();
+      const automation = getState().automation;
+      if (automation.status === "paused" && automation.instruction) {
+        updateAutomation({
+          status: automation.startedAt ? "running" : "armed"
+        });
+      }
     },
     stop: () => {
       setStatus("stopped");
       autoCaptureService.stop();
+      const automation = getState().automation;
+      if (automation.status !== "idle" && automation.status !== "completed") {
+        updateAutomation({
+          status: "paused"
+        });
+      }
     },
     reset: () => {
       autoCaptureService.stop();
@@ -1351,83 +1750,30 @@ async function handleChat(request, response) {
   if (requestedExternalInputGuardEnabled !== null) {
     setExternalInputGuardEnabled(requestedExternalInputGuardEnabled);
   }
-  updateAgent({
-    mode: "user_priority",
-    phase: turnInFlight ? "queued" : "user_priority",
-    queuedUserObjective: instruction,
-    currentObjective: instruction
+
+  appendMessage(buildUserMessage({
+    instruction,
+    scene: getState().scene,
+    perception: getState().latestPerception,
+    origin: "user"
+  }));
+  armAutomationScript(instruction);
+  appendLog("info", "固定剧本自动化已布置", {
+    instruction,
+    startsAt: getState().automation.startsAt
+  });
+  appendMessage({
+    role: "assistant",
+    text: "没问题，我先把这套安排含住，等你走开以后再自己往下做。",
+    thinkingChain: [],
+    recoveryLine: "你回来一碰鼠标或键盘，我就立刻停手。",
+    perceptionSummary: "固定剧本已经布置完成，当前只是在等待启动。",
+    sceneLabel: getState().latestPerception?.sceneLabel || "等待启动",
+    riskLevel: "low",
+    actions: []
   });
 
-  try {
-    const runtimeState = getState();
-    const interactionMode = runtimeState.interactionMode || "act";
-    const externalInputGuardEnabled = runtimeState.externalInputGuardEnabled !== false;
-    const directReply = interactionMode === "act"
-      ? await maybeReplyFromCurrentChatScreen({
-        instruction,
-        externalInputGuardEnabled
-      })
-      : null;
-    if (directReply) {
-      const conversationSummary = directReply.rounds
-        .map((round) => `NPC：${round.dialogText}\n籽小刀：${round.replyText}`)
-        .join("\n\n");
-      appendMessage({
-        role: "assistant",
-        text: conversationSummary,
-        thinkingChain: [],
-        recoveryLine: `当前聊天页已续聊 ${directReply.rounds.length} 轮，停在 ${directReply.stopReason}。`,
-        perceptionSummary: "本轮直接接管当前聊天页，并持续跟 NPC 往下聊了几轮。",
-        sceneLabel: "聊天页直连",
-        riskLevel: "low",
-        actions: directReply.execution.steps
-      });
-
-      return sendJson(response, 200, statePayload());
-    }
-
-    const state = getState();
-    const scene = state.scene;
-
-    setScene(scene);
-    await waitForTurnSlot();
-    const nextState = await runPlannedTurn({
-      instruction,
-      scene,
-      perception: state.latestPerception,
-      source: "user",
-      interactionMode: state.interactionMode || "act",
-      externalInputGuardEnabled: state.externalInputGuardEnabled !== false
-    });
-
-    return sendJson(response, 200, {
-      ...statePayload(),
-      state: nextState
-    });
-  } catch (error) {
-    setLastError(error.message);
-    updateAgent({
-      phase: "waiting"
-    });
-    appendLog("error", "本轮对话执行失败", { error: error.message });
-    appendMessage({
-      role: "assistant",
-      text: `这轮处理失败了：${error.message}`,
-      thinkingChain: [],
-      recoveryLine: "我先把现场稳住，等你给我下一条更明确的指令。",
-      perceptionSummary: "这一轮没有稳定产出可用结果。",
-      sceneLabel: "执行失败",
-      riskLevel: "high",
-      actions: []
-    });
-    return sendJson(response, 500, {
-      ok: false,
-      error: error.message,
-      state: getState()
-    });
-  } finally {
-    turnInFlight = false;
-  }
+  return sendJson(response, 200, statePayload());
 }
 
 const server = http.createServer(async (request, response) => {
@@ -1488,11 +1834,6 @@ const server = http.createServer(async (request, response) => {
 server.listen(port, () => {
   appendLog("info", "视频实验控制台已启动", { port });
   console.log(`Moonlight Blade Auto Worker listening on http://localhost:${port}`);
-  setTimeout(() => {
-    maybeRunAutonomousTurn().catch((error) => {
-      appendLog("error", "自主运行启动失败", { error: error.message });
-    });
-  }, AUTONOMOUS_START_DELAY_MS);
   setInterval(() => {
     maybeRunAutonomousTurn().catch((error) => {
       appendLog("error", "自主运行定时任务失败", { error: error.message });

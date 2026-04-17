@@ -15,6 +15,22 @@ function createInitialAgentState() {
   };
 }
 
+function createInitialAutomationState() {
+  return {
+    status: "idle",
+    instruction: null,
+    armedAt: null,
+    startsAt: null,
+    startedAt: null,
+    finishedAt: null,
+    stageIndex: 0,
+    completedRoundsInStage: 0,
+    totalTurns: 0,
+    lastThought: null,
+    lastOutcome: null
+  };
+}
+
 function createInitialCaptureState() {
   return {
     enabled: false,
@@ -39,6 +55,7 @@ function createInitialState() {
     externalInputGuardEnabled: true,
     currentTurn: null,
     latestPerception: null,
+    automation: createInitialAutomationState(),
     capture: createInitialCaptureState(),
     experiments: [],
     agent: createInitialAgentState(),
@@ -113,6 +130,15 @@ export function setCaptureState(patch) {
   return state.capture;
 }
 
+export function updateAutomation(patch) {
+  state.automation = {
+    ...state.automation,
+    ...patch
+  };
+
+  return state.automation;
+}
+
 export function appendExperiment(experiment) {
   state.experiments.unshift({
     id: experiment.id || `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -154,6 +180,7 @@ export function resetRuntime() {
   state.externalInputGuardEnabled = next.externalInputGuardEnabled;
   state.currentTurn = next.currentTurn;
   state.latestPerception = next.latestPerception;
+  state.automation = next.automation;
   state.capture = next.capture;
   state.experiments = [];
   state.agent = next.agent;

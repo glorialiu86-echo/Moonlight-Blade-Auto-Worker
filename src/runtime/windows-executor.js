@@ -236,29 +236,30 @@ function createStealthSetupActions(baseAction) {
     },
     {
       id: `${baseAction.id}-primitive-6`,
-      title: "Enter Stealth",
-      type: "press_shortcut",
-      sourceType: baseAction.sourceType,
-      shortcut: "stealth",
-      postDelayMs: 500
-    },
-    {
-      id: `${baseAction.id}-primitive-7`,
       title: "Search Front Target",
       type: "stealth_search_target",
       sourceType: baseAction.sourceType,
       searchTimeoutMs: 7000,
       turnPulseMs: 180,
       moveSettleMs: 80,
+      frontRoi: [0.43, 0.12, 0.58, 0.52]
+    },
+    {
+      id: `${baseAction.id}-primitive-7`,
+      title: "Select Front Target",
+      type: "stealth_select_target",
+      sourceType: baseAction.sourceType,
+      selectionTimeoutMs: 2200,
+      selectionSettleMs: 120,
       frontRoi: [0.36, 0.18, 0.64, 0.42]
     },
     {
       id: `${baseAction.id}-primitive-8`,
-      title: "Select Front Target By Tab",
-      type: "stealth_select_target_tab",
+      title: "Enter Stealth",
+      type: "press_shortcut",
       sourceType: baseAction.sourceType,
-      selectionTimeoutMs: 2200,
-      selectionSettleMs: 120,
+      shortcut: "stealth",
+      postDelayMs: 500
     }
   ];
 }

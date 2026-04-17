@@ -3852,46 +3852,6 @@ def run_stealth_select_target(hwnd: int, action: dict[str, Any]) -> dict[str, An
     }
 
 
-def run_stealth_select_target_tab(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
-    action_id = str(action.get("id") or "")
-    title = str(action.get("title") or "stealth_select_target_tab")
-    selection_timeout_ms = int(action.get("selectionTimeoutMs") or 2200)
-    selection_settle_ms = int(action.get("selectionSettleMs") or 120)
-
-    focus_window(hwnd)
-    started_at = time.time()
-    press_count = 0
-    stage_state = detect_npc_interaction_stage(hwnd)
-    target_info = detect_target_threshold(hwnd)
-
-    while (time.time() - started_at) * 1000 < selection_timeout_ms:
-        pydirectinput.press("tab")
-        INPUT_GUARD.refresh_baseline()
-        press_count += 1
-        INPUT_GUARD.guarded_sleep(selection_settle_ms, title)
-        stage_state = detect_npc_interaction_stage(hwnd)
-        target_info = detect_target_threshold(hwnd)
-        if stage_state["stage"] == "npc_selected" or contains_any_keyword(stage_state["texts"].get("look_button", ""), ["查看"]) or has_selected_target(target_info):
-            break
-
-    if stage_state["stage"] != "npc_selected" and not contains_any_keyword(stage_state["texts"].get("look_button", ""), ["查看"]) and not has_selected_target(target_info):
-        raise RuntimeError("Failed to select NPC with Tab and show 查看/放大镜")
-
-    return {
-        "id": action_id,
-        "title": title,
-        "status": "performed",
-        "detail": "Selected front target with Tab",
-        "input": {
-            "mode": "stealth_select_target_tab",
-            "tabPressCount": press_count,
-            "stage": stage_state["stage"],
-            "stageTexts": stage_state["texts"],
-            "targetText": target_info.get("text") or "",
-        },
-    }
-
-
 def run_stealth_rush_knockout(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "stealth_rush_knockout")
@@ -4196,9 +4156,6 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "stealth_select_target":
         return run_stealth_select_target(hwnd, action)
-
-    if action_type == "stealth_select_target_tab":
-        return run_stealth_select_target_tab(hwnd, action)
 
     if action_type == "stealth_rush_knockout":
         return run_stealth_rush_knockout(hwnd, action)

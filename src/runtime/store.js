@@ -27,7 +27,9 @@ function createInitialAutomationState() {
     completedRoundsInStage: 0,
     totalTurns: 0,
     lastThought: null,
-    lastOutcome: null
+    lastOutcome: null,
+    resumeAvailable: false,
+    resumeFailedStepTitle: null
   };
 }
 
@@ -166,6 +168,15 @@ export function appendMessage(message) {
   });
   state.messages = state.messages.slice(-40);
   return state.messages[state.messages.length - 1];
+}
+
+export function removeMessage(messageId) {
+  if (!messageId) {
+    return state.messages;
+  }
+
+  state.messages = state.messages.filter((message) => message.id !== messageId);
+  return state.messages;
 }
 
 export function setLastError(errorMessage) {

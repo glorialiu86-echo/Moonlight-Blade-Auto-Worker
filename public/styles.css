@@ -90,6 +90,14 @@ body {
   min-height: 48px;
 }
 
+.simple-composer-actions .resume-triangle {
+  min-width: 48px;
+  width: 48px;
+  padding: 0;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
 .simple-composer-actions .primary {
   min-width: 112px;
 }

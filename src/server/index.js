@@ -27,6 +27,7 @@ import {
   appendLog,
   appendMessage,
   getState,
+  removeMessage,
   resetRuntime,
   setCaptureState,
   setCurrentTurn,
@@ -112,6 +113,7 @@ const FIXED_SCRIPT_STAGES = [
 ];
 
 let turnInFlight = false;
+let pendingResumeContext = null;
 
 const autoCaptureService = createAutoCaptureService({
   captureWindow: () => captureGameWindow(),
@@ -333,6 +335,7 @@ function advanceAutomationProgress(automationState) {
 }
 
 function armAutomationScript(instruction) {
+  clearPendingResumeContext();
   const now = new Date();
   const startsAt = new Date(now.getTime() + SCRIPT_ARM_DELAY_MS);
 
@@ -361,6 +364,66 @@ function armAutomationScript(instruction) {
 
 function hasAutomationTrigger(instruction) {
   return String(instruction || "").includes("加油");
+}
+
+function clearPendingResumeContext() {
+  pendingResumeContext = null;
+  updateAutomation({
+    resumeAvailable: false,
+    resumeFailedStepTitle: null
+  });
+}
+
+function setPendingResumeContext(context) {
+  pendingResumeContext = context || null;
+  updateAutomation({
+    resumeAvailable: Boolean(context),
+    resumeFailedStepTitle: context?.failedStepTitle || null
+  });
+}
+
+function getFailedStepTitle(error) {
+  return String(
+    error?.workerPayload?.failedStep?.title
+      || error?.workerPayload?.failedStep?.type
+      || error?.workerPayload?.failedStep?.sourceType
+      || "这一步"
+  ).trim();
+}
+
+function buildFunnyFailureLine(stepTitle, errorMessage) {
+  const title = String(stepTitle || "这一步").trim();
+  const reason = String(errorMessage || "它就是不肯配合").trim();
+  return `我卡在「${title}」这一步了，${reason}，快救救我。`;
+}
+
+function buildResumeContextFromError(baseContext, error) {
+  const workerActions = Array.isArray(error?.workerActions) ? error.workerActions : [];
+  if (workerActions.length === 0) {
+    return null;
+  }
+
+  const failedStep = error?.workerPayload?.failedStep || null;
+  const completedCount = Array.isArray(error?.workerPayload?.steps) ? error.workerPayload.steps.length : 0;
+  let failedIndex = failedStep?.id
+    ? workerActions.findIndex((action) => action.id === failedStep.id)
+    : -1;
+
+  if (failedIndex < 0) {
+    failedIndex = Math.min(Math.max(completedCount, 0), workerActions.length - 1);
+  }
+
+  const remainingWorkerActions = workerActions.slice(failedIndex);
+  if (remainingWorkerActions.length === 0) {
+    return null;
+  }
+
+  return {
+    ...baseContext,
+    failedStepTitle: getFailedStepTitle(error),
+    failureMessageId: null,
+    remainingWorkerActions
+  };
 }
 
 function sleep(ms) {
@@ -934,6 +997,125 @@ async function recordMotionReviewSamples({
   }
 }
 
+async function finalizeFixedScriptTurnExecution({
+  stage,
+  roundNumber,
+  scene,
+  perception,
+  interactionMode,
+  externalInputGuardEnabled,
+  perceptionSummary,
+  plan,
+  execution,
+  resultLeadText
+}) {
+  if (interactionMode !== "watch") {
+    await recordMotionReviewSamples({
+      instruction: plan.intent,
+      source: "agent",
+      scene,
+      plan,
+      perception,
+      execution
+    });
+
+    await recordInteractionLearningSample({
+      instruction: plan.intent,
+      source: "agent",
+      scene,
+      plan,
+      perception,
+      execution
+    });
+
+    const replyResult = await maybeSendNpcReply({
+      instruction: plan.intent,
+      plan,
+      execution,
+      externalInputGuardEnabled
+    });
+
+    if (replyResult) {
+      execution = {
+        ...execution,
+        steps: [
+          ...execution.steps,
+          ...replyResult.execution.steps
+        ],
+        rawSteps: [
+          ...execution.rawSteps,
+          ...replyResult.execution.rawSteps
+        ],
+        durationMs: execution.durationMs + replyResult.execution.durationMs,
+        outcome: `${execution.outcome} 已顺着这一轮又多聊了 ${replyResult.rounds.length} 轮。`,
+        replyText: replyResult.replyText,
+        replyRounds: replyResult.rounds
+      };
+    }
+  }
+
+  const turn = {
+    id: `turn-${Date.now()}`,
+    instruction: "按刚才那套安排继续推进",
+    scene,
+    createdAt: new Date().toISOString(),
+    source: "agent",
+    interactionMode,
+    externalInputGuardEnabled,
+    plan,
+    execution,
+    perception: perception || null
+  };
+
+  setCurrentTurn(turn);
+
+  appendMessage({
+    role: "assistant",
+    text: `${resultLeadText}${execution.outcome}`,
+    thinkingChain: [],
+    recoveryLine: plan.recoveryLine,
+    perceptionSummary,
+    sceneLabel: plan.environment,
+    riskLevel: plan.riskLevel,
+    actions: execution.steps,
+    decide: ""
+  });
+
+  appendExperiment(buildExperimentRecord({
+    instruction: "按既定安排继续推进",
+    source: "agent",
+    scene,
+    plan,
+    execution,
+    perception,
+    perceptionSummary
+  }));
+
+  appendLog("info", "固定剧本动作已执行", {
+    scriptKey: stage.key,
+    roundNumber,
+    outcome: execution.outcome
+  });
+
+  updateAutomation({
+    lastOutcome: execution.outcome
+  });
+  updateAgent({
+    mode: "autonomous",
+    phase: "autonomous",
+    currentObjective: "按既定安排继续往下做",
+    queuedUserObjective: null,
+    lastTurnSource: "agent",
+    lastTurnAt: new Date().toISOString(),
+    autonomousTurnCount: (getState().agent?.autonomousTurnCount || 0) + 1
+  });
+
+  return {
+    plan,
+    execution
+  };
+}
+
 async function runFixedScriptTurn({
   stage,
   roundNumber,
@@ -1016,113 +1198,148 @@ async function runFixedScriptTurn({
         execution: failedExecution,
         error
       });
+      error.resumeContext = buildResumeContextFromError({
+        stage,
+        roundNumber,
+        userInstruction,
+        scene,
+        perception,
+        interactionMode,
+        externalInputGuardEnabled,
+        perceptionSummary,
+        plan
+      }, error);
       throw error;
     }
-
-    await recordMotionReviewSamples({
-      instruction: plan.intent,
-      source: "agent",
-      scene,
-      plan,
-      perception,
-      execution
-    });
-
-    await recordInteractionLearningSample({
-      instruction: plan.intent,
-      source: "agent",
-      scene,
-      plan,
-      perception,
-      execution
-    });
-
-    const replyResult = await maybeSendNpcReply({
-      instruction: plan.intent,
-      plan,
-      execution,
-      externalInputGuardEnabled
-    });
-
-    if (replyResult) {
-      execution = {
-        ...execution,
-        steps: [
-          ...execution.steps,
-          ...replyResult.execution.steps
-        ],
-        rawSteps: [
-          ...execution.rawSteps,
-          ...replyResult.execution.rawSteps
-        ],
-        durationMs: execution.durationMs + replyResult.execution.durationMs,
-        outcome: `${execution.outcome} 已顺着这一轮又多聊了 ${replyResult.rounds.length} 轮。`,
-        replyText: replyResult.replyText,
-        replyRounds: replyResult.rounds
-      };
-    }
   }
-
-  const turn = {
-    id: `turn-${Date.now()}`,
-    instruction: "按刚才那套安排继续推进",
+  return finalizeFixedScriptTurnExecution({
+    stage,
+    roundNumber,
     scene,
-    createdAt: new Date().toISOString(),
-    source: "agent",
+    perception,
     interactionMode,
     externalInputGuardEnabled,
-    plan,
-    execution,
-    perception: perception || null
-  };
-
-  setCurrentTurn(turn);
-
-  appendMessage({
-    role: "assistant",
-    text: `我先照这路做了一轮。${execution.outcome}`,
-    thinkingChain: [],
-    recoveryLine: plan.recoveryLine,
     perceptionSummary,
-    sceneLabel: plan.environment,
-    riskLevel: plan.riskLevel,
-    actions: execution.steps,
-    decide: ""
-  });
-
-  appendExperiment(buildExperimentRecord({
-    instruction: "按既定安排继续推进",
-    source: "agent",
-    scene,
     plan,
     execution,
-    perception,
-    perceptionSummary
-  }));
+    resultLeadText: "我先照这路做了一轮。"
+  });
+}
 
-  appendLog("info", "固定剧本动作已执行", {
-    scriptKey: stage.key,
-    roundNumber,
-    outcome: execution.outcome
+function recordAutonomousFailure(error) {
+  const failedStepTitle = getFailedStepTitle(error);
+  const resumeContext = error?.resumeContext || null;
+  const sceneLabel = resumeContext?.plan?.environment
+    || getState().latestPerception?.sceneLabel
+    || "自动运行";
+  const failureMessage = appendMessage({
+    role: "assistant",
+    text: buildFunnyFailureLine(failedStepTitle, error.message),
+    thinkingChain: [],
+    recoveryLine: resumeContext
+      ? "点一下右边那个三角，我就从卡住的那一步继续。"
+      : "这回我先趴着不乱动，免得把场面越搞越难看。",
+    perceptionSummary: resumeContext
+      ? "动作链卡住了，当前可以从失败步骤继续。"
+      : "动作链卡住了，但这次没有可直接续跑的失败步骤。",
+    sceneLabel,
+    riskLevel: "medium",
+    actions: []
   });
 
+  if (resumeContext) {
+    setPendingResumeContext({
+      ...resumeContext,
+      failureMessageId: failureMessage.id
+    });
+  } else {
+    clearPendingResumeContext();
+  }
+}
+
+async function resumeFailedAutomationStep() {
+  const context = pendingResumeContext;
+  if (!context?.remainingWorkerActions?.length) {
+    throw new Error("当前没有可继续的失败步骤。");
+  }
+
+  await waitForTurnSlot();
+  clearPendingResumeContext();
+  if (context.failureMessageId) {
+    removeMessage(context.failureMessageId);
+  }
+
+  setLastError(null);
+  setStatus("running");
+  autoCaptureService.start();
   updateAutomation({
-    lastOutcome: execution.outcome
+    status: "running"
   });
   updateAgent({
     mode: "autonomous",
     phase: "autonomous",
-    currentObjective: "按既定安排继续往下做",
-    queuedUserObjective: null,
-    lastTurnSource: "agent",
-    lastTurnAt: new Date().toISOString(),
-    autonomousTurnCount: (getState().agent?.autonomousTurnCount || 0) + 1
+    currentObjective: `从「${context.failedStepTitle || "失败步骤"}」继续`,
+    lastAutonomousInstruction: context.plan?.intent || getState().agent.lastAutonomousInstruction
   });
 
-  return {
-    plan,
-    execution
-  };
+  try {
+    const latestPerception = getState().latestPerception || context.perception || null;
+    const perceptionSummary = perceptionSummaryBySource(latestPerception, "agent");
+    const execution = await runWindowsActions(context.remainingWorkerActions, {
+      interruptOnExternalInput: context.externalInputGuardEnabled
+    });
+
+    await finalizeFixedScriptTurnExecution({
+      stage: context.stage,
+      roundNumber: context.roundNumber,
+      scene: context.scene,
+      perception: latestPerception,
+      interactionMode: context.interactionMode,
+      externalInputGuardEnabled: context.externalInputGuardEnabled,
+      perceptionSummary,
+      plan: context.plan,
+      execution,
+      resultLeadText: `我从「${context.failedStepTitle || "那一步"}」接上了。`
+    });
+
+    const progressedState = getState();
+    updateAutomation({
+      ...advanceAutomationProgress(progressedState.automation),
+      totalTurns: progressedState.automation.totalTurns + 1
+    });
+  } catch (error) {
+    if (handleExternalInputInterrupted(error, "失败步骤续跑")) {
+      return;
+    }
+
+    setLastError(error.message);
+    updateAutomation({
+      status: "paused"
+    });
+    updateAgent({
+      phase: "waiting"
+    });
+    appendLog("error", "失败步骤续跑失败", {
+      error: error.message
+    });
+    recordAutonomousFailure({
+      ...error,
+      resumeContext: buildResumeContextFromError({
+        stage: context.stage,
+        roundNumber: context.roundNumber,
+        userInstruction: context.userInstruction,
+        scene: context.scene,
+        perception: context.perception,
+        interactionMode: context.interactionMode,
+        externalInputGuardEnabled: context.externalInputGuardEnabled,
+        perceptionSummary: context.perceptionSummary,
+        plan: context.plan
+      }, error)
+    });
+    throw error;
+  } finally {
+    turnInFlight = false;
+  }
 }
 
 async function runPlannedTurn({
@@ -1432,6 +1649,7 @@ async function maybeRunAutonomousTurn() {
     appendLog("error", "自主运行回合失败", {
       error: error.message
     });
+    recordAutonomousFailure(error);
   } finally {
     turnInFlight = false;
   }
@@ -1514,8 +1732,12 @@ async function handleControl(request, response) {
     },
     reset: () => {
       autoCaptureService.stop();
+      clearPendingResumeContext();
       resetRuntime();
       appendLog("info", "运行上下文已清空");
+    },
+    resume_failed_step: async () => {
+      await resumeFailedAutomationStep();
     }
   };
 
@@ -1524,7 +1746,7 @@ async function handleControl(request, response) {
       return sendJson(response, 400, { ok: false, error: "Unsupported control action" });
     }
 
-    transitions[action]();
+    await transitions[action]();
 
     if (action !== "reset") {
       appendLog("info", `控制动作已执行：${action}`);
@@ -1749,6 +1971,7 @@ async function handleChat(request, response) {
   setStatus("running");
   ensureAutoCaptureRunning();
   setLastError(null);
+  clearPendingResumeContext();
   if (requestedInteractionMode) {
     setInteractionMode(requestedInteractionMode);
   }

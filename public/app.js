@@ -2,6 +2,7 @@ const state = {
   submitting: false,
   runtimeStatus: "idle",
   interactionMode: "watch",
+  resumeAvailable: false,
   voiceSupported: false,
   voice: {
     recording: false,
@@ -19,6 +20,7 @@ const elements = {
   composerForm: document.querySelector("#composerForm"),
   instructionInput: document.querySelector("#instructionInput"),
   messageList: document.querySelector("#messageList"),
+  resumeFailedStepButton: document.querySelector("#resumeFailedStepButton"),
   voiceButton: document.querySelector("#voiceButton"),
   voiceStatus: document.querySelector("#voiceStatus"),
   userMessageTemplate: document.querySelector("#userMessageTemplate"),
@@ -55,6 +57,9 @@ function syncUiState() {
   const busy = state.submitting || state.voice.transcribing;
   elements.instructionInput.disabled = busy || state.voice.recording;
   elements.composerForm.querySelector('button[type="submit"]').disabled = busy || state.voice.recording;
+  if (elements.resumeFailedStepButton) {
+    elements.resumeFailedStepButton.disabled = busy || state.voice.recording || !state.resumeAvailable;
+  }
 
   if (elements.voiceButton) {
     elements.voiceButton.disabled = state.submitting || state.voice.transcribing || !state.voiceSupported;
@@ -134,6 +139,7 @@ function renderMessages(messages) {
 function renderRuntimeState(runtimeState) {
   state.runtimeStatus = runtimeState.status || "idle";
   state.interactionMode = runtimeState.interactionMode || "watch";
+  state.resumeAvailable = Boolean(runtimeState.automation?.resumeAvailable);
   renderMessages(runtimeState.messages);
   syncUiState();
 }
@@ -168,6 +174,33 @@ async function submitInstruction({ allowDuringTranscription = false } = {}) {
     });
 
     elements.instructionInput.value = "";
+    applyPayload(payload);
+    updateVoiceStatus("");
+  } catch (error) {
+    await refresh().catch(() => {});
+    window.alert(error.message);
+  } finally {
+    state.submitting = false;
+    syncUiState();
+  }
+}
+
+async function resumeFailedStep() {
+  if (state.submitting || state.voice.recording || !state.resumeAvailable) {
+    return;
+  }
+
+  state.submitting = true;
+  syncUiState();
+
+  try {
+    const payload = await request("/api/control", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "resume_failed_step"
+      })
+    });
+
     applyPayload(payload);
     updateVoiceStatus("");
   } catch (error) {
@@ -423,6 +456,10 @@ function initVoiceInput() {
 elements.composerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await submitInstruction();
+});
+
+elements.resumeFailedStepButton?.addEventListener("click", async () => {
+  await resumeFailedStep();
 });
 
 elements.voiceButton?.addEventListener("click", async () => {

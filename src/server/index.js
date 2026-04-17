@@ -655,6 +655,21 @@ async function buildWatchUserReplyV2({ instruction, imageInput, conversationMess
   return String(result.text || "").replace(/\s+/g, " ").trim();
 }
 
+async function captureReplyImageOrThrow() {
+  const capture = await captureGameWindow();
+  latestCaptureImageDataUrl = capture.imageDataUrl;
+  setCaptureState({
+    lastCaptureAt: capture.capturedAt,
+    lastWindowTitle: capture.windowTitle,
+    lastBounds: capture.bounds,
+    lastImageSource: "reply_capture",
+    consecutiveFailures: 0,
+    lastErrorCode: null,
+    lastErrorMessage: null
+  });
+  return capture.imageDataUrl;
+}
+
 async function maybeRunWatchCommentaryTurn(runtimeState) {
   const perception = runtimeState.latestPerception;
   const imageInput = latestCaptureImageDataUrl;
@@ -732,30 +747,6 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
 }
 
 async function runWatchUserReplyTurn({ instruction, scene, perception, conversationMessages = [] }) {
-  if (!latestCaptureImageDataUrl) {
-    appendMessage({
-      role: "assistant",
-      text: "你先继续玩，我盯到画面再接你这句。",
-      thinkingChain: [],
-      perceptionSummary: perceptionSummaryBySource(perception, "agent"),
-      sceneLabel: perception?.sceneLabel || sceneDescription(scene),
-      riskLevel: "low",
-      actions: [],
-      decide: ""
-    });
-    updateAgent({
-      mode: "user_priority",
-      phase: "cooldown",
-      currentObjective: "watch",
-      queuedUserObjective: null,
-      lastUserInstruction: instruction,
-      lastTurnSource: "user",
-      lastTurnAt: new Date().toISOString(),
-      watchCommentaryCooldownUntil: new Date(Date.now() + WATCH_USER_REPLY_COOLDOWN_MS).toISOString()
-    });
-    return;
-  }
-
   await waitForTurnSlot();
 
   updateAgent({
@@ -766,14 +757,15 @@ async function runWatchUserReplyTurn({ instruction, scene, perception, conversat
   });
 
   try {
+    const replyImageInput = await captureReplyImageOrThrow();
     const replyText = await buildWatchUserReplyV2({
       instruction,
-      imageInput: latestCaptureImageDataUrl,
+      imageInput: replyImageInput,
       conversationMessages
     });
 
     if (!replyText) {
-      throw new Error("观看模式没有生成可用回复。");
+      throw new Error("No watch reply generated.");
     }
 
     appendMessage({
@@ -787,11 +779,37 @@ async function runWatchUserReplyTurn({ instruction, scene, perception, conversat
       decide: ""
     });
 
-    appendLog("info", "观看模式已优先回复籽岷", {
+    appendLog("info", "watch mode replied to user with fresh screenshot", {
       instruction,
-      replyText
+      replyText,
+      imageSource: "reply_capture"
     });
 
+    updateAgent({
+      mode: "user_priority",
+      phase: "cooldown",
+      currentObjective: "watch",
+      queuedUserObjective: null,
+      lastUserInstruction: instruction,
+      lastTurnSource: "user",
+      lastTurnAt: new Date().toISOString(),
+      watchCommentaryCooldownUntil: new Date(Date.now() + WATCH_USER_REPLY_COOLDOWN_MS).toISOString()
+    });
+  } catch (error) {
+    appendLog("error", "watch mode reply failed", {
+      instruction,
+      error: error.message
+    });
+    appendMessage({
+      role: "assistant",
+      text: `这轮我没抓到可用画面，先不乱接话：${error.message}`,
+      thinkingChain: [],
+      perceptionSummary: perceptionSummaryBySource(perception, "agent"),
+      sceneLabel: perception?.sceneLabel || sceneDescription(scene),
+      riskLevel: "medium",
+      actions: [],
+      decide: ""
+    });
     updateAgent({
       mode: "user_priority",
       phase: "cooldown",

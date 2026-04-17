@@ -2899,7 +2899,7 @@ async function maybeRunAutonomousTurn() {
       });
       appendMessage({
         role: "assistant",
-        text: "行，我现在顺着刚才那套安排往下做。",
+        text: "好嘞，这就按刚才盘好的路子稳稳开干！",
         thinkingChain: [],
         perceptionSummary: "自动化已从等待切到执行。",
         sceneLabel: runtimeState.latestPerception?.sceneLabel || "自动运行",
@@ -2923,7 +2923,7 @@ async function maybeRunAutonomousTurn() {
       });
       appendMessage({
         role: "assistant",
-        text: "我完美完成籽岷的任务啦，现在可骄傲了，就等他回来验收啦。这一趟也赚了不少钱，先在街上乖乖收手。",
+        text: "籽岷的任务我全拿下啦～昂首挺胸等他回来看成果！钱也揣兜里了，街边站得笔直，不乱伸手～",
         thinkingChain: [],
         perceptionSummary: "固定剧本已执行完毕。",
         sceneLabel: latestState.latestPerception?.sceneLabel || "自动运行结束",
@@ -3313,7 +3313,7 @@ async function handleChat(request, response) {
     });
     appendMessage({
       role: "assistant",
-      text: "好的！收到！等我想想怎么做…",
+      text: "收到加油啦！马上动脑筋～",
       thinkingChain: [],
       recoveryLine: "你回来一碰鼠标或键盘，我就立刻停手。",
       perceptionSummary: "固定剧本已经布置完成，当前只是在等待启动。",
@@ -3336,7 +3336,7 @@ async function handleChat(request, response) {
     });
     appendMessage({
       role: "assistant",
-      text: "好的！收到！等我想想怎么做…",
+      text: "收到加油啦！马上动脑筋～",
       thinkingChain: [],
       recoveryLine: "只有你说出触发词，我才会布置整套自动化。",
       perceptionSummary: "本轮没有命中固定剧本触发词，当前不会布置自动化主流程。",

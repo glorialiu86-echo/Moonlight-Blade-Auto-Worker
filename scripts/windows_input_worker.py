@@ -2788,7 +2788,30 @@ def exit_panel(hwnd: int) -> None:
     INPUT_GUARD.guarded_sleep(250, "exit_panel")
 
 
-def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval_ms: int) -> dict[str, Any]:
+NPC_READY_STAGES = {"npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"}
+
+
+def collect_npc_stage_input(
+    hwnd: int,
+    stage_state: dict[str, Any],
+    target_text: str = "",
+) -> dict[str, Any]:
+    payload = {
+        "stage": stage_state["stage"],
+        "stageTexts": stage_state["texts"],
+        "targetText": target_text,
+    }
+    if stage_state["stage"] == "chat_ready":
+        payload["dialogText"] = str(detect_dialog(hwnd).get("text") or "").strip()
+    return payload
+
+
+def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "acquire_npc_target")
+    timeout_ms = int(action.get("timeoutMs") or DEFAULT_INTERACT_TIMEOUT_MS)
+    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
+    scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
     click_points = [
         (0.80, 0.44),
         (0.84, 0.45),
@@ -2801,11 +2824,9 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
     ]
     click_attempts = 0
     move_attempts = 0
-    camera_drags = 0
     click_point_attempts: list[dict[str, float]] = []
-    nearbyScanAttempts: list[dict[str, Any]] = []
-    selectionAttempts: list[dict[str, Any]] = []
-    viewAttempts: list[dict[str, Any]] = []
+    nearby_scan_attempts: list[dict[str, Any]] = []
+    selection_attempts: list[dict[str, Any]] = []
     stage_history: list[str] = []
     start_time = time.time()
     last_stage = "none"
@@ -2813,128 +2834,94 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
 
     focus_window(hwnd)
 
-    nearby_scan = scan_nearby_npc_targets(hwnd, "ensure_npc_action_menu")
-    nearbyScanAttempts = nearby_scan["attempts"]
-    if nearby_scan["matched"]:
-        stage_history.extend([attempt["stage"] for attempt in nearbyScanAttempts])
-
-        if nearby_scan["stage"] in ["npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"]:
-            return {
-                "stage": nearby_scan["stage"],
-                "stageTexts": nearby_scan["stageTexts"],
-                "stageHistory": stage_history,
-                "clickAttempts": len(nearbyScanAttempts),
-                "moveAttempts": move_attempts,
-                "cameraDrags": camera_drags,
-                "clickPointAttempts": click_point_attempts,
-                "nearbyScanAttempts": nearbyScanAttempts,
-                "selectionAttempts": selectionAttempts,
-                    "viewAttempts": viewAttempts,
-                    "targetText": nearby_scan["targetText"],
-                }
-
-        if nearby_scan["stage"] == "npc_selected" or has_selected_target({"text": nearby_scan["targetText"]}):
-            open_view_result = open_view_for_selected_npc(
-                hwnd,
-                "ensure_npc_action_menu",
-                nearby_scan["targetText"],
-            )
-            viewAttempts.extend(open_view_result["viewAttempts"])
-            stage_history.append(open_view_result["stage"])
-            if open_view_result["opened"]:
-                return {
-                    "stage": open_view_result["stage"],
-                    "stageTexts": open_view_result["stageTexts"],
-                    "stageHistory": stage_history,
-                    "clickAttempts": len(nearbyScanAttempts),
-                    "moveAttempts": move_attempts,
-                    "cameraDrags": camera_drags,
-                    "clickPointAttempts": click_point_attempts,
-                    "nearbyScanAttempts": nearbyScanAttempts,
-                    "selectionAttempts": selectionAttempts,
-                    "viewAttempts": viewAttempts,
-                    "targetText": nearby_scan["targetText"],
-                }
-
-    while (time.time() - start_time) * 1000 < timeout_ms:
-        INPUT_GUARD.check_or_raise("ensure_npc_action_menu")
-        elapsed_ms = (time.time() - start_time) * 1000
-        stage_state = detect_npc_interaction_stage(hwnd)
-        last_stage = stage_state["stage"]
-        stage_history.append(last_stage)
-        target_info = detect_target_threshold(hwnd)
-
-        if last_stage in ["npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"]:
-            return {
-                "stage": last_stage,
-                "stageTexts": stage_state["texts"],
-                "stageHistory": stage_history,
+    current_stage_state = detect_npc_interaction_stage(hwnd)
+    current_target_info = detect_target_threshold(hwnd)
+    current_stage = current_stage_state["stage"]
+    if current_stage in NPC_READY_STAGES or current_stage == "npc_selected" or has_selected_target(current_target_info):
+        resolved_stage = current_stage if current_stage != "none" else "npc_selected"
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": f"NPC target already available at stage {resolved_stage}",
+            "input": {
+                "mode": "acquire_npc_target",
+                **collect_npc_stage_input(hwnd, {**current_stage_state, "stage": resolved_stage}, current_target_info["text"]),
+                "stageHistory": [resolved_stage],
                 "clickAttempts": click_attempts,
                 "moveAttempts": move_attempts,
-                "cameraDrags": camera_drags,
                 "clickPointAttempts": click_point_attempts,
-                "nearbyScanAttempts": nearbyScanAttempts,
-                "selectionAttempts": selectionAttempts,
-                "viewAttempts": viewAttempts,
-                "targetText": target_info["text"],
+                "nearbyScanAttempts": nearby_scan_attempts,
+                "selectionAttempts": selection_attempts,
+                "lastClick": last_npc_click,
+            },
+        }
+
+    nearby_scan = scan_nearby_npc_targets(hwnd, title)
+    nearby_scan_attempts = nearby_scan["attempts"]
+    if nearby_scan["matched"]:
+        stage_history.extend([attempt["stage"] for attempt in nearby_scan_attempts])
+        resolved_stage = nearby_scan["stage"]
+        if resolved_stage == "none" and has_selected_target({"text": nearby_scan["targetText"]}):
+            resolved_stage = "npc_selected"
+        if resolved_stage in NPC_READY_STAGES or resolved_stage == "npc_selected":
+            last_npc_click = nearby_scan_attempts[-1]["click"] if nearby_scan_attempts else None
+            return {
+                "id": action_id,
+                "title": title,
+                "status": "performed",
+                "detail": f"Acquired NPC target at stage {resolved_stage}",
+                "input": {
+                    "mode": "acquire_npc_target",
+                    "stage": resolved_stage,
+                    "stageTexts": nearby_scan["stageTexts"],
+                    "targetText": nearby_scan["targetText"],
+                    **({"dialogText": str(detect_dialog(hwnd).get("text") or "").strip()} if resolved_stage == "chat_ready" else {}),
+                    "stageHistory": stage_history,
+                    "clickAttempts": len(nearby_scan_attempts),
+                    "moveAttempts": move_attempts,
+                    "clickPointAttempts": click_point_attempts,
+                    "nearbyScanAttempts": nearby_scan_attempts,
+                    "selectionAttempts": selection_attempts,
+                    "lastClick": last_npc_click,
+                },
             }
 
-        if last_stage == "npc_selected" or has_selected_target(target_info):
-            open_view_result = open_view_for_selected_npc(
-                hwnd,
-                "ensure_npc_action_menu",
-                target_info["text"],
-                last_npc_click,
-            )
-            viewAttempts.extend(open_view_result["viewAttempts"])
-            stage_history.append(open_view_result["stage"])
-            if open_view_result["opened"]:
-                return {
-                    "stage": open_view_result["stage"],
-                    "stageTexts": open_view_result["stageTexts"],
-                    "stageHistory": stage_history,
-                    "clickAttempts": click_attempts + len(open_view_result["viewAttempts"]),
-                    "moveAttempts": move_attempts,
-                    "cameraDrags": camera_drags,
-                    "clickPointAttempts": click_point_attempts,
-                    "nearbyScanAttempts": nearbyScanAttempts,
-                    "selectionAttempts": selectionAttempts,
-                    "viewAttempts": viewAttempts,
-                    "targetText": target_info["text"],
-                }
-            click_attempts += 1
-            INPUT_GUARD.guarded_sleep(120, "ensure_npc_action_menu")
-            stage_state = detect_npc_interaction_stage(hwnd)
-            last_stage = stage_state["stage"]
-            stage_history.append(last_stage)
-            if last_stage in ["npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"]:
-                return {
-                    "stage": last_stage,
-                    "stageTexts": stage_state["texts"],
+    while (time.time() - start_time) * 1000 < timeout_ms:
+        INPUT_GUARD.check_or_raise(title)
+        stage_state = detect_npc_interaction_stage(hwnd)
+        target_info = detect_target_threshold(hwnd)
+        last_stage = stage_state["stage"]
+        resolved_stage = last_stage if last_stage != "none" else ("npc_selected" if has_selected_target(target_info) else "none")
+        stage_history.append(resolved_stage)
+
+        if resolved_stage in NPC_READY_STAGES or resolved_stage == "npc_selected":
+            return {
+                "id": action_id,
+                "title": title,
+                "status": "performed",
+                "detail": f"Acquired NPC target at stage {resolved_stage}",
+                "input": {
+                    "mode": "acquire_npc_target",
+                    **collect_npc_stage_input(hwnd, {**stage_state, "stage": resolved_stage}, target_info["text"]),
                     "stageHistory": stage_history,
                     "clickAttempts": click_attempts,
                     "moveAttempts": move_attempts,
-                    "cameraDrags": camera_drags,
                     "clickPointAttempts": click_point_attempts,
-                    "nearbyScanAttempts": nearbyScanAttempts,
-                    "selectionAttempts": selectionAttempts,
-                    "viewAttempts": viewAttempts,
-                    "targetText": target_info["text"],
-                }
-            continue
+                    "nearbyScanAttempts": nearby_scan_attempts,
+                    "selectionAttempts": selection_attempts,
+                    "lastClick": last_npc_click,
+                },
+            }
 
         x_ratio, y_ratio = click_points[click_attempts % len(click_points)]
         last_npc_click = click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
         click_point_attempts.append({"xRatio": x_ratio, "yRatio": y_ratio})
-        click_target = find_click_target_name(
-            hwnd,
-            int(last_npc_click["screenX"]),
-            int(last_npc_click["screenY"]),
-        )
+        click_target = find_click_target_name(hwnd, int(last_npc_click["screenX"]), int(last_npc_click["screenY"]))
         if click_target:
             selection_result = verify_npc_selection(hwnd, last_npc_click, click_target["text"])
             selection_result["targetProbe"] = click_target
-            selectionAttempts.append(selection_result)
+            selection_attempts.append(selection_result)
             if selection_result["selected"]:
                 last_npc_click = {
                     **last_npc_click,
@@ -2943,7 +2930,7 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
             else:
                 last_npc_click = None
         else:
-            selectionAttempts.append(
+            selection_attempts.append(
                 {
                     "selected": False,
                     "expectedName": "",
@@ -2953,225 +2940,498 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
                 }
             )
             last_npc_click = None
+
         click_attempts += 1
-        INPUT_GUARD.guarded_sleep(100, "ensure_npc_action_menu")
+        INPUT_GUARD.guarded_sleep(100, title)
 
         if click_attempts % len(click_points) == 0:
             move_attempts += 1
             pulse_forward(hwnd, move_pulse_ms)
-            INPUT_GUARD.guarded_sleep(80, "ensure_npc_action_menu")
+            INPUT_GUARD.guarded_sleep(80, title)
 
-        INPUT_GUARD.guarded_sleep(min(scan_interval_ms, 90), "ensure_npc_action_menu")
+        INPUT_GUARD.guarded_sleep(min(scan_interval_ms, 90), title)
 
     raise RuntimeError(
-        "Failed to open NPC action menu before timeout. "
+        "Failed to acquire a stable NPC target before timeout. "
         f"Last stage: {last_stage or 'none'}"
     )
 
 
-def try_enter_chat(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval_ms: int) -> dict[str, Any]:
-    current_stage = detect_npc_interaction_stage(hwnd)
-    if current_stage["stage"] == "chat_ready":
-        dialog_state = detect_dialog(hwnd)
+def run_open_npc_action_menu(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "open_npc_action_menu")
+    stage_state = detect_npc_interaction_stage(hwnd)
+    target_info = detect_target_threshold(hwnd)
+    current_stage = stage_state["stage"]
+
+    if current_stage in NPC_READY_STAGES:
         return {
-            "success": True,
-            "stage": "chat_ready",
-            "dialogText": dialog_state["text"],
-            "stageHistory": ["chat_ready"],
-            "menuState": {
-                "stage": "chat_ready",
-                "stageTexts": current_stage["texts"],
-                "clickAttempts": 0,
-                "moveAttempts": 0,
-                "cameraDrags": 0,
-                "clickPointAttempts": [],
-                "nearbyScanAttempts": [],
-                "selectionAttempts": [],
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": f"NPC menu context already available at stage {current_stage}",
+            "input": {
+                "mode": "open_npc_action_menu",
+                **collect_npc_stage_input(hwnd, stage_state, target_info["text"]),
                 "viewAttempts": [],
-                "targetText": "",
             },
         }
 
-    menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
-    stage_history = list(menu_state["stageHistory"])
-
-    if menu_state["stage"] == "chat_ready":
-        dialog_state = detect_dialog(hwnd)
-        return {
-            "success": True,
-            "stage": "chat_ready",
-            "dialogText": dialog_state["text"],
-            "stageHistory": stage_history,
-            "menuState": menu_state,
-        }
-
-    if menu_state["stage"] == "small_talk_menu":
-        click_named_point(hwnd, "small_talk")
-        INPUT_GUARD.guarded_sleep(140, "try_enter_chat")
-    else:
-        click_named_point(hwnd, "talk")
-        INPUT_GUARD.guarded_sleep(120, "try_enter_chat")
-        click_named_point(hwnd, "small_talk")
-        INPUT_GUARD.guarded_sleep(140, "try_enter_chat")
-
-    post_talk_state = detect_npc_interaction_stage(hwnd)
-    stage_history.append(post_talk_state["stage"])
-
-    if post_talk_state["stage"] == "small_talk_confirm":
-        click_named_point(hwnd, "confirm_small_talk")
-        INPUT_GUARD.guarded_sleep(250, "try_enter_chat")
-        post_talk_state = detect_npc_interaction_stage(hwnd)
-        stage_history.append(post_talk_state["stage"])
-
-    if post_talk_state["stage"] == "chat_ready":
-        # After confirming small talk, do not immediately click the chat input.
-        # The NPC may still need time to walk into position and fully open the
-        # chat screen. Only use the fixed chat_input point once chat_ready is
-        # actually reached.
-        dialog_state = detect_dialog(hwnd)
-        return {
-            "success": True,
-            "stage": "chat_ready",
-            "dialogText": dialog_state["text"],
-            "stageHistory": stage_history,
-            "menuState": menu_state,
-        }
-
-    return {
-        "success": False,
-        "stage": post_talk_state["stage"],
-        "dialogText": "",
-        "stageHistory": stage_history,
-        "menuState": menu_state,
-    }
-
-
-def run_click_npc_interact(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
-    action_id = str(action.get("id") or "")
-    title = str(action.get("title") or "click_npc_interact")
-    timeout_ms = int(action.get("timeoutMs") or DEFAULT_INTERACT_TIMEOUT_MS)
-    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
-    scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
-
-    result = try_enter_chat(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
-    if not result["success"]:
+    if current_stage != "npc_selected" and not has_selected_target(target_info):
         raise RuntimeError(
-            "Local click NPC interaction loop timed out before the chat screen was reached. "
-            f"Last stage: {result['stage'] or 'none'}"
+            "open_npc_action_menu requires an already selected NPC target. "
+            f"Detected stage: {current_stage or 'none'}"
+        )
+
+    open_view_result = open_view_for_selected_npc(hwnd, title, target_info["text"])
+    next_stage = open_view_result["stage"]
+    if not open_view_result["opened"] or next_stage not in NPC_READY_STAGES:
+        raise RuntimeError(
+            "Failed to open NPC action menu from the selected target. "
+            f"Last stage: {next_stage or 'none'}"
         )
 
     return {
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Reached road NPC chat screen.",
+        "detail": f"Opened NPC interaction context at stage {next_stage}",
         "input": {
-            "mode": "click_npc_interact",
-            "stage": "chat_ready",
-            "dialogText": result["dialogText"],
-            "stageHistory": result["stageHistory"],
-            "clickAttempts": result["menuState"]["clickAttempts"],
-            "moveAttempts": result["menuState"]["moveAttempts"],
-            "cameraDrags": result["menuState"]["cameraDrags"],
-            "clickPointAttempts": result["menuState"]["clickPointAttempts"],
+            "mode": "open_npc_action_menu",
+            "stage": next_stage,
+            "stageTexts": open_view_result.get("stageTexts") or {},
+            "targetText": target_info["text"],
+            **({"dialogText": str(detect_dialog(hwnd).get("text") or "").strip()} if next_stage == "chat_ready" else {}),
+            "viewAttempts": open_view_result["viewAttempts"],
         },
     }
 
 
-def run_gift_social_flow(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+def run_click_menu_talk(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
-    title = str(action.get("title") or "gift_social_flow")
-    timeout_ms = int(action.get("timeoutMs") or DEFAULT_INTERACT_TIMEOUT_MS)
-    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
-    scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
-    gift_rounds = max(1, int(action.get("giftRounds") or 2))
+    title = str(action.get("title") or "click_menu_talk")
+    stage_state = detect_npc_interaction_stage(hwnd)
+    current_stage = stage_state["stage"]
 
-    menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
-    stage_history = list(menu_state["stageHistory"])
-    gift_clicks: list[dict[str, Any]] = []
-    submit_clicks: list[dict[str, Any]] = []
+    if current_stage in {"small_talk_menu", "chat_ready"}:
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": f"Talk entry already advanced to {current_stage}",
+            "input": {
+                "mode": "click_menu_talk",
+                **collect_npc_stage_input(hwnd, stage_state),
+                "click": None,
+            },
+        }
 
-    click_named_point(hwnd, "gift")
-    INPUT_GUARD.guarded_sleep(300, title)
-    gift_state = detect_npc_interaction_stage(hwnd)
-    stage_history.append(gift_state["stage"])
-    if gift_state["stage"] != "gift_screen":
-        raise RuntimeError(f"Gift flow did not reach gift screen. Last stage: {gift_state['stage'] or 'none'}")
-
-    for _ in range(gift_rounds):
-        gift_click = click_named_point(hwnd, "gift_first_slot")
-        gift_clicks.append(gift_click)
-        INPUT_GUARD.guarded_sleep(150, title)
-        submit_click = click_named_point(hwnd, "gift_submit")
-        submit_clicks.append(submit_click)
-        INPUT_GUARD.guarded_sleep(450, title)
-        gift_state = detect_npc_interaction_stage(hwnd)
-        stage_history.append(gift_state["stage"])
-
-    close_click = click_named_point(hwnd, "close_panel")
-    INPUT_GUARD.guarded_sleep(250, title)
-
-    return {
-        "id": action_id,
-        "title": title,
-        "status": "performed",
-        "detail": f"Completed {gift_rounds} gift rounds and closed the panel",
-        "input": {
-            "mode": "gift_social_flow",
-            "giftRounds": gift_rounds,
-            "stageHistory": stage_history,
-            "giftClicks": gift_clicks,
-            "submitClicks": submit_clicks,
-            "closeClick": close_click,
-        },
-    }
-
-
-def run_talk_social_flow(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
-    action_id = str(action.get("id") or "")
-    title = str(action.get("title") or "talk_social_flow")
-    timeout_ms = int(action.get("timeoutMs") or DEFAULT_INTERACT_TIMEOUT_MS)
-    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
-    scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
-    text = str(action.get("text") or "").strip()
-    if not text:
-        raise RuntimeError("talk_social_flow action requires text")
-
-    menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
-    stage_history = list(menu_state["stageHistory"])
+    if current_stage != "npc_action_menu":
+        raise RuntimeError(
+            "click_menu_talk requires npc_action_menu. "
+            f"Detected stage: {current_stage or 'none'}"
+        )
 
     talk_click = click_named_point(hwnd, "talk")
     INPUT_GUARD.guarded_sleep(180, title)
-    small_talk_click = click_named_point(hwnd, "small_talk")
-    INPUT_GUARD.guarded_sleep(180, title)
-    confirm_click = click_named_point(hwnd, "small_talk_confirm_dialog")
-    INPUT_GUARD.guarded_sleep(350, title)
-
-    chat_state = detect_npc_interaction_stage(hwnd)
-    stage_history.append(chat_state["stage"])
-    if chat_state["stage"] != "chat_ready":
-        raise RuntimeError(f"Talk flow did not reach chat screen. Last stage: {chat_state['stage'] or 'none'}")
-
-    send_state = send_chat_message(hwnd, text, False, 0)
-    INPUT_GUARD.guarded_sleep(180, title)
-    exit_click = click_named_point(hwnd, "chat_exit")
-    INPUT_GUARD.guarded_sleep(250, title)
+    next_stage_state = detect_npc_interaction_stage(hwnd)
+    next_stage = next_stage_state["stage"]
+    if next_stage not in {"small_talk_menu", "chat_ready"}:
+        raise RuntimeError(
+            "Talk entry did not advance to small talk or chat. "
+            f"Last stage: {next_stage or 'none'}"
+        )
 
     return {
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Opened small talk, sent chat text, and exited chat",
+        "detail": f"Talk entry advanced to {next_stage}",
         "input": {
-            "mode": "talk_social_flow",
-            "stageHistory": stage_history,
-            "talkClick": talk_click,
-            "smallTalkClick": small_talk_click,
-            "confirmClick": confirm_click,
-            "sendState": send_state,
-            "exitClick": exit_click,
-            "text": text,
+            "mode": "click_menu_talk",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "click": talk_click,
         },
+    }
+
+
+def run_click_menu_small_talk(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "click_menu_small_talk")
+    stage_state = detect_npc_interaction_stage(hwnd)
+    current_stage = stage_state["stage"]
+
+    if current_stage == "chat_ready":
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": "Chat screen is already open",
+            "input": {
+                "mode": "click_menu_small_talk",
+                **collect_npc_stage_input(hwnd, stage_state),
+                "click": None,
+            },
+        }
+
+    if current_stage != "small_talk_menu":
+        raise RuntimeError(
+            "click_menu_small_talk requires small_talk_menu. "
+            f"Detected stage: {current_stage or 'none'}"
+        )
+
+    small_talk_click = click_named_point(hwnd, "small_talk")
+    INPUT_GUARD.guarded_sleep(180, title)
+    next_stage_state = detect_npc_interaction_stage(hwnd)
+    next_stage = next_stage_state["stage"]
+    if next_stage not in {"small_talk_confirm", "chat_ready"}:
+        raise RuntimeError(
+            "Small talk did not advance to confirmation or chat. "
+            f"Last stage: {next_stage or 'none'}"
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Small talk entry advanced to {next_stage}",
+        "input": {
+            "mode": "click_menu_small_talk",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "click": small_talk_click,
+        },
+    }
+
+
+def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "confirm_small_talk_entry")
+    stage_state = detect_npc_interaction_stage(hwnd)
+    current_stage = stage_state["stage"]
+
+    if current_stage == "chat_ready":
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": "Chat screen is already ready",
+            "input": {
+                "mode": "confirm_small_talk_entry",
+                **collect_npc_stage_input(hwnd, stage_state),
+                "click": None,
+            },
+        }
+
+    if current_stage != "small_talk_confirm":
+        raise RuntimeError(
+            "confirm_small_talk_entry requires small_talk_confirm. "
+            f"Detected stage: {current_stage or 'none'}"
+        )
+
+    confirm_click = click_named_point(hwnd, "small_talk_confirm_dialog")
+    INPUT_GUARD.guarded_sleep(350, title)
+    next_stage_state = detect_npc_interaction_stage(hwnd)
+    next_stage = next_stage_state["stage"]
+    if next_stage != "chat_ready":
+        raise RuntimeError(
+            "Small talk confirmation did not reach chat_ready. "
+            f"Last stage: {next_stage or 'none'}"
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Confirmed small talk and reached chat screen",
+        "input": {
+            "mode": "confirm_small_talk_entry",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "click": confirm_click,
+        },
+    }
+
+
+def run_click_menu_gift(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "click_menu_gift")
+    stage_state = detect_npc_interaction_stage(hwnd)
+    current_stage = stage_state["stage"]
+
+    if current_stage == "gift_screen":
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": "Gift screen is already open",
+            "input": {
+                "mode": "click_menu_gift",
+                **collect_npc_stage_input(hwnd, stage_state),
+                "click": None,
+            },
+        }
+
+    if current_stage != "npc_action_menu":
+        raise RuntimeError(
+            "click_menu_gift requires npc_action_menu. "
+            f"Detected stage: {current_stage or 'none'}"
+        )
+
+    gift_click = click_named_point(hwnd, "gift")
+    INPUT_GUARD.guarded_sleep(300, title)
+    next_stage_state = detect_npc_interaction_stage(hwnd)
+    if next_stage_state["stage"] != "gift_screen":
+        raise RuntimeError(
+            "Gift entry did not reach gift_screen. "
+            f"Last stage: {next_stage_state['stage'] or 'none'}"
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Opened gift screen",
+        "input": {
+            "mode": "click_menu_gift",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "click": gift_click,
+        },
+    }
+
+
+def run_select_gift_first_slot(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "select_gift_first_slot")
+    stage_state = detect_npc_interaction_stage(hwnd)
+    if stage_state["stage"] != "gift_screen":
+        raise RuntimeError(
+            "select_gift_first_slot requires gift_screen. "
+            f"Detected stage: {stage_state['stage'] or 'none'}"
+        )
+
+    gift_click = click_named_point(hwnd, "gift_first_slot")
+    INPUT_GUARD.guarded_sleep(150, title)
+    next_stage_state = detect_npc_interaction_stage(hwnd)
+    if next_stage_state["stage"] != "gift_screen":
+        raise RuntimeError(
+            "Gift slot selection left gift_screen unexpectedly. "
+            f"Last stage: {next_stage_state['stage'] or 'none'}"
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Selected the first gift slot",
+        "input": {
+            "mode": "select_gift_first_slot",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "click": gift_click,
+        },
+    }
+
+
+def run_submit_gift_once(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "submit_gift_once")
+    stage_state = detect_npc_interaction_stage(hwnd)
+    if stage_state["stage"] != "gift_screen":
+        raise RuntimeError(
+            "submit_gift_once requires gift_screen. "
+            f"Detected stage: {stage_state['stage'] or 'none'}"
+        )
+
+    favor_before = parse_favor_value(stage_state["texts"]["gift_panel"])
+    submit_click = click_named_point(hwnd, "gift_submit")
+    INPUT_GUARD.guarded_sleep(450, title)
+    next_stage_state = detect_npc_interaction_stage(hwnd)
+    if next_stage_state["stage"] != "gift_screen":
+        raise RuntimeError(
+            "Gift submit left gift_screen unexpectedly. "
+            f"Last stage: {next_stage_state['stage'] or 'none'}"
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Submitted one gift round",
+        "input": {
+            "mode": "submit_gift_once",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "click": submit_click,
+            "favorBefore": favor_before,
+            "favorAfter": parse_favor_value(next_stage_state["texts"]["gift_panel"]),
+        },
+    }
+
+
+def run_click_menu_trade(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "click_menu_trade")
+    stage_state = detect_npc_interaction_stage(hwnd)
+    current_stage = stage_state["stage"]
+
+    if current_stage == "trade_screen":
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": "Trade screen is already open",
+            "input": {
+                "mode": "click_menu_trade",
+                **collect_npc_stage_input(hwnd, stage_state),
+                "click": None,
+            },
+        }
+
+    if current_stage != "npc_action_menu":
+        raise RuntimeError(
+            "click_menu_trade requires npc_action_menu. "
+            f"Detected stage: {current_stage or 'none'}"
+        )
+
+    trade_click = click_named_point(hwnd, "trade")
+    INPUT_GUARD.guarded_sleep(350, title)
+    next_stage_state = detect_npc_interaction_stage(hwnd)
+    if next_stage_state["stage"] != "trade_screen":
+        raise RuntimeError(
+            "Trade entry did not reach trade_screen. "
+            f"Last stage: {next_stage_state['stage'] or 'none'}"
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Opened trade screen",
+        "input": {
+            "mode": "click_menu_trade",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "click": trade_click,
+        },
+    }
+
+
+def run_trade_click_step(
+    hwnd: int,
+    action: dict[str, Any],
+    point_name: str,
+    detail: str,
+    delay_ms: int,
+    allow_non_trade_after: bool = False,
+) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or action.get("type") or point_name)
+    stage_state = detect_npc_interaction_stage(hwnd)
+    if stage_state["stage"] != "trade_screen":
+        raise RuntimeError(
+            f"{action.get('type') or point_name} requires trade_screen. "
+            f"Detected stage: {stage_state['stage'] or 'none'}"
+        )
+
+    step_click = click_named_point(hwnd, point_name)
+    INPUT_GUARD.guarded_sleep(delay_ms, title)
+    next_stage_state = detect_npc_interaction_stage(hwnd)
+    if not allow_non_trade_after and next_stage_state["stage"] != "trade_screen":
+        raise RuntimeError(
+            f"Trade step {point_name} left trade_screen unexpectedly. "
+            f"Last stage: {next_stage_state['stage'] or 'none'}"
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": detail,
+        "input": {
+            "mode": str(action.get("type") or point_name),
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "pointName": point_name,
+            "click": step_click,
+        },
+    }
+
+
+def run_close_current_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "close_current_panel")
+    before_stage_state = detect_npc_interaction_stage(hwnd)
+    before_stage = before_stage_state["stage"]
+    closable_stages = {"chat_ready", "gift_screen", "trade_screen", "npc_action_menu", "small_talk_menu", "small_talk_confirm"}
+
+    if before_stage not in closable_stages:
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": f"No closable panel at stage {before_stage or 'none'}",
+            "input": {
+                "mode": "close_current_panel",
+                **collect_npc_stage_input(hwnd, before_stage_state),
+                "beforeStage": before_stage,
+                "closeTriggered": False,
+            },
+        }
+
+    exit_panel(hwnd)
+    after_stage_state = detect_npc_interaction_stage(hwnd)
+    after_stage = after_stage_state["stage"]
+    if after_stage == before_stage and after_stage in closable_stages:
+        raise RuntimeError(
+            "close_current_panel did not leave the current panel. "
+            f"Stage remained: {after_stage or 'none'}"
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Closed panel from {before_stage} to {after_stage or 'none'}",
+        "input": {
+            "mode": "close_current_panel",
+            **collect_npc_stage_input(hwnd, after_stage_state),
+            "beforeStage": before_stage,
+            "closeTriggered": True,
+        },
+    }
+
+
+def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval_ms: int) -> dict[str, Any]:
+    acquire_result = run_acquire_npc_target(
+        hwnd,
+        {
+            "id": "ensure-npc-action-menu-acquire",
+            "title": "ensure_npc_action_menu_acquire",
+            "timeoutMs": timeout_ms,
+            "movePulseMs": move_pulse_ms,
+            "scanIntervalMs": scan_interval_ms,
+        },
+    )
+    menu_result = run_open_npc_action_menu(
+        hwnd,
+        {
+            "id": "ensure-npc-action-menu-open",
+            "title": "ensure_npc_action_menu_open",
+        },
+    )
+    acquire_input = acquire_result["input"]
+    menu_input = menu_result["input"]
+    stage_history = list(acquire_input.get("stageHistory") or [])
+    if menu_input.get("stage"):
+        stage_history.append(menu_input["stage"])
+
+    return {
+        "stage": menu_input["stage"],
+        "stageTexts": menu_input.get("stageTexts") or {},
+        "stageHistory": stage_history,
+        "clickAttempts": int(acquire_input.get("clickAttempts") or 0),
+        "moveAttempts": int(acquire_input.get("moveAttempts") or 0),
+        "cameraDrags": 0,
+        "clickPointAttempts": acquire_input.get("clickPointAttempts") or [],
+        "nearbyScanAttempts": acquire_input.get("nearbyScanAttempts") or [],
+        "selectionAttempts": acquire_input.get("selectionAttempts") or [],
+        "viewAttempts": menu_input.get("viewAttempts") or [],
+        "targetText": menu_input.get("targetText") or acquire_input.get("targetText") or "",
     }
 
 
@@ -3258,164 +3518,6 @@ def run_stealth_front_arc_strike(hwnd: int, action: dict[str, Any]) -> dict[str,
     }
 
 
-def run_town_npc_social_loop(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
-    action_id = str(action.get("id") or "")
-    title = str(action.get("title") or "town_npc_social_loop")
-    timeout_ms = int(action.get("timeoutMs") or DEFAULT_INTERACT_TIMEOUT_MS)
-    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
-    scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
-
-    threshold_info = detect_target_threshold(hwnd)
-    stage_history: list[str] = []
-    trade_attempted = False
-    trade_completed = False
-    gift_attempts = 0
-    gift_completed = False
-    favor_before = None
-    favor_after = None
-
-    chat_attempt = try_enter_chat(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
-    stage_history.extend(chat_attempt["stageHistory"])
-    if chat_attempt["success"]:
-        return {
-            "id": action_id,
-            "title": title,
-            "status": "performed",
-            "detail": "Reached road NPC chat screen without trade or gift.",
-            "input": {
-                "mode": "town_npc_social_loop",
-                "stage": "chat_ready",
-                "dialogText": chat_attempt["dialogText"],
-                "stageHistory": stage_history,
-                "tradeAttempted": trade_attempted,
-                "tradeCompleted": trade_completed,
-                "giftAttempts": gift_attempts,
-                "giftCompleted": gift_completed,
-                "favorBefore": favor_before,
-                "favorAfter": favor_after,
-                "targetThreshold": threshold_info["threshold"],
-                "isSpecialNpc": threshold_info["isSpecialNpc"],
-                "targetText": threshold_info["text"],
-            },
-        }
-
-    menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
-    stage_history.extend(menu_state["stageHistory"])
-    click_named_point(hwnd, "gift")
-    INPUT_GUARD.guarded_sleep(350, "town_npc_social_loop")
-    gift_state = detect_npc_interaction_stage(hwnd)
-    stage_history.append(gift_state["stage"])
-
-    if gift_state["stage"] == "gift_screen":
-        favor_before = parse_favor_value(gift_state["texts"]["gift_panel"])
-        favor_after = favor_before
-        if favor_before is not None and favor_before >= threshold_info["threshold"]:
-            exit_panel(hwnd)
-            retry_chat = try_enter_chat(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
-            stage_history.extend(retry_chat["stageHistory"])
-            if retry_chat["success"]:
-                return {
-                    "id": action_id,
-                    "title": title,
-                    "status": "performed",
-                    "detail": "Reached chat screen after reading favor threshold.",
-                    "input": {
-                        "mode": "town_npc_social_loop",
-                        "stage": "chat_ready",
-                        "dialogText": retry_chat["dialogText"],
-                        "stageHistory": stage_history,
-                        "tradeAttempted": trade_attempted,
-                        "tradeCompleted": trade_completed,
-                        "giftAttempts": gift_attempts,
-                        "giftCompleted": gift_completed,
-                        "favorBefore": favor_before,
-                        "favorAfter": favor_after,
-                        "targetThreshold": threshold_info["threshold"],
-                        "isSpecialNpc": threshold_info["isSpecialNpc"],
-                        "targetText": threshold_info["text"],
-                    },
-                }
-        exit_panel(hwnd)
-
-    menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
-    stage_history.extend(menu_state["stageHistory"])
-    click_named_point(hwnd, "trade")
-    trade_attempted = True
-    INPUT_GUARD.guarded_sleep(350, "town_npc_social_loop")
-    trade_state = detect_npc_interaction_stage(hwnd)
-    stage_history.append(trade_state["stage"])
-
-    if trade_state["stage"] == "trade_screen":
-        trade_flow_result = execute_fixed_trade_flow(hwnd, "town_npc_social_loop")
-        stage_history.extend(trade_flow_result["stageHistory"][1:])
-        trade_completed = True
-        exit_panel(hwnd)
-
-    menu_state = ensure_npc_action_menu(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
-    stage_history.extend(menu_state["stageHistory"])
-    click_named_point(hwnd, "gift")
-    INPUT_GUARD.guarded_sleep(350, "town_npc_social_loop")
-
-    for _ in range(3):
-        gift_state = detect_npc_interaction_stage(hwnd)
-        stage_history.append(gift_state["stage"])
-
-        if gift_state["stage"] != "gift_screen":
-            break
-
-        current_favor = parse_favor_value(gift_state["texts"]["gift_panel"])
-        if favor_before is None:
-            favor_before = current_favor
-        favor_after = current_favor
-
-        if current_favor is not None and current_favor >= threshold_info["threshold"]:
-            break
-
-        click_named_point(hwnd, "gift_first_slot")
-        INPUT_GUARD.guarded_sleep(150, "town_npc_social_loop")
-        click_named_point(hwnd, "gift_submit")
-        gift_attempts += 1
-        gift_completed = True
-        INPUT_GUARD.guarded_sleep(450, "town_npc_social_loop")
-
-        updated_gift_state = detect_npc_interaction_stage(hwnd)
-        stage_history.append(updated_gift_state["stage"])
-        favor_after = parse_favor_value(updated_gift_state["texts"]["gift_panel"])
-        if favor_after is not None and favor_after >= threshold_info["threshold"]:
-            break
-
-    if detect_npc_interaction_stage(hwnd)["stage"] == "gift_screen":
-        exit_panel(hwnd)
-
-    retry_chat = try_enter_chat(hwnd, timeout_ms, move_pulse_ms, scan_interval_ms)
-    stage_history.extend(retry_chat["stageHistory"])
-    if retry_chat["success"]:
-        return {
-            "id": action_id,
-            "title": title,
-            "status": "performed",
-            "detail": "Reached road NPC chat screen after trade and gift flow.",
-            "input": {
-                "mode": "town_npc_social_loop",
-                "stage": "chat_ready",
-                "dialogText": retry_chat["dialogText"],
-                "stageHistory": stage_history,
-                "tradeAttempted": trade_attempted,
-                "tradeCompleted": trade_completed,
-                "giftAttempts": gift_attempts,
-                "giftCompleted": gift_completed,
-                "favorBefore": favor_before,
-                "favorAfter": favor_after,
-                "targetThreshold": threshold_info["threshold"],
-                "isSpecialNpc": threshold_info["isSpecialNpc"],
-                "targetText": threshold_info["text"],
-            },
-        }
-
-    raise RuntimeError(
-        "Town NPC social loop did not reach the chat screen after trade and gift attempts. "
-        f"Last stage: {retry_chat['stage'] or 'none'}"
-    )
 
 
 def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
@@ -3435,14 +3537,32 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
             "bounds": bounds,
         }
 
-    if action_type == "click_npc_interact":
-        return run_click_npc_interact(hwnd, action)
+    if action_type == "acquire_npc_target":
+        return run_acquire_npc_target(hwnd, action)
 
-    if action_type == "gift_social_flow":
-        return run_gift_social_flow(hwnd, action)
+    if action_type == "open_npc_action_menu":
+        return run_open_npc_action_menu(hwnd, action)
 
-    if action_type == "talk_social_flow":
-        return run_talk_social_flow(hwnd, action)
+    if action_type == "click_menu_talk":
+        return run_click_menu_talk(hwnd, action)
+
+    if action_type == "click_menu_small_talk":
+        return run_click_menu_small_talk(hwnd, action)
+
+    if action_type == "confirm_small_talk_entry":
+        return run_confirm_small_talk_entry(hwnd, action)
+
+    if action_type == "click_menu_gift":
+        return run_click_menu_gift(hwnd, action)
+
+    if action_type == "select_gift_first_slot":
+        return run_select_gift_first_slot(hwnd, action)
+
+    if action_type == "submit_gift_once":
+        return run_submit_gift_once(hwnd, action)
+
+    if action_type == "click_menu_trade":
+        return run_click_menu_trade(hwnd, action)
 
     if action_type == "stealth_front_arc_strike":
         return run_stealth_front_arc_strike(hwnd, action)
@@ -3463,9 +3583,6 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
                 **click_state,
             },
         }
-
-    if action_type == "town_npc_social_loop":
-        return run_town_npc_social_loop(hwnd, action)
 
     if action_type == "map_route_to_coordinate":
         return run_map_route_to_coordinate(hwnd, action)
@@ -3490,6 +3607,30 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "submit_hawking":
         return run_submit_hawking(hwnd, action)
+
+    if action_type == "trade_select_left_item_tab":
+        return run_trade_click_step(hwnd, action, "trade_left_item_tab", "Selected the left trade tab", 180)
+
+    if action_type == "trade_select_left_item":
+        return run_trade_click_step(hwnd, action, "trade_left_item_slot", "Selected the left trade item", 260)
+
+    if action_type == "trade_left_item_up_shelf":
+        return run_trade_click_step(hwnd, action, "trade_left_up_shelf_button", "Placed the left trade item on shelf", 320)
+
+    if action_type == "trade_select_right_money_slot":
+        return run_trade_click_step(hwnd, action, "trade_right_money_slot", "Selected the right-side payment item", 220)
+
+    if action_type == "trade_scale_quantity":
+        return run_trade_click_step(hwnd, action, "trade_scale_button", "Adjusted the trade quantity", 220)
+
+    if action_type == "trade_right_item_up_shelf":
+        return run_trade_click_step(hwnd, action, "trade_right_up_shelf_button", "Placed the right-side payment item on shelf", 320)
+
+    if action_type == "trade_submit":
+        return run_trade_click_step(hwnd, action, "trade_final_submit_button", "Submitted the current trade", 380, True)
+
+    if action_type == "close_current_panel":
+        return run_close_current_panel(hwnd, action)
 
     if action_type == "move_forward_pulse":
         return run_move_forward_pulse(hwnd, action)

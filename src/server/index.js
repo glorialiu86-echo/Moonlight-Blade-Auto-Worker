@@ -805,9 +805,9 @@ async function maybeReplyFromCurrentChatScreen({ instruction, externalInputGuard
 }
 
 async function maybeSendNpcReply({ instruction, plan, execution, externalInputGuardEnabled = true }) {
-  const talkStep = execution.rawSteps?.find((step) => step?.input?.mode === "click_npc_interact");
-  const socialStep = execution.rawSteps?.find((step) => step?.input?.mode === "town_npc_social_loop");
-  const finalTalkStep = socialStep || talkStep;
+  const finalTalkStep = [...(execution.rawSteps || [])]
+    .reverse()
+    .find((step) => step?.input?.stage === "chat_ready");
   const talkStage = String(finalTalkStep?.input?.stage || "").trim();
 
   if (talkStage !== "chat_ready") {

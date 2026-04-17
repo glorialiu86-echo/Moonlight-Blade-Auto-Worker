@@ -162,7 +162,23 @@ export function buildInteractionSample({
   execution,
   error = null
 }) {
-  const relevantStep = execution?.rawSteps?.find((step) => ["click_npc_interact", "town_npc_social_loop"].includes(step?.input?.mode));
+  const relevantStep = [...(execution?.rawSteps || [])]
+    .reverse()
+    .find((step) => {
+      const stage = step?.input?.stage;
+      return [
+        "npc_selected",
+        "npc_action_menu",
+        "small_talk_menu",
+        "small_talk_confirm",
+        "chat_ready",
+        "gift_screen",
+        "trade_screen"
+      ].includes(stage)
+        || typeof step?.input?.dialogText === "string"
+        || step?.input?.favorAfter != null
+        || step?.input?.favorBefore != null;
+    });
   const stepInput = relevantStep?.input || {};
   const actionTypes = Array.isArray(plan?.actions) ? plan.actions.map((action) => action.type) : [];
 

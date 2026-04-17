@@ -16,16 +16,16 @@ export const ACTION_REGISTRY = {
   talk: {
     key: "talk",
     label: "搭话",
-    executorType: "town_npc_social_loop",
+    executorType: "npc_chat_entry_flow",
     availability: "ready",
-    note: "我能主动找路人搭话，把聊天页先顶出来。"
+    note: "我会拆成找目标、拉起查看、点交谈、点闲聊、确认入聊这几步推进。"
   },
   gift: {
     key: "gift",
     label: "送礼",
-    executorType: "click_npc_interact",
+    executorType: "npc_gift_flow",
     availability: "partial",
-    note: "我能先顶到交互页，但整条送礼链还要继续补。"
+    note: "我会拆成找目标、开赠礼页、选礼物、送礼、收面板；当前仍只走固定礼物槽。"
   },
   inspect: {
     key: "inspect",
@@ -37,30 +37,30 @@ export const ACTION_REGISTRY = {
   trade: {
     key: "trade",
     label: "交易",
-    executorType: "click_npc_interact",
+    executorType: "npc_trade_flow",
     availability: "partial",
-    note: "我能先摸到交易入口，完整交易路径还要继续打磨。"
+    note: "我会拆成找目标、开交易页、逐步上架左货和右侧支付物，再提交交易。"
   },
   threaten: {
     key: "threaten",
     label: "施压",
-    executorType: "click_npc_interact",
+    executorType: "npc_chat_entry_flow",
     availability: "partial",
-    note: "我现在只能借交互链试探推进，单独施压动作还没拆开。"
+    note: "我现在先只拆到接触目标并进交互链，单独施压动作还没补。"
   },
   steal: {
     key: "steal",
     label: "偷窃",
-    executorType: "click_npc_interact",
+    executorType: "npc_chat_entry_flow",
     availability: "partial",
-    note: "我能先接近并打开交互，但偷窃专属路径还没补完。"
+    note: "我现在先只拆到接触目标并进交互链，偷窃专属动作还没补完。"
   },
   strike: {
     key: "strike",
     label: "动手",
-    executorType: "click_npc_interact",
+    executorType: "npc_chat_entry_flow",
     availability: "partial",
-    note: "我能先接触目标，真正的闷棍链路还在后面补。"
+    note: "我现在先只拆到接触目标并进交互链，真正的动手链路还在后面补。"
   },
   escape: {
     key: "escape",

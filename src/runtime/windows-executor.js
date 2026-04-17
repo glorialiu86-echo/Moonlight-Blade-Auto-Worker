@@ -18,6 +18,158 @@ function resolvePythonPath() {
   return path.resolve(repoRoot, ".venv/Scripts/python.exe");
 }
 
+function createNpcFlowActions(baseAction, steps) {
+  return steps.map((step, index) => ({
+    id: `${baseAction.id}-step-${index + 1}`,
+    title: step.title,
+    type: step.type,
+    sourceType: baseAction.sourceType,
+    ...step.payload
+  }));
+}
+
+function createNpcChatEntryActions(baseAction, options = {}) {
+  return createNpcFlowActions(baseAction, [
+    {
+      title: "锁定路人目标",
+      type: "acquire_npc_target",
+      payload: {
+        timeoutMs: options.timeoutMs || 5000,
+        movePulseMs: options.movePulseMs || 160,
+        scanIntervalMs: options.scanIntervalMs || 180
+      }
+    },
+    {
+      title: "拉起路人交互菜单",
+      type: "open_npc_action_menu",
+      payload: {}
+    },
+    {
+      title: "点开交谈入口",
+      type: "click_menu_talk",
+      payload: {}
+    },
+    {
+      title: "点开闲聊入口",
+      type: "click_menu_small_talk",
+      payload: {}
+    },
+    {
+      title: "确认进入聊天页",
+      type: "confirm_small_talk_entry",
+      payload: {}
+    }
+  ]);
+}
+
+function createNpcGiftActions(baseAction, options = {}) {
+  const giftRounds = Math.max(1, options.giftRounds || 2);
+  const giftSteps = Array.from({ length: giftRounds }).flatMap((_, roundIndex) => ([
+    {
+      title: `选中礼物槽位 ${roundIndex + 1}`,
+      type: "select_gift_first_slot",
+      payload: {}
+    },
+    {
+      title: `送出一轮礼物 ${roundIndex + 1}`,
+      type: "submit_gift_once",
+      payload: {}
+    }
+  ]));
+
+  return createNpcFlowActions(baseAction, [
+    {
+      title: "锁定路人目标",
+      type: "acquire_npc_target",
+      payload: {
+        timeoutMs: options.timeoutMs || 4500,
+        movePulseMs: options.movePulseMs || 160,
+        scanIntervalMs: options.scanIntervalMs || 180
+      }
+    },
+    {
+      title: "拉起路人交互菜单",
+      type: "open_npc_action_menu",
+      payload: {}
+    },
+    {
+      title: "打开赠礼页",
+      type: "click_menu_gift",
+      payload: {}
+    },
+    ...giftSteps,
+    {
+      title: "关闭当前面板",
+      type: "close_current_panel",
+      payload: {}
+    }
+  ]);
+}
+
+function createNpcTradeActions(baseAction, options = {}) {
+  return createNpcFlowActions(baseAction, [
+    {
+      title: "锁定路人目标",
+      type: "acquire_npc_target",
+      payload: {
+        timeoutMs: options.timeoutMs || 5000,
+        movePulseMs: options.movePulseMs || 180,
+        scanIntervalMs: options.scanIntervalMs || 180
+      }
+    },
+    {
+      title: "拉起路人交互菜单",
+      type: "open_npc_action_menu",
+      payload: {}
+    },
+    {
+      title: "打开交易页",
+      type: "click_menu_trade",
+      payload: {}
+    },
+    {
+      title: "切到左侧货栏",
+      type: "trade_select_left_item_tab",
+      payload: {}
+    },
+    {
+      title: "选中左侧货物",
+      type: "trade_select_left_item",
+      payload: {}
+    },
+    {
+      title: "左侧货物上架",
+      type: "trade_left_item_up_shelf",
+      payload: {}
+    },
+    {
+      title: "选中右侧支付物",
+      type: "trade_select_right_money_slot",
+      payload: {}
+    },
+    {
+      title: "调整支付数量",
+      type: "trade_scale_quantity",
+      payload: {}
+    },
+    {
+      title: "右侧支付物上架",
+      type: "trade_right_item_up_shelf",
+      payload: {}
+    },
+    {
+      title: "提交当前交易",
+      type: "trade_submit",
+      payload: {}
+    },
+    {
+      title: "关闭当前面板",
+      type: "close_current_panel",
+      payload: {}
+    }
+  ]);
+}
+
 function createWorkerActions(plan) {
   return plan.actions.flatMap((action, index) => {
     const actionDefinition = getActionDefinition(action.type);
@@ -41,41 +193,32 @@ function createWorkerActions(plan) {
           sourceType: action.type
         }));
       case "talk":
-        return {
-          ...baseAction,
-          type: "talk_social_flow",
-          text: action.text || "",
+        return createNpcChatEntryActions(baseAction, {
           timeoutMs: 7000,
           movePulseMs: 160,
           scanIntervalMs: 180
-        };
+        });
       case "gift":
-        return {
-          ...baseAction,
-          type: "gift_social_flow",
+        return createNpcGiftActions(baseAction, {
           giftRounds: 2,
           timeoutMs: 4500,
           movePulseMs: 160,
           scanIntervalMs: 180
-        };
-      case "threaten":
-      case "steal":
-      case "strike":
-        return {
-          ...baseAction,
-          type: "click_npc_interact",
-          timeoutMs: 4500,
-          movePulseMs: 160,
-          scanIntervalMs: 180
-        };
+        });
       case "trade":
-        return {
-          ...baseAction,
-          type: "click_npc_interact",
+        return createNpcTradeActions(baseAction, {
           timeoutMs: 5000,
           movePulseMs: 180,
           scanIntervalMs: 180
-        };
+        });
+      case "threaten":
+      case "steal":
+      case "strike":
+        return createNpcChatEntryActions(baseAction, {
+          timeoutMs: 4500,
+          movePulseMs: 160,
+          scanIntervalMs: 180
+        });
       case "escape":
         return {
           ...baseAction,

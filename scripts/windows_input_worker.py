@@ -194,6 +194,19 @@ MAP_STAGE_ROIS = {
     "keypad_panel": (0.36, 0.50, 0.78, 0.94),
 }
 
+NPC_CAPTURE_SCAN_POINTS = [
+    (0.500, 0.430), (0.593, 0.446), (0.665, 0.489), (0.705, 0.555), (0.705, 0.635),
+    (0.665, 0.701), (0.593, 0.744), (0.500, 0.760), (0.407, 0.744), (0.335, 0.701),
+    (0.295, 0.635), (0.295, 0.555), (0.335, 0.489), (0.407, 0.446), (0.500, 0.395),
+    (0.610, 0.413), (0.696, 0.466), (0.744, 0.547), (0.744, 0.643), (0.696, 0.724),
+    (0.610, 0.777), (0.500, 0.795), (0.390, 0.777), (0.304, 0.724), (0.256, 0.643),
+    (0.256, 0.547), (0.304, 0.466), (0.390, 0.413), (0.500, 0.360), (0.627, 0.381),
+    (0.726, 0.442), (0.781, 0.538), (0.781, 0.652), (0.726, 0.748), (0.627, 0.809),
+    (0.500, 0.830), (0.373, 0.809), (0.274, 0.748), (0.219, 0.652), (0.219, 0.538),
+    (0.274, 0.442), (0.373, 0.381), (0.500, 0.460), (0.645, 0.484), (0.756, 0.552),
+    (0.756, 0.638), (0.645, 0.706), (0.355, 0.706), (0.244, 0.638), (0.244, 0.552),
+]
+
 ACTION_POINTS = {
     "view": (0.32, 0.57),
     "talk": (1870 / 2537, 1252 / 1384),
@@ -1507,24 +1520,61 @@ def find_moving_view_button(hwnd: int) -> dict[str, Any] | None:
     return None
 
 
-def select_nearest_npc_via_tab(hwnd: int, title: str) -> dict[str, Any]:
-    focus_window(hwnd)
-    pydirectinput.press("tab")
-    INPUT_GUARD.refresh_baseline()
-    INPUT_GUARD.guarded_sleep(140, title)
+def scan_nearby_npc_targets(hwnd: int, title: str) -> dict[str, Any]:
+    scan_attempts: list[dict[str, Any]] = []
 
-    stage_state = detect_npc_interaction_stage(hwnd)
-    target_info = detect_target_threshold(hwnd)
+    for x_ratio, y_ratio in NPC_CAPTURE_SCAN_POINTS:
+        click_state = click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
+        INPUT_GUARD.guarded_sleep(45, title)
+        stage_state = detect_npc_interaction_stage(hwnd)
+        target_info = detect_target_threshold(hwnd)
+        moving_view = find_moving_view_button(hwnd)
+        scan_attempt = {
+            "xRatio": x_ratio,
+            "yRatio": y_ratio,
+            "click": click_state,
+            "stage": stage_state["stage"],
+            "targetText": target_info["text"],
+            "hasSelectedTarget": has_selected_target(target_info),
+            "movingView": moving_view,
+        }
+        scan_attempts.append(scan_attempt)
 
+        if stage_state["stage"] in ["npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"]:
+            return {
+                "source": "nearby_scan",
+                "matched": True,
+                "attempts": scan_attempts,
+                "stage": stage_state["stage"],
+                "stageTexts": stage_state["texts"],
+                "targetText": target_info["text"],
+                "movingView": moving_view,
+            }
+
+        if moving_view or has_selected_target(target_info):
+            return {
+                "source": "nearby_scan",
+                "matched": True,
+                "attempts": scan_attempts,
+                "stage": stage_state["stage"],
+                "stageTexts": stage_state["texts"],
+                "targetText": target_info["text"],
+                "movingView": moving_view,
+            }
+
+    last_attempt = scan_attempts[-1] if scan_attempts else {
+        "stage": "none",
+        "targetText": "",
+        "movingView": None,
+    }
     return {
-        "source": "tab_nearest_npc",
-        "stage": stage_state["stage"],
-        "stageTexts": stage_state["texts"],
-        "targetText": target_info["text"],
-        "hasSelectedTarget": has_selected_target(target_info),
-        # If name-based matching is noisy, the magnifier can still be clicked
-        # from the fixed relative position above the visible 查看 label.
-        "movingView": find_moving_view_button(hwnd),
+        "source": "nearby_scan",
+        "matched": False,
+        "attempts": scan_attempts,
+        "stage": last_attempt["stage"],
+        "stageTexts": {},
+        "targetText": last_attempt["targetText"],
+        "movingView": last_attempt["movingView"],
     }
 
 
@@ -2697,9 +2747,9 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
     move_attempts = 0
     camera_drags = 0
     click_point_attempts: list[dict[str, float]] = []
+    nearbyScanAttempts: list[dict[str, Any]] = []
     selectionAttempts: list[dict[str, Any]] = []
     viewAttempts: list[dict[str, Any]] = []
-    tabAttempts: list[dict[str, Any]] = []
     stage_history: list[str] = []
     start_time = time.time()
     last_stage = "none"
@@ -2707,33 +2757,32 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
 
     focus_window(hwnd)
 
-    for _ in range(2):
-        INPUT_GUARD.check_or_raise("ensure_npc_action_menu")
-        tab_attempt = select_nearest_npc_via_tab(hwnd, "ensure_npc_action_menu")
-        tabAttempts.append(tab_attempt)
-        stage_history.append(tab_attempt["stage"])
+    nearby_scan = scan_nearby_npc_targets(hwnd, "ensure_npc_action_menu")
+    nearbyScanAttempts = nearby_scan["attempts"]
+    if nearby_scan["matched"]:
+        stage_history.extend([attempt["stage"] for attempt in nearbyScanAttempts])
 
-        if tab_attempt["stage"] in ["npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"]:
+        if nearby_scan["stage"] in ["npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"]:
             return {
-                "stage": tab_attempt["stage"],
-                "stageTexts": tab_attempt["stageTexts"],
+                "stage": nearby_scan["stage"],
+                "stageTexts": nearby_scan["stageTexts"],
                 "stageHistory": stage_history,
-                "clickAttempts": click_attempts,
+                "clickAttempts": len(nearbyScanAttempts),
                 "moveAttempts": move_attempts,
                 "cameraDrags": camera_drags,
                 "clickPointAttempts": click_point_attempts,
+                "nearbyScanAttempts": nearbyScanAttempts,
                 "selectionAttempts": selectionAttempts,
                 "viewAttempts": viewAttempts,
-                "tabAttempts": tabAttempts,
-                "targetText": tab_attempt["targetText"],
+                "targetText": nearby_scan["targetText"],
             }
 
-        moving_view = tab_attempt.get("movingView")
+        moving_view = nearby_scan.get("movingView")
         if moving_view:
             click_screen_point(hwnd, moving_view["screenX"], moving_view["screenY"], "left")
             viewAttempts.append({
                 **moving_view,
-                "source": "tab_relative_view_button",
+                "source": "nearby_scan_relative_view_button",
             })
             INPUT_GUARD.guarded_sleep(100, "ensure_npc_action_menu")
             quick_menu_state = detect_bottom_right_menu_stage(hwnd)
@@ -2742,18 +2791,18 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
                 return {
                     "stage": quick_menu_state["stage"],
                     "stageTexts": {
-                        **tab_attempt["stageTexts"],
+                        **nearby_scan["stageTexts"],
                         "bottom_right_actions": quick_menu_state["text"],
                     },
                     "stageHistory": stage_history,
-                    "clickAttempts": click_attempts,
+                    "clickAttempts": len(nearbyScanAttempts),
                     "moveAttempts": move_attempts,
                     "cameraDrags": camera_drags,
                     "clickPointAttempts": click_point_attempts,
+                    "nearbyScanAttempts": nearbyScanAttempts,
                     "selectionAttempts": selectionAttempts,
                     "viewAttempts": viewAttempts,
-                    "tabAttempts": tabAttempts,
-                    "targetText": tab_attempt["targetText"],
+                    "targetText": nearby_scan["targetText"],
                 }
 
     while (time.time() - start_time) * 1000 < timeout_ms:
@@ -2773,9 +2822,9 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
                 "moveAttempts": move_attempts,
                 "cameraDrags": camera_drags,
                 "clickPointAttempts": click_point_attempts,
+                "nearbyScanAttempts": nearbyScanAttempts,
                 "selectionAttempts": selectionAttempts,
                 "viewAttempts": viewAttempts,
-                "tabAttempts": tabAttempts,
                 "targetText": target_info["text"],
             }
 
@@ -2805,9 +2854,9 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
                         "moveAttempts": move_attempts,
                         "cameraDrags": camera_drags,
                         "clickPointAttempts": click_point_attempts,
+                        "nearbyScanAttempts": nearbyScanAttempts,
                         "selectionAttempts": selectionAttempts,
                         "viewAttempts": viewAttempts,
-                        "tabAttempts": tabAttempts,
                         "targetText": target_info["text"],
                     }
             click_attempts += 1
@@ -2824,9 +2873,9 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
                     "moveAttempts": move_attempts,
                     "cameraDrags": camera_drags,
                     "clickPointAttempts": click_point_attempts,
+                    "nearbyScanAttempts": nearbyScanAttempts,
                     "selectionAttempts": selectionAttempts,
                     "viewAttempts": viewAttempts,
-                    "tabAttempts": tabAttempts,
                     "targetText": target_info["text"],
                 }
             continue
@@ -2893,9 +2942,9 @@ def try_enter_chat(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_interval
                 "moveAttempts": 0,
                 "cameraDrags": 0,
                 "clickPointAttempts": [],
+                "nearbyScanAttempts": [],
                 "selectionAttempts": [],
                 "viewAttempts": [],
-                "tabAttempts": [],
                 "targetText": "",
             },
         }

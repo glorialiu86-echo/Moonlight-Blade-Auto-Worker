@@ -40,6 +40,19 @@ body {
 
 .simple-chat-shell {
   width: min(760px, 100%);
+  display: grid;
+  gap: 20px;
+}
+
+.simple-page-logo-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+.simple-page-logo {
+  display: block;
+  width: min(100%, 420px);
+  height: auto;
 }
 
 .simple-chat-card {

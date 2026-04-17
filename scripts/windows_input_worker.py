@@ -4053,7 +4053,7 @@ def run_stealth_trigger_miaoqu(hwnd: int, action: dict[str, Any]) -> dict[str, A
     title = str(action.get("title") or "stealth_trigger_miaoqu")
     trigger_timeout_ms = int(action.get("triggerTimeoutMs") or 5000)
     trigger_settle_ms = int(action.get("triggerSettleMs") or 40)
-    pydirectinput.press("4")
+    pydirectinput.press("3")
     INPUT_GUARD.refresh_baseline()
     INPUT_GUARD.guarded_sleep(trigger_settle_ms, title)
 
@@ -4064,13 +4064,13 @@ def run_stealth_trigger_miaoqu(hwnd: int, action: dict[str, Any]) -> dict[str, A
         steal_state = detect_steal_screen(hwnd)
 
     if not steal_state["visible"]:
-        raise RuntimeError("Steal panel did not appear after pressing 4")
+        raise RuntimeError("Steal panel did not appear after pressing 3")
 
     return {
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Opened miaoqu panel after pressing 4 once",
+        "detail": "Opened miaoqu panel after pressing 3 once",
         "input": {
             "mode": "stealth_trigger_miaoqu",
             "text": steal_state["text"],

@@ -186,6 +186,7 @@ NPC_STAGE_ROIS = {
 
 STEALTH_ROIS = {
     "front_name_band": (0.36, 0.18, 0.64, 0.42),
+    "exit_button": (0.86, 0.44, 0.99, 0.58),
 }
 
 MAP_STAGE_ROIS = {
@@ -237,6 +238,7 @@ ACTION_POINTS = {
     "steal_button_2": (1916 / 2048, 704 / 1360),
     "steal_button_3": (1916 / 2048, 893 / 1360),
     "steal_button_4": (1916 / 2048, 1085 / 1360),
+    "exit_stealth": (1893 / 2048, 573 / 1152),
     "gift_first_slot": (1721 / 2537, 580 / 1384),
     "gift_plus": (0.82, 0.92),
     "gift_submit": (2289 / 2537, 1216 / 1384),
@@ -1069,6 +1071,16 @@ def detect_steal_screen(hwnd: int) -> dict[str, Any]:
     return {
         "visible": count_keywords(panel_text, STEAL_KEYWORDS) >= 2,
         "text": panel_text,
+    }
+
+
+def detect_exit_stealth_button(hwnd: int) -> dict[str, Any]:
+    button_text = ocr_text(capture_window_region(hwnd, STEALTH_ROIS["exit_button"]))
+    normalized_text = normalize_npc_name(button_text)
+    return {
+        "visible": "退出潜行" in normalized_text,
+        "text": button_text,
+        "normalizedText": normalized_text,
     }
 
 
@@ -3439,6 +3451,40 @@ def run_click_steal_button(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def run_exit_stealth(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "exit_stealth")
+    settle_ms = int(action.get("settleMs") or action.get("postDelayMs") or 450)
+
+    exit_state = detect_exit_stealth_button(hwnd)
+    if not exit_state["visible"]:
+        raise RuntimeError(
+            "exit_stealth requires visible 退出潜行 button. "
+            f"Detected text: {exit_state['text'] or 'none'}"
+        )
+
+    step_click = click_named_point(hwnd, "exit_stealth")
+    INPUT_GUARD.guarded_sleep(settle_ms, title)
+    next_exit_state = detect_exit_stealth_button(hwnd)
+
+    if next_exit_state["visible"]:
+        raise RuntimeError("Exit stealth button is still visible after click.")
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Clicked the fixed exit stealth button and left stealth mode",
+        "input": {
+            "mode": "exit_stealth",
+            "beforeText": exit_state["text"],
+            "afterText": next_exit_state["text"],
+            "pointName": "exit_stealth",
+            "click": step_click,
+        },
+    }
+
+
 def run_close_current_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "close_current_panel")
@@ -4251,6 +4297,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "click_steal_button":
         return run_click_steal_button(hwnd, action)
+
+    if action_type == "exit_stealth":
+        return run_exit_stealth(hwnd, action)
 
     if action_type == "close_current_panel":
         return run_close_current_panel(hwnd, action)

@@ -53,6 +53,8 @@ const CAPTURE_INTERVAL_MS = 3000;
 const NPC_CHAT_MAX_ROUNDS = 4;
 const NPC_CHAT_POLL_DELAY_MS = 1200;
 const WATCH_COMMENTARY_MIN_INTERVAL_MS = 3000;
+const WATCH_COMMENTARY_MAX_SILENCE_MS = 5000;
+const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
 const FIXED_SCRIPT_STAGES = [
   {
     key: "sell_loop",
@@ -459,6 +461,30 @@ function perceptionSummaryBySource(perception, source) {
     .trim();
 }
 
+function buildPerceptionContext(perception) {
+  if (!perception) {
+    return "暂无截图识别结果。";
+  }
+
+  return [
+    `截图总结：${perception.summary || "暂无总结"}`,
+    `场景标签：${perception.sceneLabel || "未判定"}`,
+    `OCR 文字：${perception.ocrText || "无"}`,
+    `NPC：${perception.npcNames?.join("、") || "无"}`,
+    `交互项：${perception.interactiveOptions?.join("、") || "无"}`,
+    `警告：${perception.alerts?.join("、") || "无"}`
+  ].join("\n");
+}
+
+function buildRecentAssistantLines(conversationMessages = [], limit = 3) {
+  return conversationMessages
+    .filter((message) => message?.role === "assistant")
+    .slice(-limit)
+    .map((message) => String(message.text || "").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
 function buildWatchCommentaryFingerprint(perception) {
   if (!perception) {
     return "";
@@ -474,13 +500,8 @@ function buildWatchCommentaryFingerprint(perception) {
   });
 }
 
-async function buildWatchCommentary({ perception, conversationMessages = [] }) {
-  const recentAssistantLines = conversationMessages
-    .filter((message) => message?.role === "assistant")
-    .slice(-3)
-    .map((message) => String(message.text || "").trim())
-    .filter(Boolean)
-    .join("\n");
+async function buildWatchCommentary({ perception, conversationMessages = [], trigger = "scene_change" }) {
+  const recentAssistantLines = buildRecentAssistantLines(conversationMessages, 3);
 
   const prompt = [
     "你是籽小刀，现在处于观看模式。",
@@ -488,6 +509,9 @@ async function buildWatchCommentary({ perception, conversationMessages = [] }) {
     "只用中文输出一句话，长度控制在12到28个字。",
     "语气要有主见、带一点邪门歪理、能增加节目效果，但不要提系统、截图、OCR、AI、模型。",
     "不要复述画面全文，不要下命令，不要拆成多句，不要带引号。",
+    trigger === "silence_keepalive"
+      ? "这次是因为你太久没接话了，要补一句轻量陪看吐槽，就算画面变化不大也别装死。"
+      : "这次是因为画面有新信息，要顺着当前变化补一句更贴脸的看法。",
     recentAssistantLines ? `最近几句你说过的话：\n${recentAssistantLines}` : "最近还没有说过话。",
     "当前画面信息：",
     buildPerceptionContext(perception)
@@ -497,6 +521,31 @@ async function buildWatchCommentary({ perception, conversationMessages = [] }) {
     userPrompt: prompt,
     maxTokens: 60,
     temperature: 0.9
+  });
+
+  return String(result.text || "").replace(/\s+/g, " ").trim();
+}
+
+async function buildWatchUserReply({ instruction, perception, conversationMessages = [] }) {
+  const recentAssistantLines = buildRecentAssistantLines(conversationMessages, 3);
+
+  const prompt = [
+    "你是籽小刀，现在处于观看模式。",
+    "籽岷正在主玩游戏，你不操作游戏，只是作为搭档在旁边接话。",
+    "籽岷刚刚主动和你说话了，你现在必须优先回他，再回去继续看戏。",
+    "只用中文输出一句话，长度控制在12到32个字。",
+    "语气要像熟人搭档，聪明、嘴碎、略带坏心眼，但不要进入任务规划，不要说你要接管游戏。",
+    "不要提系统、截图、OCR、AI、模型，不要拆成多句。",
+    recentAssistantLines ? `最近几句你说过的话：\n${recentAssistantLines}` : "最近还没有说过话。",
+    `籽岷刚刚说：${instruction}`,
+    "当前画面信息：",
+    buildPerceptionContext(perception)
+  ].join("\n");
+
+  const result = await generateText({
+    userPrompt: prompt,
+    maxTokens: 80,
+    temperature: 0.85
   });
 
   return String(result.text || "").replace(/\s+/g, " ").trim();
@@ -513,19 +562,30 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
   const lastCommentaryAt = runtimeState.agent?.lastWatchCommentaryAt
     ? new Date(runtimeState.agent.lastWatchCommentaryAt).getTime()
     : 0;
+  const cooldownUntil = runtimeState.agent?.watchCommentaryCooldownUntil
+    ? new Date(runtimeState.agent.watchCommentaryCooldownUntil).getTime()
+    : 0;
+
+  if (cooldownUntil && now < cooldownUntil) {
+    return false;
+  }
 
   if (lastCommentaryAt && now - lastCommentaryAt < WATCH_COMMENTARY_MIN_INTERVAL_MS) {
     return false;
   }
 
   const fingerprint = buildWatchCommentaryFingerprint(perception);
-  if (fingerprint && runtimeState.agent?.lastWatchCommentaryFingerprint === fingerprint) {
+  const fingerprintUnchanged = fingerprint && runtimeState.agent?.lastWatchCommentaryFingerprint === fingerprint;
+  const silenceTooLong = !lastCommentaryAt || now - lastCommentaryAt >= WATCH_COMMENTARY_MAX_SILENCE_MS;
+
+  if (fingerprintUnchanged && !silenceTooLong) {
     return false;
   }
 
   const text = await buildWatchCommentary({
     perception,
-    conversationMessages: runtimeState.messages
+    conversationMessages: runtimeState.messages,
+    trigger: fingerprintUnchanged ? "silence_keepalive" : "scene_change"
   });
 
   if (!text) {
@@ -545,6 +605,7 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
 
   appendLog("info", "观看模式自动旁白已发送", {
     text,
+    trigger: fingerprintUnchanged ? "silence_keepalive" : "scene_change",
     sceneLabel: perception.sceneLabel || "",
     alerts: perception.alerts || []
   });
@@ -558,10 +619,63 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
     lastAutonomousInstruction: "watch_commentary",
     lastWatchCommentaryAt: new Date().toISOString(),
     lastWatchCommentaryFingerprint: fingerprint,
+    watchCommentaryCooldownUntil: null,
     autonomousTurnCount: (runtimeState.agent?.autonomousTurnCount || 0) + 1
   });
 
   return true;
+}
+
+async function runWatchUserReplyTurn({ instruction, scene, perception, conversationMessages = [] }) {
+  await waitForTurnSlot();
+
+  updateAgent({
+    mode: "user_priority",
+    phase: "user_priority",
+    currentObjective: instruction,
+    queuedUserObjective: instruction
+  });
+
+  try {
+    const replyText = await buildWatchUserReply({
+      instruction,
+      perception,
+      conversationMessages
+    });
+
+    if (!replyText) {
+      throw new Error("观看模式没有生成可用回复。");
+    }
+
+    appendMessage({
+      role: "assistant",
+      text: replyText,
+      thinkingChain: [],
+      perceptionSummary: perceptionSummaryBySource(perception, "agent"),
+      sceneLabel: perception?.sceneLabel || sceneDescription(scene),
+      riskLevel: perception?.alerts?.length ? "medium" : "low",
+      actions: [],
+      decide: ""
+    });
+
+    appendLog("info", "观看模式已优先回复籽岷", {
+      instruction,
+      replyText
+    });
+
+    updateAgent({
+      mode: "user_priority",
+      phase: "cooldown",
+      currentObjective: "watch",
+      queuedUserObjective: null,
+      lastUserInstruction: instruction,
+      lastTurnSource: "user",
+      lastTurnAt: new Date().toISOString(),
+      watchCommentaryCooldownUntil: new Date(Date.now() + WATCH_USER_REPLY_COOLDOWN_MS).toISOString()
+    });
+  } finally {
+    turnInFlight = false;
+  }
 }
 
 function ensureAutoCaptureRunning() {
@@ -1985,6 +2099,7 @@ async function handleChat(request, response) {
     perception: getState().latestPerception,
     origin: "user"
   }));
+
   if (automationTriggered) {
     armAutomationScript(instruction);
     appendLog("info", "固定剧本自动化已布置", {
@@ -2001,6 +2116,14 @@ async function handleChat(request, response) {
       sceneLabel: getState().latestPerception?.sceneLabel || "等待启动",
       riskLevel: "low",
       actions: []
+    });
+  } else if ((getState().interactionMode || "watch") === "watch") {
+    const latestState = getState();
+    await runWatchUserReplyTurn({
+      instruction,
+      scene: latestState.scene,
+      perception: latestState.latestPerception,
+      conversationMessages: latestState.messages.slice(0, -1)
     });
   } else {
     appendLog("info", "本轮未命中固定剧本触发词", {

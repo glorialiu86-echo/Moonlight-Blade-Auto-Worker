@@ -11,7 +11,8 @@ function createInitialAgentState() {
     lastTurnAt: null,
     autonomousTurnCount: 0,
     lastWatchCommentaryAt: null,
-    lastWatchCommentaryFingerprint: null
+    lastWatchCommentaryFingerprint: null,
+    watchCommentaryCooldownUntil: null
   };
 }
 

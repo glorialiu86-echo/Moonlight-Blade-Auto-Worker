@@ -91,7 +91,7 @@ export function createTravelToCoordinateAction({
   waitAfterGoMs = 800,
   coordinateTolerance = 5,
   rerouteLimit = 2,
-  maxTravelMs = 18000
+  maxTravelMs = 24000
 }) {
   return createWorkerAction(id, title, "travel_to_coordinate", {
     xCoordinate,

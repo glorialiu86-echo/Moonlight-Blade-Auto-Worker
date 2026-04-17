@@ -1713,6 +1713,46 @@ def find_moving_view_button(hwnd: int) -> dict[str, Any] | None:
     return None
 
 
+def build_social_target_signature(
+    target_info: dict[str, Any],
+    moving_view: dict[str, Any] | None,
+) -> dict[str, Any]:
+    normalized_target_text = normalize_npc_name(target_info.get("text") or "")
+    payload = {
+        "targetText": str(target_info.get("text") or "").strip(),
+        "normalizedTargetText": normalized_target_text,
+        "viewButton": None,
+    }
+    if moving_view:
+        payload["viewButton"] = {
+            "screenX": int(moving_view["screenX"]),
+            "screenY": int(moving_view["screenY"]),
+            "text": str(moving_view.get("text") or "").strip(),
+        }
+    return payload
+
+
+def social_target_signature_changed(
+    before_signature: dict[str, Any],
+    after_signature: dict[str, Any],
+    position_shift_threshold_px: int,
+) -> tuple[bool, str]:
+    before_target = str(before_signature.get("normalizedTargetText") or "").strip()
+    after_target = str(after_signature.get("normalizedTargetText") or "").strip()
+    if before_target and after_target and not names_match(before_target, after_target):
+        return True, "target_text_changed"
+
+    before_view = before_signature.get("viewButton") or {}
+    after_view = after_signature.get("viewButton") or {}
+    if before_view and after_view:
+        delta_x = abs(int(after_view["screenX"]) - int(before_view["screenX"]))
+        delta_y = abs(int(after_view["screenY"]) - int(before_view["screenY"]))
+        if max(delta_x, delta_y) >= position_shift_threshold_px:
+            return True, "view_anchor_changed"
+
+    return False, "unchanged"
+
+
 def scan_nearby_npc_targets(hwnd: int, title: str) -> dict[str, Any]:
     scan_attempts: list[dict[str, Any]] = []
 
@@ -1858,6 +1898,7 @@ def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, A
     drag_start_ratio = action.get("dragStartRatio") or [0.54, 0.48]
     drag_end_ratio = action.get("dragEndRatio") or [0.64, 0.48]
     drag_duration_ms = int(action.get("dragDurationMs") or 180)
+    position_shift_threshold_px = int(action.get("positionShiftThresholdPx") or 28)
 
     focus_window(hwnd)
     attempts: list[dict[str, Any]] = []
@@ -1866,18 +1907,34 @@ def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, A
     for cycle_index in range(max(1, max_cycles)):
         for attempt_index in range(max(1, attempts_per_cycle)):
             INPUT_GUARD.check_or_raise(title)
+            before_target_info = detect_target_threshold(hwnd)
+            before_moving_view = find_moving_view_button(hwnd)
+            before_signature = build_social_target_signature(before_target_info, before_moving_view)
             pydirectinput.press("tab")
             INPUT_GUARD.refresh_baseline()
             INPUT_GUARD.guarded_sleep(settle_ms, title)
             stage_state = detect_npc_interaction_stage(hwnd)
             target_info = detect_target_threshold(hwnd)
-            success = npc_stage_has_selectable_target(stage_state, target_info)
+            moving_view = find_moving_view_button(hwnd)
+            after_signature = build_social_target_signature(target_info, moving_view)
+            selectable_target = npc_stage_has_selectable_target(stage_state, target_info)
+            target_changed, success_reason = social_target_signature_changed(
+                before_signature,
+                after_signature,
+                position_shift_threshold_px,
+            )
+            success = selectable_target and target_changed
             attempt_payload = {
                 "cycleIndex": cycle_index + 1,
                 "attemptIndex": attempt_index + 1,
                 "stage": stage_state["stage"],
                 "targetText": target_info["text"],
                 "lookText": stage_state["texts"].get("look_button", ""),
+                "selectableTarget": selectable_target,
+                "targetChanged": target_changed,
+                "successReason": success_reason,
+                "beforeSignature": before_signature,
+                "afterSignature": after_signature,
                 "success": success,
             }
             attempts.append(attempt_payload)
@@ -1921,7 +1978,7 @@ def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, A
         error_code="NPC_TARGET_SWITCH_FAILED",
         failed_step=build_failed_step_payload(
             action,
-            "Tab switch did not reach npc_selected or 查看 target",
+            "Tab switch never produced a changed selectable target",
             failed_input,
         ),
     )
@@ -1935,7 +1992,7 @@ def run_travel_to_coordinate(hwnd: int, action: dict[str, Any]) -> dict[str, Any
     toggle_key = str(action.get("toggleKey") or "m").strip().lower()
     wait_after_go_ms = int(action.get("waitAfterGoMs") or 0)
     poll_ms = int(action.get("pollMs") or 1000)
-    max_travel_ms = int(action.get("maxTravelMs") or 18000)
+    max_travel_ms = int(action.get("maxTravelMs") or 24000)
     stable_poll_limit = int(action.get("stablePollLimit") or 3)
     coordinate_tolerance = int(action.get("coordinateTolerance") or 5)
     reroute_limit = int(action.get("rerouteLimit") or 2)

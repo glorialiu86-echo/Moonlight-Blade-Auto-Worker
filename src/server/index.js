@@ -1126,7 +1126,13 @@ async function maybeReplyFromCurrentChatScreen({ instruction, externalInputGuard
   };
 }
 
-async function maybeSendNpcReply({ instruction, plan, execution, externalInputGuardEnabled = true }) {
+async function maybeSendNpcReply({
+  instruction,
+  plan,
+  execution,
+  externalInputGuardEnabled = true,
+  closeAfterSend = false
+}) {
   const finalTalkStep = [...(execution.rawSteps || [])]
     .reverse()
     .find((step) => step?.input?.stage === "chat_ready");
@@ -1146,7 +1152,7 @@ async function maybeSendNpcReply({ instruction, plan, execution, externalInputGu
     instruction,
     dialogText,
     externalInputGuardEnabled,
-    closeAfterSend: false
+    closeAfterSend
   });
 
   if (!loopResult.rounds.length) {
@@ -1287,7 +1293,8 @@ async function finalizeFixedScriptTurnExecution({
       instruction: plan.intent,
       plan,
       execution,
-      externalInputGuardEnabled
+      externalInputGuardEnabled,
+      closeAfterSend: stage.key === "social_warm" || stage.key === "social_dark"
     });
 
     if (replyResult) {

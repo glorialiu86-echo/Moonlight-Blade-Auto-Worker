@@ -94,6 +94,12 @@ function renderEmptyState() {
   scrollMessagesToBottom();
 }
 
+function replaceAssistantViewerReferences(text) {
+  return String(text || "")
+    .replaceAll("籽岷团队", "你")
+    .replaceAll("籽岷", "你");
+}
+
 function buildAssistantText(message) {
   const thinkingChain = Array.isArray(message.thinkingChain)
     ? message.thinkingChain
@@ -114,7 +120,7 @@ function buildAssistantText(message) {
     lines.push(String(message.text).trim());
   }
 
-  return lines.filter(Boolean).join("\n");
+  return replaceAssistantViewerReferences(lines.filter(Boolean).join("\n"));
 }
 
 function renderUserMessage(message) {

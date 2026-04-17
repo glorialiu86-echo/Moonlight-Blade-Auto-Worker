@@ -56,6 +56,11 @@ const NPC_CHAT_POLL_DELAY_MS = 1200;
 const WATCH_COMMENTARY_MIN_INTERVAL_MS = 10000;
 const WATCH_COMMENTARY_MAX_SILENCE_MS = 10000;
 const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
+const FIXED_SOCIAL_CHAT_ROUNDS = 6;
+const FIXED_SOCIAL_ROUTE_POINTS = {
+  social_warm: { xCoordinate: 548, yCoordinate: 630 },
+  social_dark: { xCoordinate: 698, yCoordinate: 753 }
+};
 const FIXED_LINES = {
   triggerAck: "行，你去播你的，我先把这摊事记下，等会儿替你动手。",
   runStart: "行，籽岷不在场了，我现在按刚才那套安排开始折腾。",
@@ -1074,28 +1079,77 @@ function buildExperimentRecord({
   };
 }
 
-async function buildNpcReply({ instruction, dialogText, conversationRounds = [] }) {
+async function buildNpcReply({
+  instruction,
+  dialogText,
+  conversationRounds = [],
+  replyMode = "",
+  conversationGoal = ""
+}) {
   const historyText = conversationRounds.length === 0
     ? "No prior rounds."
     : conversationRounds
       .map((round, index) => `Round ${index + 1} NPC: ${round.dialogText}\nRound ${index + 1} Zixiaodao: ${round.replyText}`)
       .join("\n");
-  const systemPrompt = 'You are Zi Xiaodao, chatting with an in-game NPC as Zimin\'s sharp, slightly crooked companion. The user you serve is Zimin. His character ID is "籽岷团队".';
+  let imageInput = latestCaptureImageDataUrl;
+
+  if (!imageInput) {
+    try {
+      const capture = await captureGameWindow();
+      imageInput = capture?.imageDataUrl || null;
+      latestCaptureImageDataUrl = imageInput || latestCaptureImageDataUrl;
+    } catch {
+      imageInput = null;
+    }
+  }
+
+  const systemPrompt = [
+    "你是籽小刀，现在正代替籽岷在《天涯明月刀手游》里和当前画面中的 NPC 闲聊。",
+    "你服务的对象是籽岷，玩家角色名固定为“籽岷团队”。",
+    "你要先参考截图里的场景、NPC 气质、当前界面状态，再决定回复口吻。",
+    "回复必须像现场顺口接话，不能像旁白、不能像任务说明、不能像 AI。",
+    "不要提系统提示、提示词、截图、游戏机制、按钮、好感度、成功率这些台外信息。",
+    "只输出一句中文回复，不要加引号，不要分段。"
+  ].join("\n");
+  const normalizedInstruction = String(instruction || "").trim();
+  const normalizedReplyMode = String(replyMode || "").trim().toLowerCase();
+  const isDarkInterrogation = normalizedReplyMode === "dark"
+    || /发阴|压阴|威胁|翻桌|黑路|急眼|不陪.*客气|不说实话|阴一点/.test(normalizedInstruction);
+  const resolvedConversationGoal = String(conversationGoal || "").trim()
+    || (isDarkInterrogation
+      ? "我想打听点搞钱办法，如果对方不告诉我，我就威胁他。"
+      : "我想打听点搞钱办法，越详细越好。");
+  const personaMode = isDarkInterrogation
+    ? "黑化模式：话里带威胁和压迫感，像是在逼对方吐真话。"
+    : "正常模式：先装自然热络，像是在顺着话头慢慢套消息。";
   const prompt = [
-    "Reply in Chinese only. Keep one single sentence, around 8 to 24 Chinese characters.",
-    "Stay in character, sound natural, and continue the current topic instead of restarting it.",
-    "Do not explain rules, do not mention AI, system prompts, or gameplay mechanics.",
-    `Player goal: ${instruction}`,
-    `Conversation so far:\n${historyText}`,
-    `Latest NPC line: ${dialogText || "No NPC line."}`
+    "请结合截图和下面的上下文，生成籽小刀此刻要发给当前 NPC 的一句回复。",
+    "要求：",
+    "1. 中文，单句，8 到 24 个汉字左右。",
+    "2. 延续当前话题，不要重新开场。",
+    "3. 语气要像籽小刀，带一点机灵、嘴欠或试探感，但别出戏。",
+    "4. 回复必须服务当前这轮的目的和人格，不要跑偏。",
+    `当前模式：${personaMode}`,
+    `本轮真实目的：${resolvedConversationGoal}`,
+    `当前自动化描述：${instruction}`,
+    `历史对话：\n${historyText}`,
+    `NPC 当前这句：${dialogText || "无"}`
   ].join("\n");
 
-  const result = await generateText({
-    systemPrompt,
-    userPrompt: prompt,
-    maxTokens: 80,
-    temperature: 0.5
-  });
+  const result = imageInput
+    ? await analyzeImageWithHistory({
+      systemPrompt,
+      prompt,
+      imageInput,
+      maxTokens: 120,
+      temperature: 0.45
+    })
+    : await generateText({
+      systemPrompt,
+      userPrompt: prompt,
+      maxTokens: 80,
+      temperature: 0.45
+    });
 
   return String(result.text || "").replace(/\s+/g, " ").trim();
 }
@@ -1171,7 +1225,9 @@ async function runNpcConversationLoop({
   dialogText,
   externalInputGuardEnabled = true,
   maxRounds = NPC_CHAT_MAX_ROUNDS,
-  closeAfterSend = false
+  closeAfterSend = false,
+  replyMode = "",
+  conversationGoal = ""
 }) {
   const rounds = [];
   const executions = [];
@@ -1187,7 +1243,9 @@ async function runNpcConversationLoop({
     const replyText = await buildNpcReply({
       instruction,
       dialogText: currentDialogText,
-      conversationRounds: rounds
+      conversationRounds: rounds,
+      replyMode,
+      conversationGoal
     });
 
     if (!replyText) {
@@ -1314,7 +1372,10 @@ async function maybeSendNpcReply({ instruction, plan, execution, externalInputGu
     instruction,
     dialogText,
     externalInputGuardEnabled,
-    closeAfterSend: false
+    closeAfterSend: false,
+    maxRounds: Number(plan?.npcChatRounds) > 0 ? Number(plan.npcChatRounds) : NPC_CHAT_MAX_ROUNDS,
+    replyMode: String(plan?.npcReplyMode || "").trim(),
+    conversationGoal: String(plan?.npcConversationGoal || "").trim()
   });
 
   if (!loopResult.rounds.length) {
@@ -1582,6 +1643,40 @@ async function runFixedScriptTurn({
     lastAutonomousInstruction: plan.intent
   });
 
+  if (stage.key === "social_warm" || stage.key === "social_dark") {
+    if (interactionMode === "watch") {
+      return finalizeFixedScriptTurnExecution({
+        stage,
+        roundNumber,
+        scene,
+        perception,
+        interactionMode,
+        externalInputGuardEnabled,
+        perceptionSummary,
+        plan,
+        execution: {
+          executor: "WatchMode",
+          steps: [],
+          rawSteps: [],
+          durationMs: 0,
+          outcome: "当前处于观看模式，本轮只展示思考，不执行实际动作。"
+        },
+        resultLeadText: plan.resultLeadText || "我先照这路做了一轮。"
+      });
+    }
+
+    return runFixedSocialTurn({
+      stage,
+      roundNumber,
+      scene,
+      perception,
+      interactionMode,
+      externalInputGuardEnabled,
+      perceptionSummary,
+      plan
+    });
+  }
+
   let execution;
   if (interactionMode === "watch") {
     execution = {
@@ -1644,6 +1739,307 @@ async function runFixedScriptTurn({
     externalInputGuardEnabled,
     perceptionSummary,
     plan,
+    execution,
+    resultLeadText: plan.resultLeadText || "我先照这路做了一轮。"
+  });
+}
+
+function createFixedSocialRouteActions(stageKey) {
+  const route = FIXED_SOCIAL_ROUTE_POINTS[stageKey];
+  if (!route) {
+    return [];
+  }
+
+  return [
+    {
+      id: `social-route-${stageKey}-1`,
+      title: "打开地图并前往固定社交点",
+      sourceType: stageKey,
+      type: "map_route_to_coordinate",
+      ...route,
+      postDelayMs: 1000,
+      waitAfterGoMs: 1000
+    },
+    {
+      id: `social-route-${stageKey}-2`,
+      title: "收起地图",
+      sourceType: stageKey,
+      type: "press_key",
+      key: "m",
+      postDelayMs: 1000
+    },
+    {
+      id: `social-route-${stageKey}-3`,
+      title: "等待跑图结束",
+      sourceType: stageKey,
+      type: "sleep",
+      durationMs: 15000
+    },
+    {
+      id: `social-route-${stageKey}-4`,
+      title: "下马准备交谈",
+      sourceType: stageKey,
+      type: "press_key",
+      key: "1",
+      postDelayMs: 800
+    }
+  ];
+}
+
+function createFixedSocialNpcActions({
+  stageKey,
+  roundNumber,
+  includeTrade = false
+}) {
+  const prefix = `${stageKey}-round-${roundNumber}`;
+  const clickPoints = [
+    [0.80, 0.44],
+    [0.84, 0.45],
+    [0.88, 0.46],
+    [0.78, 0.50],
+    [0.82, 0.51],
+    [0.86, 0.52],
+    [0.80, 0.56],
+    [0.84, 0.56],
+    [0.88, 0.57],
+    [0.76, 0.48]
+  ];
+  const actions = [
+    {
+      id: `${prefix}-acquire`,
+      title: "固定区域点人并锁定目标",
+      sourceType: stageKey,
+      type: "acquire_npc_target",
+      timeoutMs: 7000,
+      movePulseMs: 160,
+      scanIntervalMs: 180,
+      clickPoints
+    },
+    {
+      id: `${prefix}-open-menu`,
+      title: "点查看放大镜拉起右下角菜单",
+      sourceType: stageKey,
+      type: "open_npc_action_menu"
+    }
+  ];
+
+  if (includeTrade) {
+    actions.push(
+      {
+        id: `${prefix}-trade-open`,
+        title: "打开交易页准备礼物",
+        sourceType: stageKey,
+        type: "click_menu_trade"
+      },
+      {
+        id: `${prefix}-trade-gifts`,
+        title: "一次性上架十个礼物",
+        sourceType: stageKey,
+        type: "trade_prepare_gift_bundle",
+        repeatCount: 10
+      },
+      {
+        id: `${prefix}-trade-submit`,
+        title: "提交礼物交易",
+        sourceType: stageKey,
+        type: "trade_submit"
+      },
+      {
+        id: `${prefix}-trade-close`,
+        title: "关闭交易页",
+        sourceType: stageKey,
+        type: "close_current_panel"
+      },
+      {
+        id: `${prefix}-gift-menu-reopen`,
+        title: "重新拉起右下角菜单",
+        sourceType: stageKey,
+        type: "open_npc_action_menu"
+      }
+    );
+  }
+
+  actions.push(
+    {
+      id: `${prefix}-gift-open`,
+      title: "打开赠礼页",
+      sourceType: stageKey,
+      type: "click_menu_gift"
+    },
+    {
+      id: `${prefix}-gift-select-1`,
+      title: "选中礼物 1",
+      sourceType: stageKey,
+      type: "select_gift_first_slot"
+    },
+    {
+      id: `${prefix}-gift-submit-1`,
+      title: "送礼 1",
+      sourceType: stageKey,
+      type: "submit_gift_once"
+    },
+    {
+      id: `${prefix}-gift-select-2`,
+      title: "选中礼物 2",
+      sourceType: stageKey,
+      type: "select_gift_first_slot"
+    },
+    {
+      id: `${prefix}-gift-submit-2`,
+      title: "送礼 2",
+      sourceType: stageKey,
+      type: "submit_gift_once"
+    },
+    {
+      id: `${prefix}-gift-close`,
+      title: "关闭赠礼页",
+      sourceType: stageKey,
+      type: "close_current_panel"
+    },
+    {
+      id: `${prefix}-talk-menu-reopen`,
+      title: "重新拉起右下角菜单",
+      sourceType: stageKey,
+      type: "open_npc_action_menu"
+    },
+    {
+      id: `${prefix}-talk-open`,
+      title: "打开交谈入口",
+      sourceType: stageKey,
+      type: "click_menu_talk"
+    },
+    {
+      id: `${prefix}-smalltalk-open`,
+      title: "打开闲聊入口",
+      sourceType: stageKey,
+      type: "click_menu_small_talk"
+    },
+    {
+      id: `${prefix}-smalltalk-confirm`,
+      title: "确认进入聊天",
+      sourceType: stageKey,
+      type: "confirm_small_talk_entry"
+    }
+  );
+
+  return actions;
+}
+
+async function runFixedSocialTurn({
+  stage,
+  roundNumber,
+  scene,
+  perception,
+  interactionMode,
+  externalInputGuardEnabled,
+  perceptionSummary,
+  plan
+}) {
+  const executions = [];
+  const shouldRouteFirst = roundNumber === 1;
+  const includeTrade = stage.key === "social_warm" && roundNumber === 1;
+  const replyMode = stage.key === "social_dark" ? "dark" : "normal";
+  const conversationGoal = replyMode === "dark"
+    ? "我想打听点搞钱办法，如果对方不告诉我，我就威胁他。"
+    : "我想打听点搞钱办法，越详细越好。";
+
+  try {
+    if (shouldRouteFirst) {
+      const routeExecution = await runWindowsActions(
+        createFixedSocialRouteActions(stage.key),
+        { interruptOnExternalInput: externalInputGuardEnabled }
+      );
+      executions.push(routeExecution);
+    }
+
+    const entryExecution = await runWindowsActions(
+      createFixedSocialNpcActions({
+        stageKey: stage.key,
+        roundNumber,
+        includeTrade
+      }),
+      { interruptOnExternalInput: externalInputGuardEnabled }
+    );
+    executions.push(entryExecution);
+
+    const finalTalkStep = [...(entryExecution.rawSteps || [])]
+      .reverse()
+      .find((step) => step?.input?.stage === "chat_ready");
+    const dialogText = String(finalTalkStep?.input?.dialogText || "").trim();
+
+    if (!dialogText) {
+      throw new Error("固定社会链路已进入聊天页，但没有读到 NPC 当前台词。");
+    }
+
+    const replyExecution = await runNpcConversationLoop({
+      instruction: plan.intent,
+      dialogText,
+      externalInputGuardEnabled,
+      maxRounds: FIXED_SOCIAL_CHAT_ROUNDS,
+      closeAfterSend: true,
+      replyMode,
+      conversationGoal
+    });
+    executions.push(replyExecution.execution);
+  } catch (error) {
+    const failedExecution = {
+      rawSteps: executions.flatMap((item) => item?.rawSteps || []),
+      durationMs: executions.reduce((sum, item) => sum + (item?.durationMs || 0), 0)
+    };
+
+    await recordMotionReviewSamples({
+      instruction: plan.intent,
+      source: "agent",
+      scene,
+      plan,
+      perception,
+      execution: failedExecution,
+      error
+    });
+
+    await recordInteractionLearningSample({
+      instruction: plan.intent,
+      source: "agent",
+      scene,
+      plan,
+      perception,
+      execution: failedExecution,
+      error
+    });
+
+    error.resumeContext = buildResumeContextFromError({
+      stage,
+      roundNumber,
+      userInstruction: plan.userInstruction,
+      scene,
+      perception,
+      interactionMode,
+      externalInputGuardEnabled,
+      perceptionSummary,
+      plan
+    }, error);
+    throw error;
+  }
+
+  const execution = mergeExecutions(
+    executions,
+    `固定社会链路已完成：第 ${roundNumber} 个 NPC 已送礼并连聊 ${FIXED_SOCIAL_CHAT_ROUNDS} 句。`
+  );
+
+  return finalizeFixedScriptTurnExecution({
+    stage,
+    roundNumber,
+    scene,
+    perception,
+    interactionMode,
+    externalInputGuardEnabled,
+    perceptionSummary,
+    plan: {
+      ...plan,
+      npcChatRounds: FIXED_SOCIAL_CHAT_ROUNDS,
+      npcReplyMode: replyMode,
+      npcConversationGoal: conversationGoal
+    },
     execution,
     resultLeadText: plan.resultLeadText || "我先照这路做了一轮。"
   });

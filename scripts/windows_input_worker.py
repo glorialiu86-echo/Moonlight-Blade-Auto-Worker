@@ -2913,6 +2913,7 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     timeout_ms = int(action.get("timeoutMs") or DEFAULT_INTERACT_TIMEOUT_MS)
     move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
     scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
+    custom_click_points = action.get("clickPoints")
     click_points = [
         (0.80, 0.44),
         (0.84, 0.45),
@@ -2923,6 +2924,13 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         (0.80, 0.56),
         (0.84, 0.56),
     ]
+    if isinstance(custom_click_points, list):
+        normalized_click_points: list[tuple[float, float]] = []
+        for point in custom_click_points:
+            if isinstance(point, (list, tuple)) and len(point) == 2:
+                normalized_click_points.append((float(point[0]), float(point[1])))
+        if normalized_click_points:
+            click_points = normalized_click_points
     click_attempts = 0
     move_attempts = 0
     click_point_attempts: list[dict[str, float]] = []

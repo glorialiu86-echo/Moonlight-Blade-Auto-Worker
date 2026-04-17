@@ -60,6 +60,10 @@ function detectInteractionMode(instruction) {
 }
 
 function updateVoiceStatus(message = "") {
+  if (!elements.voiceStatus) {
+    return;
+  }
+
   const text = String(message || "").trim();
   elements.voiceStatus.textContent = text;
   elements.voiceStatus.hidden = !text;

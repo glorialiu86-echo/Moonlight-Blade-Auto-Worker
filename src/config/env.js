@@ -55,7 +55,7 @@ export function getTextLlmConfig() {
 
 export function getLocalAsrConfig() {
   return {
-    model: optionalEnv("LOCAL_ASR_MODEL", "medium"),
+    model: optionalEnv("LOCAL_ASR_MODEL", "paraformer-zh"),
     language: optionalEnv("LOCAL_ASR_LANGUAGE", "zh"),
     device: optionalEnv("LOCAL_ASR_DEVICE", "cpu"),
     computeType: optionalEnv("LOCAL_ASR_COMPUTE_TYPE", "int8"),

@@ -3,7 +3,19 @@ import os
 import sys
 import traceback
 
-from faster_whisper import WhisperModel
+from funasr import AutoModel
+from funasr.utils.postprocess_utils import rich_transcription_postprocess
+
+
+WHISPER_MODEL_ALIASES = {
+    "tiny",
+    "base",
+    "small",
+    "medium",
+    "large",
+    "large-v2",
+    "large-v3",
+}
 
 
 def emit(payload):
@@ -11,28 +23,51 @@ def emit(payload):
     sys.stdout.flush()
 
 
-def build_model():
-    model_name = os.getenv("LOCAL_ASR_MODEL", "small")
-    device = os.getenv("LOCAL_ASR_DEVICE", "cpu")
-    compute_type = os.getenv("LOCAL_ASR_COMPUTE_TYPE", "int8")
-    cpu_threads = int(os.getenv("LOCAL_ASR_CPU_THREADS", "4"))
-    download_root = os.getenv("LOCAL_ASR_MODEL_CACHE_DIR") or None
+def resolve_model_name():
+    model_name = os.getenv("LOCAL_ASR_MODEL", "paraformer-zh").strip() or "paraformer-zh"
 
-    model = WhisperModel(
-        model_name,
+    if model_name in WHISPER_MODEL_ALIASES:
+        return "paraformer-zh"
+
+    return model_name
+
+
+def build_model():
+    model_name = resolve_model_name()
+    device = os.getenv("LOCAL_ASR_DEVICE", "cpu").strip() or "cpu"
+    cpu_threads = int(os.getenv("LOCAL_ASR_CPU_THREADS", "4"))
+    disable_update = os.getenv("LOCAL_ASR_DISABLE_UPDATE", "true").lower() != "false"
+    model_cache_dir = os.getenv("LOCAL_ASR_MODEL_CACHE_DIR") or None
+    if model_cache_dir and "faster-whisper" in model_cache_dir.lower():
+        model_cache_dir = None
+
+    model = AutoModel(
+        model=model_name,
+        vad_model=os.getenv("LOCAL_ASR_VAD_MODEL", "fsmn-vad"),
+        punc_model=os.getenv("LOCAL_ASR_PUNC_MODEL", "ct-punc-c"),
         device=device,
-        compute_type=compute_type,
-        cpu_threads=cpu_threads,
-        download_root=download_root,
+        disable_update=disable_update,
+        hub="ms",
+        model_revision=os.getenv("LOCAL_ASR_MODEL_REVISION", "master"),
+        vad_model_revision=os.getenv("LOCAL_ASR_VAD_MODEL_REVISION", "master"),
+        punc_model_revision=os.getenv("LOCAL_ASR_PUNC_MODEL_REVISION", "master"),
+        model_dir=model_cache_dir,
     )
+
+    try:
+        import torch
+
+        torch.set_num_threads(cpu_threads)
+    except Exception:
+        pass
 
     emit(
         {
             "type": "ready",
             "model": model_name,
             "device": device,
-            "compute_type": compute_type,
             "cpu_threads": cpu_threads,
+            "engine": "funasr",
         }
     )
     return model
@@ -40,25 +75,29 @@ def build_model():
 
 def transcribe(model, request):
     language = request.get("language") or os.getenv("LOCAL_ASR_LANGUAGE", "zh")
-    beam_size = int(request.get("beam_size") or 5)
-    best_of = int(request.get("best_of") or 5)
     initial_prompt = os.getenv(
         "LOCAL_ASR_INITIAL_PROMPT",
         "以下内容是简体中文普通话口语转写，可能涉及《天涯明月刀》的任务名、NPC 名称、地名和玩家口语，请尽量按发音准确转写。",
     )
-    segments, _ = model.transcribe(
-        request["audio_path"],
+
+    result = model.generate(
+        input=request["audio_path"],
         language=language,
-        beam_size=beam_size,
-        best_of=best_of,
-        vad_filter=True,
-        condition_on_previous_text=False,
-        word_timestamps=False,
-        temperature=0,
-        initial_prompt=initial_prompt,
+        batch_size_s=30,
+        use_itn=True,
+        merge_vad=True,
+        merge_length_s=12,
+        hotword=initial_prompt,
     )
-    text = "".join(segment.text for segment in segments).strip()
-    return text
+
+    if not result:
+        return ""
+
+    text = str(result[0].get("text", "")).strip()
+    if not text:
+        return ""
+
+    return rich_transcription_postprocess(text).strip()
 
 
 def main():

@@ -8,29 +8,29 @@
   </head>
   <body class="simple-chat-page">
     <main class="simple-chat-shell">
-      <div class="simple-page-logo-wrap">
-        <img class="simple-page-logo" src="/logo.png" alt="籽小刀" />
-      </div>
+      <header class="simple-page-logo-wrap">
+        <img class="simple-page-logo" src="/logo.png" alt="籽岷团队" />
+      </header>
+
       <section class="simple-chat-card" aria-label="聊天窗口">
         <section id="messageList" class="simple-message-list" aria-live="polite"></section>
-
-        <form id="composerForm" class="simple-composer">
-          <label class="simple-composer-field" for="instructionInput">
-            <textarea
-              id="instructionInput"
-              name="instruction"
-              rows="4"
-              placeholder="说点什么"
-            ></textarea>
-          </label>
-          <div class="simple-composer-actions">
-            <button id="resumeFailedStepButton" type="button" class="resume-triangle" aria-label="从失败步骤继续">▷</button>
-            <button id="voiceButton" type="button">语音</button>
-            <button type="submit" class="primary">发送</button>
-          </div>
-          <p id="voiceStatus" class="simple-voice-status" hidden></p>
-        </form>
       </section>
+
+      <form id="composerForm" class="simple-composer">
+        <label class="simple-composer-field" for="instructionInput">
+          <textarea
+            id="instructionInput"
+            name="instruction"
+            rows="3"
+            placeholder="说点什么"
+          ></textarea>
+        </label>
+        <div class="simple-composer-actions">
+          <button id="resumeFailedStepButton" type="button" class="resume-triangle" aria-label="从失败步骤继续">▶</button>
+          <button id="voiceButton" type="button">语音</button>
+          <button type="submit" class="primary">发送</button>
+        </div>
+      </form>
     </main>
 
     <template id="userMessageTemplate">

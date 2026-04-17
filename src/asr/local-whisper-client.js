@@ -128,6 +128,7 @@ function ensureWorker() {
     stdio: ["pipe", "pipe", "pipe"],
     env: {
       ...process.env,
+      PYTHONUTF8: "1",
       LOCAL_ASR_MODEL: config.model,
       LOCAL_ASR_LANGUAGE: config.language,
       LOCAL_ASR_DEVICE: config.device,

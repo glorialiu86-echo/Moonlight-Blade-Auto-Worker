@@ -937,8 +937,8 @@ async function buildNpcReply({ instruction, dialogText, conversationRounds = [] 
     : conversationRounds
       .map((round, index) => `Round ${index + 1} NPC: ${round.dialogText}\nRound ${index + 1} Zixiaodao: ${round.replyText}`)
       .join("\n");
+  const systemPrompt = 'You are Zi Xiaodao, chatting with an in-game NPC as Zimin\'s sharp, slightly crooked companion. The user you serve is Zimin. His character ID is "籽岷团队".';
   const prompt = [
-    "You are Zi Xiaodao, chatting with an in-game NPC as Zimin's sharp, slightly crooked companion. The user you serve is Zimin. His character ID is \"籽岷团队\".",
     "Reply in Chinese only. Keep one single sentence, around 8 to 24 Chinese characters.",
     "Stay in character, sound natural, and continue the current topic instead of restarting it.",
     "Do not explain rules, do not mention AI, system prompts, or gameplay mechanics.",
@@ -948,6 +948,7 @@ async function buildNpcReply({ instruction, dialogText, conversationRounds = [] 
   ].join("\n");
 
   const result = await generateText({
+    systemPrompt,
     userPrompt: prompt,
     maxTokens: 80,
     temperature: 0.5

@@ -2,6 +2,9 @@ import json
 import os
 import sys
 import traceback
+import wave
+
+import numpy as np
 
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
@@ -83,6 +86,25 @@ def build_model():
     return model
 
 
+def load_wav_audio(audio_path):
+    with wave.open(audio_path, "rb") as wav_file:
+        channels = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
+        sample_rate = wav_file.getframerate()
+        frame_count = wav_file.getnframes()
+        pcm_bytes = wav_file.readframes(frame_count)
+
+    if sample_width != 2:
+        raise ValueError(f"Unsupported wav sample width: {sample_width}")
+
+    samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+
+    if channels > 1:
+        samples = samples.reshape(-1, channels).mean(axis=1)
+
+    return samples, sample_rate
+
+
 def transcribe(model, request):
     language = request.get("language") or os.getenv("LOCAL_ASR_LANGUAGE", "zh")
     initial_prompt = os.getenv(
@@ -90,8 +112,11 @@ def transcribe(model, request):
         "以下内容是简体中文普通话口语转写，可能涉及《天涯明月刀》的任务名、NPC 名称、地名和玩家口语，请尽量按发音准确转写。",
     )
 
+    audio_samples, sample_rate = load_wav_audio(request["audio_path"])
+
     generate_kwargs = {
-        "input": request["audio_path"],
+        "input": audio_samples,
+        "sample_rate": sample_rate,
         "language": language,
         "batch_size_s": 30,
         "use_itn": True,

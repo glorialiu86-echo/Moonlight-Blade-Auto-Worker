@@ -238,6 +238,18 @@ function parseAudioDataUrl(audioDataUrl) {
   };
 }
 
+function sceneDescription(scene) {
+  const map = {
+    town_dialogue: "城镇对话",
+    bag_management: "背包管理",
+    market_trade: "交易/商店",
+    jail_warning: "高风险警告",
+    field_patrol: "野外巡游"
+  };
+
+  return map[scene] || "未判定场景";
+}
+
 async function writeTempAudioFile(audioDataUrl) {
   const { extension, buffer } = parseAudioDataUrl(audioDataUrl);
   const filePath = path.join(
@@ -2193,35 +2205,35 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/capture/status") {
-      return handleCaptureStatus(request, response);
+      return await handleCaptureStatus(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/control") {
-      return handleControl(request, response);
+      return await handleControl(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/capture/control") {
-      return handleCaptureControl(request, response);
+      return await handleCaptureControl(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/turn") {
-      return handleTurn(request, response);
+      return await handleTurn(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/analyze-image") {
-      return handleAnalyzeImage(request, response);
+      return await handleAnalyzeImage(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/voice/transcribe") {
-      return handleVoiceTranscription(request, response);
+      return await handleVoiceTranscription(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/chat") {
-      return handleChat(request, response);
+      return await handleChat(request, response);
     }
 
     if (request.method === "GET") {
-      return serveStatic(response, url.pathname);
+      return await serveStatic(response, url.pathname);
     }
 
     return sendJson(response, 404, { ok: false, error: "Not found" });

@@ -15,7 +15,9 @@ const state = {
     inputSampleRate: 48000,
     silenceTimerId: null,
     speechDetected: false,
-    lastVoiceAt: 0
+    lastVoiceAt: 0,
+    activityNotified: false,
+    sending: false
   }
 };
 
@@ -232,6 +234,17 @@ async function submitVoiceInstruction(instruction) {
   }
 }
 
+async function notifyVoiceActivity() {
+  try {
+    await request("/api/voice/activity", {
+      method: "POST",
+      body: JSON.stringify({ active: true })
+    });
+  } catch {
+    // Keep listening even if the pause signal fails.
+  }
+}
+
 async function resumeFailedStep() {
   if (state.submitting || state.voice.recording || !state.resumeAvailable) {
     return;
@@ -382,6 +395,7 @@ function resetVoiceState() {
   state.voice.pcmChunks = [];
   state.voice.speechDetected = false;
   state.voice.lastVoiceAt = 0;
+  state.voice.activityNotified = false;
 }
 
 async function releaseVoiceCapture() {
@@ -427,29 +441,35 @@ async function transcribeRecordedVoice(chunks, inputSampleRate) {
   return String(payload.text || "").trim();
 }
 
-async function stopVoiceRecording({ autoSend = false } = {}) {
-  if (!state.voice.recording) {
+async function flushVoiceSegment({ autoSend = false, stopListening = false } = {}) {
+  if (state.voice.sending || state.voice.transcribing) {
     return;
   }
 
   const capturedChunks = state.voice.pcmChunks.map((chunk) => new Float32Array(chunk));
   const inputSampleRate = state.voice.inputSampleRate;
+  const hadSpeech = state.voice.speechDetected;
 
-  state.voice.recording = false;
   clearVoiceSilenceTimer();
+  resetVoiceState();
   syncUiState();
-  updateVoiceStatus("正在识别语音...");
+
+  if (!hadSpeech || capturedChunks.length === 0) {
+    if (stopListening) {
+      state.voice.recording = false;
+      await releaseVoiceCapture();
+      updateVoiceStatus("语音监听已停止");
+      syncUiState();
+    }
+    return;
+  }
+
+  state.voice.sending = true;
+  state.voice.transcribing = true;
+  syncUiState();
+  updateVoiceStatus(autoSend ? "正在识别并发送语音..." : "正在识别语音...");
 
   try {
-    await releaseVoiceCapture();
-
-    if (!state.voice.speechDetected || capturedChunks.length === 0) {
-      updateVoiceStatus("没有检测到有效语音。");
-      return;
-    }
-
-    state.voice.transcribing = true;
-    syncUiState();
     const transcript = await transcribeRecordedVoice(capturedChunks, inputSampleRate);
     state.voice.transcribing = false;
     syncUiState();
@@ -457,17 +477,43 @@ async function stopVoiceRecording({ autoSend = false } = {}) {
     if (autoSend) {
       updateVoiceStatus("识别完成，正在发送...");
       await submitVoiceInstruction(transcript);
-      return;
+    } else {
+      updateVoiceStatus("识别完成");
     }
-
-    updateVoiceStatus("识别完成");
   } catch (error) {
     state.voice.transcribing = false;
     syncUiState();
     updateVoiceStatus(`语音识别失败：${error.message}`);
   } finally {
-    resetVoiceState();
+    state.voice.sending = false;
+    state.voice.transcribing = false;
+    if (stopListening) {
+      state.voice.recording = false;
+      await releaseVoiceCapture();
+      updateVoiceStatus("语音监听已停止");
+    } else if (state.voice.recording) {
+      state.voice.silenceTimerId = window.setInterval(() => {
+        if (!state.voice.recording || state.voice.sending || !state.voice.speechDetected || !state.voice.lastVoiceAt) {
+          return;
+        }
+
+        const silentFor = Date.now() - state.voice.lastVoiceAt;
+        if (silentFor >= VOICE_AUTO_SEND_SILENCE_MS) {
+          flushVoiceSegment({ autoSend: true, stopListening: false }).catch(() => {});
+        }
+      }, 120);
+      updateVoiceStatus("正在听你说话，静音 3 秒会自动发送。");
+    }
+    syncUiState();
   }
+}
+
+async function stopVoiceRecording() {
+  if (!state.voice.recording) {
+    return;
+  }
+
+  await flushVoiceSegment({ autoSend: false, stopListening: true });
 }
 
 async function startVoiceRecording() {
@@ -508,6 +554,10 @@ async function startVoiceRecording() {
       if (rms >= VOICE_ACTIVITY_RMS_THRESHOLD) {
         state.voice.speechDetected = true;
         state.voice.lastVoiceAt = Date.now();
+        if (!state.voice.activityNotified) {
+          state.voice.activityNotified = true;
+          notifyVoiceActivity().catch(() => {});
+        }
       }
 
       if (state.voice.speechDetected) {
@@ -520,13 +570,13 @@ async function startVoiceRecording() {
 
     clearVoiceSilenceTimer();
     state.voice.silenceTimerId = window.setInterval(() => {
-      if (!state.voice.recording || !state.voice.speechDetected || !state.voice.lastVoiceAt) {
+      if (!state.voice.recording || state.voice.sending || !state.voice.speechDetected || !state.voice.lastVoiceAt) {
         return;
       }
 
       const silentFor = Date.now() - state.voice.lastVoiceAt;
       if (silentFor >= VOICE_AUTO_SEND_SILENCE_MS) {
-        stopVoiceRecording({ autoSend: true }).catch(() => {});
+        flushVoiceSegment({ autoSend: true, stopListening: false }).catch(() => {});
       }
     }, 120);
 
@@ -576,7 +626,7 @@ elements.resumeFailedStepButton?.addEventListener("click", async () => {
 
 elements.voiceButton?.addEventListener("click", async () => {
   if (state.voice.recording) {
-    await stopVoiceRecording({ autoSend: true });
+    await stopVoiceRecording();
     return;
   }
 

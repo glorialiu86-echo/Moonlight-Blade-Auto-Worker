@@ -45,7 +45,8 @@ import { runWindowsActions } from "../runtime/windows-executor.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../../public");
 const port = Number(process.env.PORT || 3000);
-const AUTONOMOUS_INTERVAL_MS = 3000;
+const AUTONOMOUS_INTERVAL_MS = 5000;
+const VOICE_INPUT_SILENCE_COOLDOWN_MS = 10000;
 const SCRIPT_ARM_DELAY_MS = 5 * 60 * 1000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
@@ -210,6 +211,27 @@ function requireAudioDataUrl(audioDataUrl) {
   }
 
   return audioDataUrl;
+}
+
+async function handleVoiceActivity(request, response) {
+  const body = await readRequestBody(request);
+  const active = Boolean(body.active);
+  const cooldownUntil = new Date(Date.now() + VOICE_INPUT_SILENCE_COOLDOWN_MS).toISOString();
+
+  updateAgent({
+    voiceInputCooldownUntil: cooldownUntil
+  });
+
+  if (active) {
+    appendLog("info", "检测到用户语音输入，暂停截图自动解说", {
+      cooldownUntil
+    });
+  }
+
+  return sendJson(response, 200, {
+    ok: true,
+    cooldownUntil
+  });
 }
 
 function parseAudioDataUrl(audioDataUrl) {
@@ -1776,6 +1798,13 @@ async function maybeRunAutonomousTurn() {
     return;
   }
 
+  if (runtimeState.agent.voiceInputCooldownUntil) {
+    const cooldownMs = new Date(runtimeState.agent.voiceInputCooldownUntil).getTime();
+    if (Number.isFinite(cooldownMs) && Date.now() < cooldownMs) {
+      return;
+    }
+  }
+
   if (runtimeState.status !== "running") {
     return;
   }
@@ -2288,6 +2317,10 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/voice/transcribe") {
       return await handleVoiceTranscription(request, response);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/voice/activity") {
+      return await handleVoiceActivity(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/chat") {

@@ -12,8 +12,7 @@ function createInitialAgentState() {
     autonomousTurnCount: 0,
     lastWatchCommentaryAt: null,
     lastWatchCommentaryFingerprint: null,
-    watchCommentaryCooldownUntil: null,
-    voiceInputCooldownUntil: null
+    watchCommentaryCooldownUntil: null
   };
 }
 
@@ -25,12 +24,14 @@ function createInitialAutomationState() {
     startsAt: null,
     startedAt: null,
     finishedAt: null,
-    ignoreExternalInputUntilStart: false,
     stageIndex: 0,
     completedRoundsInStage: 0,
     totalTurns: 0,
     lastThought: null,
     lastOutcome: null,
+    lastFailureCode: null,
+    lastRecoveryKind: null,
+    lastRecoveryAttemptCount: 0,
     resumeAvailable: false,
     resumeFailedStepTitle: null
   };

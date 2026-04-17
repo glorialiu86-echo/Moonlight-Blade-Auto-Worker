@@ -126,6 +126,16 @@ body {
   line-height: 1;
 }
 
+.simple-composer-actions .resume-triangle.resume-triangle-alert {
+  background: linear-gradient(135deg, #c53f2b 0%, #8f2018 100%);
+  color: #fff4ef;
+  box-shadow: 0 0 0 2px rgba(197, 63, 43, 0.18);
+}
+
+.simple-composer-actions .resume-triangle.resume-triangle-alert:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d54a35 0%, #9d241c 100%);
+}
+
 .simple-composer-actions .primary {
   min-width: 112px;
 }

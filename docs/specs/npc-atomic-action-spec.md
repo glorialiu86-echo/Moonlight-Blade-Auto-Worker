@@ -1,5 +1,5 @@
 # NPC 原子 Action 规格
-状态：执行到一半
+状态：执行完成
 
 ## 目的
 
@@ -9,7 +9,7 @@
 
 - 代码已经按这份规格拆到新的 worker action
 - 还没有在 Windows 真机上逐步验证稳定性
-- 本文只覆盖本轮实际落地的 NPC 社交 action
+- 本文本轮补齐了固定剧本用到的社交承接、地图 travel owner 和潜行恢复 action
 
 ## 分层
 
@@ -29,6 +29,12 @@
 ### 原子动作层
 
 这一层才是执行真源。每个 action 只负责一次输入和一次截图验状态。
+
+本轮新增的固定剧本关键 action：
+
+- `retarget_social_target`
+- `travel_to_coordinate`
+- `enter_stealth_with_retry`
 
 ## 当前状态枚举
 
@@ -70,18 +76,32 @@
 ### `open_npc_action_menu`
 
 - 前置状态：`npc_selected` 或已经进入 NPC 交互上下文
-- 行为：对已选中目标点击移动中的 `查看`，拉起右下角交互菜单
+- 行为：对已选中目标点击移动中的 `查看`，只围绕当前目标局部锚点重试，拉起右下角交互菜单
 - 成功状态：
   - `npc_action_menu`
   - `small_talk_menu`
   - `chat_ready`
   - `gift_screen`
   - `trade_screen`
-- 失败：无法从当前选中目标拉起交互上下文
+- 失败：3 次局部重试后仍无法从当前选中目标拉起交互上下文，抛出 `NPC_VIEW_NOT_OPENED`
 - 关键输出：
   - `stage`
   - `targetText`
   - `viewAttempts`
+
+### `retarget_social_target`
+
+- 前置状态：社交链已经决定放弃当前目标
+- 行为：`按一次 Tab，看一次`，最多 `5 + 扰动 + 5`
+- 成功状态：
+  - `npc_selected`
+  - 或 `look_button` 出现 `查看`
+  - 或已经回到 `npc_action_menu` / `small_talk_menu` / `chat_ready` / `gift_screen` / `trade_screen`
+- 失败：预算耗尽仍未切到可查看目标，抛出 `NPC_TARGET_SWITCH_FAILED`
+- 关键输出：
+  - `attempts`
+  - `retryCount`
+  - `perturbation`
 
 ### `click_menu_talk`
 
@@ -114,11 +134,14 @@
 - 前置状态：`small_talk_confirm`
 - 行为：点击闲聊确认按钮
 - 成功状态：`chat_ready`
-- 失败：确认后仍未进入聊天页
+- 失败：
+  - 若弹出好感门槛文案，抛出 `NPC_CHAT_THRESHOLD_REVEALED`
+  - 其他异常仍视为普通失败
 - 关键输出：
   - `stage`
   - `click`
   - `dialogText`
+  - `requiredFavor`
 
 ### `click_menu_gift`
 
@@ -244,13 +267,48 @@
 - 前置状态：`steal_screen`
 - 行为：点击右侧列表中的固定金色 `妙取` 按钮
 - 成功状态：离开 `steal_screen`
-- 失败：点击后仍停留在 `steal_screen`
+- 失败：妙取面板消失或按钮点击后仍停留在 `steal_screen`，抛出 `STEALTH_TARGET_RECOVERED`
 - 关键输出：
   - `stage`
   - `beforeText`
   - `pointName`
   - `buttonIndex`
   - `click`
+
+### `travel_to_coordinate`
+
+- 前置状态：城镇或可开图状态
+- 行为：统一负责开图、输入坐标、前往、必要确认、关图和 travel watchdog
+- 成功状态：小地图坐标与目标坐标横纵偏差都在 `±5`
+- 失败：自动 reroute `2` 次后仍未到达，抛出 `ROUTE_STALLED`
+- 关键输出：
+  - `targetCoordinate`
+  - `currentCoordinate`
+  - `coordinateTolerance`
+  - `attempts`
+
+### `enter_stealth_with_retry`
+
+- 前置状态：潜行 stage 已到位
+- 行为：原地反复尝试拉起潜行，不额外后撤
+- 成功状态：固定 `退出潜行` 按钮出现
+- 失败：连续 `5` 次仍未进入潜行，抛出 `STEALTH_ENTRY_BLOCKED`
+- 关键输出：
+  - `retryCount`
+  - `attempts`
+
+### `stealth_front_arc_strike`
+
+- 前置状态：已进入潜行
+- 行为：搜索前方目标并持续闷棍
+- 成功状态：进入击倒上下文
+- 失败：未进入击倒上下文即结束攻击窗口，抛出 `STEALTH_ALERTED`
+- 关键输出：
+  - `target`
+  - `strikeCount`
+  - `knockoutText`
+  - `searchAttempts`
+  - `turnAttempts`
 
 ### `close_current_panel`
 

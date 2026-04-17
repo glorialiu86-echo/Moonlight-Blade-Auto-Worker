@@ -3,6 +3,7 @@ const state = {
   runtimeStatus: "idle",
   interactionMode: "watch",
   resumeAvailable: false,
+  resumeFailureCode: "",
   voiceSupported: false,
   voice: {
     recording: false,
@@ -76,6 +77,16 @@ function syncUiState() {
   elements.composerForm.querySelector('button[type="submit"]').disabled = busy || state.voice.recording;
   if (elements.resumeFailedStepButton) {
     elements.resumeFailedStepButton.disabled = busy || state.voice.recording || !state.resumeAvailable;
+    elements.resumeFailedStepButton.classList.toggle(
+      "resume-triangle-alert",
+      state.resumeAvailable && Boolean(state.resumeFailureCode)
+    );
+    elements.resumeFailedStepButton.setAttribute(
+      "aria-label",
+      state.resumeAvailable && state.resumeFailureCode
+        ? "存在失败恢复动作，点击继续"
+        : "从失败步骤继续"
+    );
   }
 
   if (elements.voiceButton) {
@@ -161,6 +172,7 @@ function renderRuntimeState(runtimeState) {
   state.runtimeStatus = runtimeState.status || "idle";
   state.interactionMode = runtimeState.interactionMode || "watch";
   state.resumeAvailable = Boolean(runtimeState.automation?.resumeAvailable);
+  state.resumeFailureCode = String(runtimeState.automation?.lastFailureCode || "");
   renderMessages(runtimeState.messages);
   syncUiState();
 }
@@ -199,7 +211,7 @@ async function submitInstruction({ allowDuringTranscription = false } = {}) {
     updateVoiceStatus("");
   } catch (error) {
     await refresh().catch(() => {});
-    window.alert(error.message);
+    console.error("resume_failed_step failed", error);
   } finally {
     state.submitting = false;
     syncUiState();
@@ -268,7 +280,7 @@ async function resumeFailedStep() {
     updateVoiceStatus("");
   } catch (error) {
     await refresh().catch(() => {});
-    window.alert(error.message);
+    console.error("resume_failed_step failed", error);
   } finally {
     state.submitting = false;
     syncUiState();

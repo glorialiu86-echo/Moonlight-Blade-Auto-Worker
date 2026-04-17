@@ -7,6 +7,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
 const workerScript = path.resolve(repoRoot, "scripts/windows_input_worker.py");
 
+function createWorkerAction(id, title, type, payload = {}) {
+  return {
+    id,
+    title,
+    type,
+    ...payload
+  };
+}
+
 function resolvePythonPath() {
   const candidate = process.env.CONTROL_PYTHON?.trim()
     || process.env.LOCAL_ASR_PYTHON?.trim();
@@ -26,6 +35,73 @@ function createNpcFlowActions(baseAction, steps) {
     sourceType: baseAction.sourceType,
     ...step.payload
   }));
+}
+
+function createAcquireNpcTargetAction(id, title, options = {}) {
+  return createWorkerAction(id, title, "acquire_npc_target", {
+    timeoutMs: options.timeoutMs || 5000,
+    movePulseMs: options.movePulseMs || 160,
+    scanIntervalMs: options.scanIntervalMs || 180
+  });
+}
+
+function createOpenNpcActionMenuAction(id, title, options = {}) {
+  return createWorkerAction(id, title, "open_npc_action_menu", {
+    viewAttemptLimit: options.viewAttemptLimit || 3
+  });
+}
+
+function createCloseCurrentPanelAction(id, title = "关闭当前面板") {
+  return createWorkerAction(id, title, "close_current_panel");
+}
+
+function createPressKeyAction(id, title, key, payload = {}) {
+  return createWorkerAction(id, title, "press_key", {
+    key,
+    ...payload
+  });
+}
+
+function createPressShortcutAction(id, title, shortcut, payload = {}) {
+  return createWorkerAction(id, title, "press_shortcut", {
+    shortcut,
+    ...payload
+  });
+}
+
+function createNamedPointClickAction(id, title, pointName, payload = {}) {
+  return createWorkerAction(id, title, "click_named_point", {
+    pointName,
+    ...payload
+  });
+}
+
+function createSleepAction(id, title, durationMs) {
+  return createWorkerAction(id, title, "sleep", {
+    durationMs
+  });
+}
+
+export function createTravelToCoordinateAction({
+  id,
+  title,
+  xCoordinate,
+  yCoordinate,
+  confirmPointName,
+  waitAfterGoMs = 800,
+  coordinateTolerance = 5,
+  rerouteLimit = 2,
+  maxTravelMs = 18000
+}) {
+  return createWorkerAction(id, title, "travel_to_coordinate", {
+    xCoordinate,
+    yCoordinate,
+    waitAfterGoMs,
+    coordinateTolerance,
+    rerouteLimit,
+    maxTravelMs,
+    ...(confirmPointName ? { confirmPointName } : {})
+  });
 }
 
 function createNpcChatEntryActions(baseAction, options = {}) {
@@ -128,11 +204,34 @@ function createNpcTradeActions(baseAction, options = {}) {
       payload: {}
     },
     {
-      title: `固定礼物上架 ${options.giftBundleCount || 10} 次`,
-      type: "trade_prepare_gift_bundle",
-      payload: {
-        repeatCount: options.giftBundleCount || 10
-      }
+      title: "切到左侧货栏",
+      type: "trade_select_left_item_tab",
+      payload: {}
+    },
+    {
+      title: "选中左侧货物",
+      type: "trade_select_left_item",
+      payload: {}
+    },
+    {
+      title: "左侧货物上架",
+      type: "trade_left_item_up_shelf",
+      payload: {}
+    },
+    {
+      title: "选中右侧支付物",
+      type: "trade_select_right_money_slot",
+      payload: {}
+    },
+    {
+      title: "调整支付数量",
+      type: "trade_scale_quantity",
+      payload: {}
+    },
+    {
+      title: "右侧支付物上架",
+      type: "trade_right_item_up_shelf",
+      payload: {}
     },
     {
       title: "提交当前交易",
@@ -168,229 +267,182 @@ function createNpcStealActions(baseAction, options = {}) {
   ]);
 }
 
-function createStealthSetupActions(baseAction) {
+export function createRetargetSocialTargetActions(options = {}) {
   return [
-    {
-      id: `${baseAction.id}-primitive-1`,
-      title: "Route To Stealth Point",
-      type: "map_route_to_coordinate",
-      sourceType: baseAction.sourceType,
-      xCoordinate: 742,
-      yCoordinate: 946,
-      postDelayMs: 1000,
-      waitAfterGoMs: 800
-    },
-    {
-      id: `${baseAction.id}-primitive-2`,
-      title: "Confirm Teleport",
-      type: "click_named_point",
-      sourceType: baseAction.sourceType,
-      pointName: "teleport_confirm",
+    createWorkerAction(options.id || "social-retarget-1", options.title || "换一个可查看的路人目标", "retarget_social_target", {
+      attemptsPerCycle: options.attemptsPerCycle || 5,
+      maxCycles: options.maxCycles || 2,
+      dragStartRatio: options.dragStartRatio || [0.54, 0.48],
+      dragEndRatio: options.dragEndRatio || [0.64, 0.48],
+      dragDurationMs: options.dragDurationMs || 180,
+      settleMs: options.settleMs || 220
+    })
+  ];
+}
+
+export function createFixedSocialTradeActions(options = {}) {
+  const prefix = options.idPrefix || "social-trade";
+  const steps = [];
+  if (options.includeAcquire !== false) {
+    steps.push(createAcquireNpcTargetAction(`${prefix}-1`, "锁定路人目标", {
+      timeoutMs: 5000,
+      movePulseMs: 180,
+      scanIntervalMs: 180
+    }));
+  }
+  steps.push(createOpenNpcActionMenuAction(`${prefix}-2`, "拉起路人交互菜单"));
+  steps.push(createWorkerAction(`${prefix}-3`, "打开交易页", "click_menu_trade"));
+  steps.push(createWorkerAction(`${prefix}-4`, "切到左侧货栏", "trade_select_left_item_tab"));
+  steps.push(createWorkerAction(`${prefix}-5`, "选中左侧货物", "trade_select_left_item"));
+  steps.push(createWorkerAction(`${prefix}-6`, "左侧货物上架", "trade_left_item_up_shelf"));
+  steps.push(createWorkerAction(`${prefix}-7`, "选中右侧支付物", "trade_select_right_money_slot"));
+  steps.push(createWorkerAction(`${prefix}-8`, "调整支付数量", "trade_scale_quantity"));
+  steps.push(createWorkerAction(`${prefix}-9`, "右侧支付物上架", "trade_right_item_up_shelf"));
+  steps.push(createWorkerAction(`${prefix}-10`, "提交当前交易", "trade_submit"));
+  steps.push(createCloseCurrentPanelAction(`${prefix}-11`));
+  return steps;
+}
+
+export function createFixedSocialGiftActions(options = {}) {
+  const prefix = options.idPrefix || "social-gift";
+  const giftRounds = Math.max(1, options.giftRounds || 2);
+  const steps = [];
+  if (options.includeAcquire) {
+    steps.push(createAcquireNpcTargetAction(`${prefix}-1`, "锁定路人目标", {
+      timeoutMs: 4500,
+      movePulseMs: 160,
+      scanIntervalMs: 180
+    }));
+  }
+  steps.push(createOpenNpcActionMenuAction(`${prefix}-${steps.length + 1}`, "拉起路人交互菜单"));
+  steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, "打开赠礼页", "click_menu_gift"));
+  for (let roundIndex = 0; roundIndex < giftRounds; roundIndex += 1) {
+    steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, `选中礼物槽位 ${roundIndex + 1}`, "select_gift_first_slot"));
+    steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, `送出一轮礼物 ${roundIndex + 1}`, "submit_gift_once"));
+  }
+  steps.push(createCloseCurrentPanelAction(`${prefix}-${steps.length + 1}`));
+  return steps;
+}
+
+export function createFixedSocialTalkActions(options = {}) {
+  const prefix = options.idPrefix || "social-talk";
+  const steps = [];
+  if (options.includeAcquire) {
+    steps.push(createAcquireNpcTargetAction(`${prefix}-1`, "锁定路人目标", {
+      timeoutMs: 7000,
+      movePulseMs: 160,
+      scanIntervalMs: 180
+    }));
+  }
+  steps.push(createOpenNpcActionMenuAction(`${prefix}-${steps.length + 1}`, "拉起路人交互菜单"));
+  steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, "点开交谈入口", "click_menu_talk"));
+  steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, "点开闲聊入口", "click_menu_small_talk"));
+  steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, "确认进入聊天页", "confirm_small_talk_entry"));
+  return steps;
+}
+
+export function createFixedSocialStageActions() {
+  return [
+    ...createFixedSocialTradeActions({ includeAcquire: true, idPrefix: "fixed-social-trade" }),
+    ...createFixedSocialGiftActions({ includeAcquire: false, idPrefix: "fixed-social-gift" }),
+    ...createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-talk" })
+  ];
+}
+
+export function createFixedSocialRecoveryActions() {
+  return [
+    ...createRetargetSocialTargetActions({ id: "fixed-social-recovery-retarget" }),
+    ...createFixedSocialGiftActions({ includeAcquire: false, idPrefix: "fixed-social-recovery-gift" }),
+    ...createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-recovery-talk" })
+  ];
+}
+
+export function createFixedSellLoopActions() {
+  return [
+    createTravelToCoordinateAction({
+      id: "fixed-sale-1",
+      title: "去货商坐标",
+      xCoordinate: 667,
+      yCoordinate: 554
+    }),
+    createPressKeyAction("fixed-sale-2", "下马准备进货", "1", { postDelayMs: 1000 }),
+    createPressKeyAction("fixed-sale-3", "矫正视角准备进货", "v", { postDelayMs: 1000 }),
+    createWorkerAction("fixed-sale-4", "打开阿依娜进货页", "open_named_vendor_purchase", {
+      targetName: "阿依娜",
+      approachSteps: 2,
+      approachMovePulseMs: 180,
+      interactAttempts: 3,
       postDelayMs: 1000
-    },
-    {
-      id: `${baseAction.id}-primitive-3`,
-      title: "Close Map Before Stealth",
-      type: "press_key",
-      sourceType: baseAction.sourceType,
-      key: "m",
+    }),
+    createWorkerAction("fixed-sale-5", "买满墨锭并关闭面板", "buy_current_vendor_item", {
+      itemName: "墨锭",
+      quantity: 1,
       postDelayMs: 1000
-    },
-    {
-      id: `${baseAction.id}-primitive-4`,
-      title: "Wait For Auto Route To Finish",
-      type: "sleep",
-      sourceType: baseAction.sourceType,
-      durationMs: 15000
-    },
-    {
-      id: `${baseAction.id}-primitive-5`,
-      title: "Dismount Before Stealth",
-      type: "press_key",
-      sourceType: baseAction.sourceType,
-      key: "1",
-      postDelayMs: 800
-    },
-    {
-      id: `${baseAction.id}-primitive-6`,
-      title: "Search Front Target",
-      type: "stealth_search_target",
-      sourceType: baseAction.sourceType,
+    }),
+    createTravelToCoordinateAction({
+      id: "fixed-sale-6",
+      title: "去大街坐标",
+      xCoordinate: 670,
+      yCoordinate: 538
+    }),
+    createPressKeyAction("fixed-sale-7", "下马准备叫卖", "1", { postDelayMs: 1000 }),
+    createPressKeyAction("fixed-sale-8", "矫正视角准备叫卖", "v", { postDelayMs: 1000 }),
+    createPressShortcutAction("fixed-sale-9", "打开叫卖界面", "hawking", { postDelayMs: 2000 }),
+    createWorkerAction("fixed-sale-10", "选中货物并上架", "stock_first_hawking_item", {
+      postDelayMs: 1000
+    }),
+    createWorkerAction("fixed-sale-11", "开始出摊", "submit_hawking", {
+      postDelayMs: 1000
+    })
+  ];
+}
+
+export function createFixedDarkCloseStageActions() {
+  return [
+    createTravelToCoordinateAction({
+      id: "fixed-dark-close-1",
+      title: "去潜行点",
+      xCoordinate: 740,
+      yCoordinate: 944,
+      confirmPointName: "teleport_confirm"
+    }),
+    createPressKeyAction("fixed-dark-close-2", "下马准备潜行", "1", { postDelayMs: 800 }),
+    createWorkerAction("fixed-dark-close-3", "进入潜行并等待时机", "enter_stealth_with_retry", {
+      retryLimit: 5,
+      settleMs: 260,
+      waitBetweenMs: 600
+    }),
+    createWorkerAction("fixed-dark-close-4", "潜行接近并闷棍", "stealth_front_arc_strike", {
       searchTimeoutMs: 7000,
       turnPulseMs: 180,
-      moveSettleMs: 80,
-      frontRoi: [0.43, 0.12, 0.58, 0.52]
-    },
-    {
-      id: `${baseAction.id}-primitive-7`,
-      title: "Select Front Target",
-      type: "stealth_select_target",
-      sourceType: baseAction.sourceType,
-      selectionTimeoutMs: 2200,
-      selectionSettleMs: 120,
-      frontRoi: [0.36, 0.18, 0.64, 0.42]
-    },
-    {
-      id: `${baseAction.id}-primitive-8`,
-      title: "Enter Stealth",
-      type: "press_shortcut",
-      sourceType: baseAction.sourceType,
-      shortcut: "stealth",
-      postDelayMs: 500
-    }
-  ];
-}
-
-function createStealthMiaoquActions(baseAction) {
-  return [
-    ...createStealthSetupActions(baseAction),
-    {
-      id: `${baseAction.id}-primitive-9`,
-      title: "Trigger Knockout",
-      type: "stealth_rush_knockout",
-      sourceType: baseAction.sourceType,
-      knockoutTimeoutMs: 5000,
-      strikeIntervalMs: 0,
-      moveSettleMs: 50
-    },
-    {
-      id: `${baseAction.id}-primitive-10`,
-      title: "Carry Target",
-      type: "stealth_carry_target",
-      sourceType: baseAction.sourceType,
-      carrySettleMs: 120
-    },
-    {
-      id: `${baseAction.id}-primitive-11`,
-      title: "Backstep With Target",
-      type: "stealth_backstep_target",
-      sourceType: baseAction.sourceType,
-      backstepMs: 2000,
-      moveSettleMs: 40
-    },
-    {
-      id: `${baseAction.id}-primitive-12`,
-      title: "Drop Carried Target",
-      type: "stealth_drop_target",
-      sourceType: baseAction.sourceType,
-      dropSettleMs: 80
-    },
-    {
-      id: `${baseAction.id}-primitive-13`,
-      title: "Trigger Miaoqu",
-      type: "stealth_trigger_miaoqu",
-      sourceType: baseAction.sourceType,
+      holdForwardMs: 2200,
+      strikeIntervalMs: 180,
+      frontRoi: [0.36, 0.18, 0.64, 0.42],
+      postDelayMs: 600
+    }),
+    createWorkerAction("fixed-dark-close-5", "拉起妙取面板", "stealth_trigger_miaoqu", {
       triggerTimeoutMs: 5000,
       triggerSettleMs: 40
-    },
-    {
-      id: `${baseAction.id}-primitive-14`,
-      title: "Click Fixed Miaoqu Button",
-      type: "click_steal_button",
-      sourceType: baseAction.sourceType,
-      buttonIndex: 3,
-      settleMs: 1500,
-      postDelayMs: 1500
-    },
-    {
-      id: `${baseAction.id}-primitive-15`,
-      title: "Escape Backward",
-      type: "stealth_escape_backward",
-      sourceType: baseAction.sourceType,
-      backstepMs: 3000,
-      moveSettleMs: 40
-    }
+    }),
+    createWorkerAction("fixed-dark-close-6", "点击右侧第一条金色妙取按钮", "click_steal_button", {
+      buttonIndex: 1,
+      postDelayMs: 500
+    })
   ];
 }
 
-function createKnockLootActions(baseAction) {
-  const actions = [
-    ...createStealthSetupActions(baseAction),
-    {
-      id: `${baseAction.id}-primitive-9`,
-      title: "Trigger Knockout",
-      type: "stealth_rush_knockout",
-      sourceType: baseAction.sourceType,
-      knockoutTimeoutMs: 5000,
-      strikeIntervalMs: 0,
-      moveSettleMs: 50
-    },
-    {
-      id: `${baseAction.id}-primitive-10`,
-      title: "Carry Target",
-      type: "stealth_carry_target",
-      sourceType: baseAction.sourceType,
-      carrySettleMs: 120
-    },
-    {
-      id: `${baseAction.id}-primitive-11`,
-      title: "Backstep With Target",
-      type: "stealth_backstep_target",
-      sourceType: baseAction.sourceType,
-      backstepMs: 2000,
-      moveSettleMs: 40
-    },
-    {
-      id: `${baseAction.id}-primitive-12`,
-      title: "Drop Carried Target",
-      type: "stealth_drop_target",
-      sourceType: baseAction.sourceType,
-      dropSettleMs: 80
-    },
-    {
-      id: `${baseAction.id}-primitive-13`,
-      title: "Open Loot Panel",
-      type: "stealth_open_loot",
-      sourceType: baseAction.sourceType,
-      lootOpenTimeoutMs: 1200,
-      lootSettleMs: 40
-    }
+export function createStealthEscapeRecoveryActions() {
+  return [
+    createWorkerAction("fixed-dark-close-recovery-1", "长按 S 后撤脱离", "stealth_escape_backward", {
+      backstepMs: 3000,
+      moveSettleMs: 80
+    }),
+    ...createFixedDarkCloseStageActions().slice(2)
   ];
-
-  for (let index = 0; index < 8; index += 1) {
-    actions.push(
-      {
-        id: `${baseAction.id}-primitive-${14 + index * 2}`,
-        title: `Loot Select Item ${index + 1}`,
-        type: "loot_select_item_once",
-        sourceType: baseAction.sourceType,
-        lootSettleMs: 20
-      },
-      {
-        id: `${baseAction.id}-primitive-${15 + index * 2}`,
-        title: `Loot Put In ${index + 1}`,
-        type: "loot_put_in_once",
-        sourceType: baseAction.sourceType,
-        lootSettleMs: 20
-      }
-    );
-  }
-
-  actions.push(
-    {
-      id: `${baseAction.id}-primitive-30`,
-      title: "Submit Loot",
-      type: "loot_submit_once",
-      sourceType: baseAction.sourceType,
-      lootSettleMs: 40
-    },
-    {
-      id: `${baseAction.id}-primitive-31`,
-      title: "Escape After Loot",
-      type: "loot_escape_forward",
-      sourceType: baseAction.sourceType,
-      escapeForwardMs: 5000
-    }
-  );
-
-  return actions;
 }
 
 function createWorkerActions(plan) {
-  const workerActions = [];
-
-  for (let index = 0; index < plan.actions.length; index += 1) {
-    const action = plan.actions[index];
+  return plan.actions.flatMap((action, index) => {
     const actionDefinition = getActionDefinition(action.type);
     const baseAction = {
       id: `input-${index + 1}`,
@@ -398,107 +450,73 @@ function createWorkerActions(plan) {
       sourceType: action.type
     };
 
-    const nextAction = plan.actions[index + 1];
-    const nextNextAction = plan.actions[index + 2];
-    if (
-      action.type === "stealth"
-      && nextAction?.type === "steal"
-      && nextNextAction?.type !== "strike"
-    ) {
-      workerActions.push(...createStealthMiaoquActions(baseAction));
-      index += 1;
-      continue;
-    }
-
-    if (
-      action.type === "stealth"
-      && nextAction?.type === "strike"
-      && nextNextAction?.type === "steal"
-    ) {
-      workerActions.push(...createKnockLootActions(baseAction));
-      index += 2;
-      continue;
-    }
-
     switch (action.type) {
       case "sale":
-        workerActions.push(...createPrimitiveActions("sale").map((primitiveAction, primitiveIndex) => ({
+        return createPrimitiveActions("sale").map((primitiveAction, primitiveIndex) => ({
           ...primitiveAction,
           id: `${baseAction.id}-primitive-${primitiveIndex + 1}`,
           sourceType: action.type
-        })));
-        break;
+        }));
       case "stealth":
-        workerActions.push(...createPrimitiveActions("stealth").map((primitiveAction, primitiveIndex) => ({
+        return createPrimitiveActions("stealth").map((primitiveAction, primitiveIndex) => ({
           ...primitiveAction,
           id: `${baseAction.id}-primitive-${primitiveIndex + 1}`,
           sourceType: action.type
-        })));
-        break;
+        }));
       case "talk":
-        workerActions.push(...createNpcChatEntryActions(baseAction, {
+        return createNpcChatEntryActions(baseAction, {
           timeoutMs: 7000,
           movePulseMs: 160,
           scanIntervalMs: 180
-        }));
-        break;
+        });
       case "gift":
-        workerActions.push(...createNpcGiftActions(baseAction, {
+        return createNpcGiftActions(baseAction, {
           giftRounds: 2,
           timeoutMs: 4500,
           movePulseMs: 160,
           scanIntervalMs: 180
-        }));
-        break;
+        });
       case "trade":
-        workerActions.push(...createNpcTradeActions(baseAction, {
+        return createNpcTradeActions(baseAction, {
           timeoutMs: 5000,
           movePulseMs: 180,
           scanIntervalMs: 180
-        }));
-        break;
+        });
       case "threaten":
       case "strike":
-        workerActions.push(...createNpcChatEntryActions(baseAction, {
+        return createNpcChatEntryActions(baseAction, {
           timeoutMs: 4500,
           movePulseMs: 160,
           scanIntervalMs: 180
-        }));
-        break;
+        });
       case "steal":
-        workerActions.push(...createNpcStealActions(baseAction, {
+        return createNpcStealActions(baseAction, {
           triggerDelayMs: 700,
           clickDelayMs: 500,
           buttonIndex: 1
-        }));
-        break;
+        });
       case "escape":
-        workerActions.push({
+        return {
           ...baseAction,
           type: "press_key",
           key: "esc",
           postDelayMs: 500
-        });
-        break;
+        };
       case "wait":
-        workerActions.push({
+        return {
           ...baseAction,
           type: "sleep",
           durationMs: 1200
-        });
-        break;
+        };
       case "inspect":
       default:
-        workerActions.push({
+        return {
           ...baseAction,
           type: "focus_window",
           postDelayMs: 200
-        });
-        break;
+        };
     }
-  }
-
-  return workerActions;
+  });
 }
 
 function parseWorkerResponse(rawStdout, rawStderr, exitCode) {
@@ -621,51 +639,30 @@ export async function runWindowsExecution(plan, options = {}) {
 
 function createStealthPrimitiveActions() {
   return [
-    {
+    createTravelToCoordinateAction({
       id: "primitive-1",
       title: "Route To Stealth Point",
-      type: "map_route_to_coordinate",
-      xCoordinate: 742,
-      yCoordinate: 946,
-      postDelayMs: 1000,
-      waitAfterGoMs: 800
-    },
+      xCoordinate: 740,
+      yCoordinate: 944,
+      confirmPointName: "teleport_confirm"
+    }),
     {
       id: "primitive-2",
-      title: "Confirm Teleport",
-      type: "click_named_point",
-      pointName: "teleport_confirm",
-      postDelayMs: 1000
-    },
-    {
-      id: "primitive-3",
-      title: "Close Map Before Stealth",
-      type: "press_key",
-      key: "m",
-      postDelayMs: 1000
-    },
-    {
-      id: "primitive-4",
-      title: "Wait For Auto Route To Finish",
-      type: "sleep",
-      durationMs: 15000
-    },
-    {
-      id: "primitive-5",
       title: "Dismount Before Stealth",
       type: "press_key",
       key: "1",
       postDelayMs: 800
     },
     {
-      id: "primitive-6",
+      id: "primitive-3",
       title: "Enter Stealth",
-      type: "press_shortcut",
-      shortcut: "stealth",
-      postDelayMs: 800
+      type: "enter_stealth_with_retry",
+      retryLimit: 5,
+      settleMs: 260,
+      waitBetweenMs: 600
     },
     {
-      id: "primitive-7",
+      id: "primitive-4",
       title: "Front Arc Search And Strike",
       type: "stealth_front_arc_strike",
       searchTimeoutMs: 7000,
@@ -674,6 +671,20 @@ function createStealthPrimitiveActions() {
       strikeIntervalMs: 180,
       frontRoi: [0.36, 0.18, 0.64, 0.42],
       postDelayMs: 600
+    },
+    {
+      id: "primitive-5",
+      title: "Trigger Miaoqu",
+      type: "stealth_trigger_miaoqu",
+      triggerTimeoutMs: 5000,
+      triggerSettleMs: 40
+    },
+    {
+      id: "primitive-6",
+      title: "Click Gold Steal Button",
+      type: "click_steal_button",
+      buttonIndex: 1,
+      postDelayMs: 500
     }
   ];
 }
@@ -724,24 +735,12 @@ export function createPrimitiveActions(sequenceName) {
         {
           id: "primitive-2",
           title: "打开地图去大街",
-          type: "map_route_to_coordinate",
-          xCoordinate: 670,
-          yCoordinate: 538,
-          postDelayMs: 1000,
-          waitAfterGoMs: 1000
-        },
-        {
-          id: "primitive-3",
-          title: "收起地图",
-          type: "press_key",
-          key: "m",
-          postDelayMs: 1000
-        },
-        {
-          id: "primitive-4",
-          title: "等待籽岷跑到大街",
-          type: "sleep",
-          durationMs: 15000
+          ...createTravelToCoordinateAction({
+            id: "primitive-2",
+            title: "打开地图去大街",
+            xCoordinate: 670,
+            yCoordinate: 538
+          })
         },
         // Any map-driven 15s travel wait should be followed by an explicit dismount
         // plus camera reset so the next fixed UI interaction does not get blocked
@@ -785,41 +784,29 @@ export function createPrimitiveActions(sequenceName) {
         {
           id: "primitive-1",
           title: "打开地图去货商",
-          type: "map_route_to_coordinate",
-          xCoordinate: 667,
-          yCoordinate: 554,
-          postDelayMs: 1000,
-          waitAfterGoMs: 1000
+          ...createTravelToCoordinateAction({
+            id: "primitive-1",
+            title: "打开地图去货商",
+            xCoordinate: 667,
+            yCoordinate: 554
+          })
         },
         {
           id: "primitive-2",
-          title: "收起地图准备找货商",
-          type: "press_key",
-          key: "m",
-          postDelayMs: 1000
-        },
-        {
-          id: "primitive-3",
-          title: "等待籽岷跑到货商",
-          type: "sleep",
-          durationMs: 15000
-        },
-        {
-          id: "primitive-4",
           title: "下马准备进货",
           type: "press_key",
           key: "1",
           postDelayMs: 1000
         },
         {
-          id: "primitive-5",
+          id: "primitive-3",
           title: "矫正视角准备进货",
           type: "press_key",
           key: "v",
           postDelayMs: 1000
         },
         {
-          id: "primitive-6",
+          id: "primitive-4",
           title: "打开阿依娜进货页",
           type: "open_named_vendor_purchase",
           targetName: "阿依娜",
@@ -829,7 +816,7 @@ export function createPrimitiveActions(sequenceName) {
           postDelayMs: 1000
         },
         {
-          id: "primitive-7",
+          id: "primitive-5",
           title: "买满墨锭并关闭面板",
           type: "buy_current_vendor_item",
           itemName: "墨锭",
@@ -837,56 +824,44 @@ export function createPrimitiveActions(sequenceName) {
           postDelayMs: 1000
         },
         {
-          id: "primitive-8",
+          id: "primitive-6",
           title: "打开地图去大街",
-          type: "map_route_to_coordinate",
-          xCoordinate: 670,
-          yCoordinate: 538,
-          postDelayMs: 1000,
-          waitAfterGoMs: 1000
+          ...createTravelToCoordinateAction({
+            id: "primitive-6",
+            title: "打开地图去大街",
+            xCoordinate: 670,
+            yCoordinate: 538
+          })
         },
         {
-          id: "primitive-9",
-          title: "收起地图准备叫卖",
-          type: "press_key",
-          key: "m",
-          postDelayMs: 1000
-        },
-        {
-          id: "primitive-10",
-          title: "等待籽岷跑到大街",
-          type: "sleep",
-          durationMs: 15000
-        },
-        {
-          id: "primitive-11",
+          id: "primitive-7",
           title: "下马准备叫卖",
           type: "press_key",
           key: "1",
           postDelayMs: 1000
         },
         {
-          id: "primitive-12",
+          id: "primitive-8",
           title: "矫正视角准备叫卖",
           type: "press_key",
           key: "v",
           postDelayMs: 1000
         },
         {
-          id: "primitive-13",
+          id: "primitive-9",
           title: "打开叫卖界面",
           type: "press_shortcut",
           shortcut: "hawking",
           postDelayMs: 2000
         },
         {
-          id: "primitive-14",
+          id: "primitive-10",
           title: "选中货物并上架",
           type: "stock_first_hawking_item",
           postDelayMs: 1000
         },
         {
-          id: "primitive-15",
+          id: "primitive-11",
           title: "开始出摊",
           type: "submit_hawking",
           postDelayMs: 1000

@@ -195,6 +195,12 @@ MAP_STAGE_ROIS = {
     "keypad_panel": (0.36, 0.50, 0.78, 0.94),
 }
 
+MINIMAP_COORDINATE_ROIS = {
+    "primary": (0.82, 0.02, 0.95, 0.10),
+    "secondary": (0.80, 0.00, 0.94, 0.12),
+    "fallback": (0.78, 0.00, 0.92, 0.14),
+}
+
 NPC_CAPTURE_SCAN_POINTS = [
     (0.515, 0.500), (0.557, 0.507), (0.592, 0.526), (0.618, 0.556), (0.634, 0.594),
     (0.639, 0.636), (0.634, 0.678), (0.618, 0.716), (0.592, 0.746), (0.557, 0.765),
@@ -1056,6 +1062,53 @@ def detect_map_screen(hwnd: int) -> dict[str, Any]:
     }
 
 
+def parse_coordinate_pair(text: str) -> dict[str, Any] | None:
+    normalized = str(text or "")
+    normalized = normalized.replace("O", "0").replace("o", "0").replace(" ", "")
+    normalized = normalized.replace("（", "(").replace("）", ")").replace("，", ",")
+    normalized = normalized.replace("\n", "")
+    match = re.search(r"\(?(\d{2,4})[,.:;](\d{2,4})\)?", normalized)
+    if not match:
+        match = re.search(r"\((\d{2,4}),(\d{2,4})\)", normalized)
+    if not match:
+        return None
+    return {
+        "x": int(match.group(1)),
+        "y": int(match.group(2)),
+        "text": text,
+    }
+
+
+def detect_minimap_coordinate(hwnd: int) -> dict[str, Any]:
+    for roi_name, roi in MINIMAP_COORDINATE_ROIS.items():
+        text = ocr_text(capture_window_region(hwnd, roi))
+        coordinate = parse_coordinate_pair(text)
+        if coordinate is not None:
+            return {
+                "found": True,
+                "text": text,
+                "coordinate": {
+                    "x": coordinate["x"],
+                    "y": coordinate["y"],
+                },
+                "roiName": roi_name,
+                "roi": {
+                    "x1": roi[0],
+                    "y1": roi[1],
+                    "x2": roi[2],
+                    "y2": roi[3],
+                },
+            }
+
+    return {
+        "found": False,
+        "text": "",
+        "coordinate": None,
+        "roiName": "",
+        "roi": None,
+    }
+
+
 def detect_vendor_purchase_screen(hwnd: int) -> dict[str, Any]:
     panel_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
     return {
@@ -1123,6 +1176,24 @@ def ensure_map_screen_open(hwnd: int, title: str, toggle_key: str = "m", timeout
             return current_state
 
     raise RuntimeError("Failed to open map screen before timeout")
+
+
+def ensure_map_screen_closed(hwnd: int, title: str, toggle_key: str = "m", timeout_ms: int = 2000) -> dict[str, Any]:
+    current_state = detect_map_screen(hwnd)
+    if not current_state["visible"]:
+        return current_state
+
+    pydirectinput.press(toggle_key)
+    INPUT_GUARD.refresh_baseline()
+    deadline = time.time() + timeout_ms / 1000.0
+
+    while time.time() <= deadline:
+        INPUT_GUARD.guarded_sleep(80, title)
+        current_state = detect_map_screen(hwnd)
+        if not current_state["visible"]:
+            return current_state
+
+    raise RuntimeError("Failed to close map screen before timeout")
 
 
 def find_map_keypad_digit_buttons(hwnd: int, sample_count: int = 4, sample_gap_ms: int = 120) -> dict[str, dict[str, Any]]:
@@ -1330,6 +1401,31 @@ def input_map_coordinate_field(
     }
 
 
+def start_map_route_to_coordinate(
+    hwnd: int,
+    title: str,
+    x_coordinate: int,
+    y_coordinate: int,
+    toggle_key: str = "m",
+    wait_after_go_ms: int = 0,
+) -> dict[str, Any]:
+    map_state = ensure_map_screen_open(hwnd, title, toggle_key=toggle_key)
+    y_input = input_map_coordinate_field(hwnd, "map_coord_y_input", "vertical", y_coordinate, "vertical", title)
+    x_input = input_map_coordinate_field(hwnd, "map_coord_x_input", "horizontal", x_coordinate, "horizontal", title)
+    go_click = click_map_route_control(hwnd, "go", "map_go")
+    INPUT_GUARD.guarded_sleep(max(1000, wait_after_go_ms), title)
+    return {
+        "toggleKey": toggle_key,
+        "mapTexts": map_state["texts"],
+        "xCoordinate": x_coordinate,
+        "yCoordinate": y_coordinate,
+        "verticalInput": y_input,
+        "horizontalInput": x_input,
+        "goClick": go_click,
+        "waitAfterGoMs": wait_after_go_ms,
+    }
+
+
 def run_map_route_to_coordinate(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "map_route_to_coordinate")
@@ -1338,11 +1434,14 @@ def run_map_route_to_coordinate(hwnd: int, action: dict[str, Any]) -> dict[str, 
     wait_after_go_ms = int(action.get("waitAfterGoMs") or 0)
     toggle_key = str(action.get("toggleKey") or "m").strip().lower()
 
-    map_state = ensure_map_screen_open(hwnd, title, toggle_key=toggle_key)
-    y_input = input_map_coordinate_field(hwnd, "map_coord_y_input", "vertical", y_coordinate, "vertical", title)
-    x_input = input_map_coordinate_field(hwnd, "map_coord_x_input", "horizontal", x_coordinate, "horizontal", title)
-    go_click = click_map_route_control(hwnd, "go", "map_go")
-    INPUT_GUARD.guarded_sleep(max(1000, wait_after_go_ms), title)
+    route_start = start_map_route_to_coordinate(
+        hwnd,
+        title,
+        x_coordinate,
+        y_coordinate,
+        toggle_key=toggle_key,
+        wait_after_go_ms=wait_after_go_ms,
+    )
 
     return {
         "id": action_id,
@@ -1351,14 +1450,7 @@ def run_map_route_to_coordinate(hwnd: int, action: dict[str, Any]) -> dict[str, 
         "detail": f"Opened map and started routing to ({x_coordinate}, {y_coordinate})",
         "input": {
             "mode": "map_route_to_coordinate",
-            "toggleKey": toggle_key,
-            "mapTexts": map_state["texts"],
-            "xCoordinate": x_coordinate,
-            "yCoordinate": y_coordinate,
-            "verticalInput": y_input,
-            "horizontalInput": x_input,
-            "goClick": go_click,
-            "waitAfterGoMs": wait_after_go_ms,
+            **route_start,
         },
     }
 
@@ -1684,55 +1776,279 @@ def open_view_for_selected_npc(
     title: str,
     target_text: str,
     last_npc_click: dict[str, Any] | None = None,
+    max_attempts: int = 3,
 ) -> dict[str, Any]:
     view_attempts: list[dict[str, Any]] = []
+    click_offsets = [(0, 0), (10, -8), (-10, 8)]
+    candidate = None
 
-    moving_view = find_moving_view_button(hwnd)
-    if not moving_view and target_text:
-        moving_view = find_view_button_near_target(hwnd, target_text)
-    if (
-        not moving_view
-        and last_npc_click
-        and last_npc_click.get("screenX") is not None
-        and last_npc_click.get("screenY") is not None
-    ):
-        moving_view = find_view_button_near_click(
+    for attempt_index in range(max(1, max_attempts)):
+        moving_view = find_moving_view_button(hwnd)
+        if not moving_view and target_text:
+            moving_view = find_view_button_near_target(hwnd, target_text)
+        if (
+            not moving_view
+            and last_npc_click
+            and last_npc_click.get("screenX") is not None
+            and last_npc_click.get("screenY") is not None
+        ):
+            moving_view = find_view_button_near_click(
+                hwnd,
+                int(last_npc_click["screenX"]),
+                int(last_npc_click["screenY"]),
+            )
+
+        if moving_view:
+            candidate = moving_view
+
+        if not candidate:
+            break
+
+        offset_x, offset_y = click_offsets[min(attempt_index, len(click_offsets) - 1)]
+        click_screen_point(
             hwnd,
-            int(last_npc_click["screenX"]),
-            int(last_npc_click["screenY"]),
+            int(candidate["screenX"]) + offset_x,
+            int(candidate["screenY"]) + offset_y,
+            "left",
         )
+        view_attempts.append(
+            {
+                **candidate,
+                "source": "selected_npc_view_button",
+                "attemptIndex": attempt_index + 1,
+                "offsetX": offset_x,
+                "offsetY": offset_y,
+                "targetText": target_text,
+            }
+        )
+        INPUT_GUARD.guarded_sleep(120, title)
 
-    if not moving_view:
-        return {
-            "opened": False,
-            "stage": detect_npc_interaction_stage(hwnd)["stage"],
-            "viewAttempts": view_attempts,
+        stage_state = detect_npc_interaction_stage(hwnd)
+        quick_menu_state = detect_bottom_right_menu_stage(hwnd)
+        stage = quick_menu_state["stage"]
+        stage_texts = {
+            **stage_state["texts"],
+            "bottom_right_actions": quick_menu_state["text"],
         }
+        if stage not in ["npc_action_menu", "small_talk_menu"]:
+            stage = stage_state["stage"]
+            stage_texts = stage_state["texts"]
 
-    click_screen_point(hwnd, moving_view["screenX"], moving_view["screenY"], "left")
-    view_attempts.append({
-        **moving_view,
-        "source": "selected_npc_view_button",
-    })
-    INPUT_GUARD.guarded_sleep(100, title)
-
-    stage_state = detect_npc_interaction_stage(hwnd)
-    quick_menu_state = detect_bottom_right_menu_stage(hwnd)
-    stage = quick_menu_state["stage"]
-    stage_texts = {
-        **stage_state["texts"],
-        "bottom_right_actions": quick_menu_state["text"],
-    }
-    if stage not in ["npc_action_menu", "small_talk_menu"]:
-        stage = stage_state["stage"]
-        stage_texts = stage_state["texts"]
+        if stage in ["npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"]:
+            return {
+                "opened": True,
+                "stage": stage,
+                "stageTexts": stage_texts,
+                "viewAttempts": view_attempts,
+            }
 
     return {
-        "opened": stage in ["npc_action_menu", "small_talk_menu", "chat_ready", "gift_screen", "trade_screen"],
-        "stage": stage,
-        "stageTexts": stage_texts,
+        "opened": False,
+        "stage": detect_npc_interaction_stage(hwnd)["stage"],
         "viewAttempts": view_attempts,
     }
+
+
+def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "retarget_social_target")
+    attempts_per_cycle = int(action.get("attemptsPerCycle") or 5)
+    max_cycles = int(action.get("maxCycles") or 2)
+    settle_ms = int(action.get("settleMs") or 220)
+    drag_start_ratio = action.get("dragStartRatio") or [0.54, 0.48]
+    drag_end_ratio = action.get("dragEndRatio") or [0.64, 0.48]
+    drag_duration_ms = int(action.get("dragDurationMs") or 180)
+
+    focus_window(hwnd)
+    attempts: list[dict[str, Any]] = []
+    perturbation = None
+
+    for cycle_index in range(max(1, max_cycles)):
+        for attempt_index in range(max(1, attempts_per_cycle)):
+            INPUT_GUARD.check_or_raise(title)
+            pydirectinput.press("tab")
+            INPUT_GUARD.refresh_baseline()
+            INPUT_GUARD.guarded_sleep(settle_ms, title)
+            stage_state = detect_npc_interaction_stage(hwnd)
+            target_info = detect_target_threshold(hwnd)
+            success = npc_stage_has_selectable_target(stage_state, target_info)
+            attempt_payload = {
+                "cycleIndex": cycle_index + 1,
+                "attemptIndex": attempt_index + 1,
+                "stage": stage_state["stage"],
+                "targetText": target_info["text"],
+                "lookText": stage_state["texts"].get("look_button", ""),
+                "success": success,
+            }
+            attempts.append(attempt_payload)
+            if success:
+                return {
+                    "id": action_id,
+                    "title": title,
+                    "status": "performed",
+                    "detail": f"Switched to a selectable social target in cycle {cycle_index + 1}",
+                    "input": {
+                        "mode": "retarget_social_target",
+                        **collect_npc_stage_input(hwnd, stage_state, target_info["text"]),
+                        "attempts": attempts,
+                        "retryCount": len(attempts),
+                        "perturbation": perturbation,
+                    },
+                }
+
+        if cycle_index >= max_cycles - 1:
+            break
+
+        perturbation = drag_camera(
+            hwnd,
+            (float(drag_start_ratio[0]), float(drag_start_ratio[1])),
+            (float(drag_end_ratio[0]), float(drag_end_ratio[1])),
+            drag_duration_ms,
+        )
+        INPUT_GUARD.guarded_sleep(180, title)
+
+    stage_state = detect_npc_interaction_stage(hwnd)
+    target_info = detect_target_threshold(hwnd)
+    failed_input = {
+        "mode": "retarget_social_target",
+        **collect_npc_stage_input(hwnd, stage_state, target_info["text"]),
+        "attempts": attempts,
+        "retryCount": len(attempts),
+        "perturbation": perturbation,
+    }
+    raise ActionExecutionError(
+        "Failed to switch to a selectable social target after the configured Tab budget",
+        error_code="NPC_TARGET_SWITCH_FAILED",
+        failed_step=build_failed_step_payload(
+            action,
+            "Tab switch did not reach npc_selected or 查看 target",
+            failed_input,
+        ),
+    )
+
+
+def run_travel_to_coordinate(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "travel_to_coordinate")
+    x_coordinate = int(action.get("xCoordinate"))
+    y_coordinate = int(action.get("yCoordinate"))
+    toggle_key = str(action.get("toggleKey") or "m").strip().lower()
+    wait_after_go_ms = int(action.get("waitAfterGoMs") or 0)
+    poll_ms = int(action.get("pollMs") or 1000)
+    max_travel_ms = int(action.get("maxTravelMs") or 18000)
+    stable_poll_limit = int(action.get("stablePollLimit") or 3)
+    coordinate_tolerance = int(action.get("coordinateTolerance") or 5)
+    reroute_limit = int(action.get("rerouteLimit") or 2)
+    confirm_point_name = str(action.get("confirmPointName") or "").strip()
+    target_coordinate = {
+        "x": x_coordinate,
+        "y": y_coordinate,
+    }
+    attempts: list[dict[str, Any]] = []
+
+    for route_attempt in range(reroute_limit + 1):
+        route_start = start_map_route_to_coordinate(
+            hwnd,
+            title,
+            x_coordinate,
+            y_coordinate,
+            toggle_key=toggle_key,
+            wait_after_go_ms=wait_after_go_ms,
+        )
+        confirm_click = None
+        if confirm_point_name:
+            confirm_click = click_named_point(hwnd, confirm_point_name)
+            INPUT_GUARD.guarded_sleep(220, title)
+        ensure_map_screen_closed(hwnd, title, toggle_key=toggle_key)
+
+        started_at = time.time()
+        stable_polls = 0
+        last_coordinate = None
+        coordinate_samples: list[dict[str, Any]] = []
+        final_coordinate = None
+
+        while (time.time() - started_at) * 1000 < max_travel_ms:
+            INPUT_GUARD.guarded_sleep(max(120, poll_ms), title)
+            minimap_state = detect_minimap_coordinate(hwnd)
+            sample = {
+                "timestampMs": round((time.time() - started_at) * 1000),
+                "found": minimap_state["found"],
+                "text": minimap_state["text"],
+                "coordinate": minimap_state["coordinate"],
+                "roiName": minimap_state["roiName"],
+            }
+            coordinate_samples.append(sample)
+
+            if not minimap_state["found"] or minimap_state["coordinate"] is None:
+                continue
+
+            final_coordinate = minimap_state["coordinate"]
+            if coordinates_within_tolerance(final_coordinate, target_coordinate, coordinate_tolerance):
+                attempts.append(
+                    {
+                        "routeAttempt": route_attempt + 1,
+                        "routeStart": route_start,
+                        "confirmClick": confirm_click,
+                        "coordinateSamples": coordinate_samples,
+                        "currentCoordinate": final_coordinate,
+                        "targetCoordinate": target_coordinate,
+                    }
+                )
+                return {
+                    "id": action_id,
+                    "title": title,
+                    "status": "performed",
+                    "detail": f"Travel reached ({x_coordinate}, {y_coordinate}) within tolerance",
+                    "input": {
+                        "mode": "travel_to_coordinate",
+                        "toggleKey": toggle_key,
+                        "targetCoordinate": target_coordinate,
+                        "currentCoordinate": final_coordinate,
+                        "coordinateTolerance": coordinate_tolerance,
+                        "rerouteLimit": reroute_limit,
+                        "attempts": attempts,
+                    },
+                }
+
+            if last_coordinate == final_coordinate:
+                stable_polls += 1
+            else:
+                stable_polls = 0
+            last_coordinate = final_coordinate
+
+            if stable_polls >= stable_poll_limit:
+                break
+
+        attempts.append(
+            {
+                        "routeAttempt": route_attempt + 1,
+                        "routeStart": route_start,
+                        "confirmClick": confirm_click,
+                        "coordinateSamples": coordinate_samples,
+                        "currentCoordinate": final_coordinate,
+                        "targetCoordinate": target_coordinate,
+            }
+        )
+
+    current_coordinate = attempts[-1]["currentCoordinate"] if attempts else None
+    failed_input = {
+        "mode": "travel_to_coordinate",
+        "targetCoordinate": target_coordinate,
+        "currentCoordinate": current_coordinate,
+        "coordinateTolerance": coordinate_tolerance,
+        "retryCount": len(attempts),
+        "rerouteLimit": reroute_limit,
+        "attempts": attempts,
+    }
+    raise ActionExecutionError(
+        f"Route stalled before reaching ({x_coordinate}, {y_coordinate})",
+        error_code="ROUTE_STALLED",
+        failed_step=build_failed_step_payload(
+            action,
+            "Travel watchdog exceeded reroute budget",
+            failed_input,
+        ),
+    )
 
 
 def find_view_button_near_target(hwnd: int, target_text: str) -> dict[str, Any] | None:
@@ -2907,6 +3223,57 @@ def collect_npc_stage_input(
     return payload
 
 
+def build_failed_step_payload(
+    action: dict[str, Any],
+    detail: str,
+    input_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": str(action.get("id") or ""),
+        "title": str(action.get("title") or action.get("type") or ""),
+        "sourceType": action.get("sourceType"),
+        "status": "failed",
+        "detail": detail,
+        "input": input_payload or {},
+    }
+
+
+def npc_stage_has_selectable_target(stage_state: dict[str, Any], target_info: dict[str, Any]) -> bool:
+    stage = str(stage_state.get("stage") or "none")
+    if stage in NPC_READY_STAGES or stage == "npc_selected":
+        return True
+    return contains_any_keyword(stage_state["texts"].get("look_button", ""), ["查看"]) or has_selected_target(target_info)
+
+
+def extract_chat_threshold_gate(stage_state: dict[str, Any]) -> dict[str, Any] | None:
+    combined_text = " ".join(
+        [
+            str(stage_state["texts"].get("confirm_dialog") or ""),
+            str(stage_state["texts"].get("chat_panel") or ""),
+            str(stage_state["texts"].get("bottom_right_actions") or ""),
+        ]
+    ).strip()
+    normalized = re.sub(r"\s+", "", combined_text)
+    if "好感" not in normalized:
+        return None
+    if not any(keyword in normalized for keyword in ["达到", "不足", "需要", "解锁", "开启", "可闲聊", "可交谈"]):
+        return None
+    threshold_match = re.search(r"(10|50)", normalized)
+    return {
+        "requiredFavor": int(threshold_match.group(1)) if threshold_match else None,
+        "text": combined_text,
+    }
+
+
+def coordinates_within_tolerance(current_coordinate: dict[str, Any] | None, target_coordinate: dict[str, int], tolerance: int) -> bool:
+    if not current_coordinate:
+        return False
+    return (
+        abs(int(current_coordinate["x"]) - int(target_coordinate["x"])) <= tolerance
+        and abs(int(current_coordinate["y"]) - int(target_coordinate["y"])) <= tolerance
+    )
+
+
 def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "acquire_npc_target")
@@ -3087,17 +3454,40 @@ def run_open_npc_action_menu(hwnd: int, action: dict[str, Any]) -> dict[str, Any
         }
 
     if current_stage != "npc_selected" and not has_selected_target(target_info):
-        raise RuntimeError(
-            "open_npc_action_menu requires an already selected NPC target. "
-            f"Detected stage: {current_stage or 'none'}"
+        failed_input = {
+            "mode": "open_npc_action_menu",
+            **collect_npc_stage_input(hwnd, stage_state, target_info["text"]),
+            "viewAttempts": [],
+        }
+        raise ActionExecutionError(
+            "open_npc_action_menu requires an already selected NPC target",
+            error_code="NPC_VIEW_NOT_OPENED",
+            failed_step=build_failed_step_payload(
+                action,
+                f"Cannot open menu from stage {current_stage or 'none'}",
+                failed_input,
+            ),
         )
 
-    open_view_result = open_view_for_selected_npc(hwnd, title, target_info["text"])
+    open_view_result = open_view_for_selected_npc(hwnd, title, target_info["text"], max_attempts=int(action.get("viewAttemptLimit") or 3))
     next_stage = open_view_result["stage"]
     if not open_view_result["opened"] or next_stage not in NPC_READY_STAGES:
-        raise RuntimeError(
-            "Failed to open NPC action menu from the selected target. "
-            f"Last stage: {next_stage or 'none'}"
+        failed_input = {
+            "mode": "open_npc_action_menu",
+            "stage": next_stage,
+            "stageTexts": open_view_result.get("stageTexts") or stage_state["texts"],
+            "targetText": target_info["text"],
+            "viewAttempts": open_view_result["viewAttempts"],
+            "retryCount": len(open_view_result["viewAttempts"]),
+        }
+        raise ActionExecutionError(
+            "Failed to open NPC action menu from the selected target",
+            error_code="NPC_VIEW_NOT_OPENED",
+            failed_step=build_failed_step_payload(
+                action,
+                f"Magnifier click did not open menu. Last stage: {next_stage or 'none'}",
+                failed_input,
+            ),
         )
 
     return {
@@ -3145,6 +3535,24 @@ def run_click_menu_talk(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     INPUT_GUARD.guarded_sleep(180, title)
     next_stage_state = detect_npc_interaction_stage(hwnd)
     next_stage = next_stage_state["stage"]
+    threshold_gate = extract_chat_threshold_gate(next_stage_state)
+    if threshold_gate:
+        failed_input = {
+            "mode": "click_menu_talk",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "click": talk_click,
+            "requiredFavor": threshold_gate["requiredFavor"],
+            "thresholdText": threshold_gate["text"],
+        }
+        raise ActionExecutionError(
+            "Talk entry revealed an unmet favor threshold",
+            error_code="NPC_CHAT_THRESHOLD_REVEALED",
+            failed_step=build_failed_step_payload(
+                action,
+                "Talk entry did not pass the favor threshold gate",
+                failed_input,
+            ),
+        )
     if next_stage not in {"small_talk_menu", "chat_ready"}:
         raise RuntimeError(
             "Talk entry did not advance to small talk or chat. "
@@ -3193,6 +3601,24 @@ def run_click_menu_small_talk(hwnd: int, action: dict[str, Any]) -> dict[str, An
     INPUT_GUARD.guarded_sleep(180, title)
     next_stage_state = detect_npc_interaction_stage(hwnd)
     next_stage = next_stage_state["stage"]
+    threshold_gate = extract_chat_threshold_gate(next_stage_state)
+    if threshold_gate:
+        failed_input = {
+            "mode": "click_menu_small_talk",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "click": small_talk_click,
+            "requiredFavor": threshold_gate["requiredFavor"],
+            "thresholdText": threshold_gate["text"],
+        }
+        raise ActionExecutionError(
+            "Chat entry exposed a higher favor threshold than the default gift flow can satisfy",
+            error_code="NPC_CHAT_THRESHOLD_REVEALED",
+            failed_step=build_failed_step_payload(
+                action,
+                "Small talk gate revealed favor threshold",
+                failed_input,
+            ),
+        )
     if next_stage not in {"small_talk_confirm", "chat_ready"}:
         raise RuntimeError(
             "Small talk did not advance to confirmation or chat. "
@@ -3241,6 +3667,24 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
     INPUT_GUARD.guarded_sleep(350, title)
     next_stage_state = detect_npc_interaction_stage(hwnd)
     next_stage = next_stage_state["stage"]
+    threshold_gate = extract_chat_threshold_gate(next_stage_state)
+    if threshold_gate:
+        failed_input = {
+            "mode": "confirm_small_talk_entry",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "click": confirm_click,
+            "requiredFavor": threshold_gate["requiredFavor"],
+            "thresholdText": threshold_gate["text"],
+        }
+        raise ActionExecutionError(
+            "Chat confirmation revealed an unmet favor threshold",
+            error_code="NPC_CHAT_THRESHOLD_REVEALED",
+            failed_step=build_failed_step_payload(
+                action,
+                "Chat confirmation did not pass the favor threshold gate",
+                failed_input,
+            ),
+        )
     if next_stage != "chat_ready":
         raise RuntimeError(
             "Small talk confirmation did not reach chat_ready. "
@@ -3494,9 +3938,20 @@ def run_click_steal_button(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     stage_state = detect_npc_interaction_stage(hwnd)
     if stage_state["stage"] != "steal_screen":
-        raise RuntimeError(
-            f"click_steal_button requires steal_screen. "
-            f"Detected stage: {stage_state['stage'] or 'none'}"
+        failed_input = {
+            "mode": "click_steal_button",
+            **collect_npc_stage_input(hwnd, stage_state),
+            "buttonIndex": button_index,
+            "pointName": point_name,
+        }
+        raise ActionExecutionError(
+            "click_steal_button requires steal_screen",
+            error_code="STEALTH_TARGET_RECOVERED",
+            failed_step=build_failed_step_payload(
+                action,
+                f"Steal panel was no longer available at stage {stage_state['stage'] or 'none'}",
+                failed_input,
+            ),
         )
 
     steal_state = detect_steal_screen(hwnd)
@@ -3504,9 +3959,22 @@ def run_click_steal_button(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     INPUT_GUARD.guarded_sleep(settle_ms, title)
     next_stage_state = detect_npc_interaction_stage(hwnd)
     if next_stage_state["stage"] == "steal_screen":
-        raise RuntimeError(
-            f"Steal button {point_name} did not close the steal panel. "
-            f"Last stage: {next_stage_state['stage'] or 'none'}"
+        failed_input = {
+            "mode": "click_steal_button",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "beforeText": steal_state["text"],
+            "pointName": point_name,
+            "buttonIndex": button_index,
+            "click": step_click,
+        }
+        raise ActionExecutionError(
+            f"Steal button {point_name} did not complete before the panel closed",
+            error_code="STEALTH_TARGET_RECOVERED",
+            failed_step=build_failed_step_payload(
+                action,
+                "Steal panel remained open after the fixed miaoqu click",
+                failed_input,
+            ),
         )
 
     return {
@@ -3642,6 +4110,76 @@ def ensure_npc_action_menu(hwnd: int, timeout_ms: int, move_pulse_ms: int, scan_
     }
 
 
+def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "enter_stealth_with_retry")
+    retry_limit = int(action.get("retryLimit") or 5)
+    settle_ms = int(action.get("settleMs") or 260)
+    wait_between_ms = int(action.get("waitBetweenMs") or 600)
+    shortcut_key = SHORTCUT_KEYS.get("stealth", "2")
+    attempts: list[dict[str, Any]] = []
+
+    focus_window(hwnd)
+    exit_state = detect_exit_stealth_button(hwnd)
+    if exit_state["visible"]:
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": "Stealth mode was already active",
+            "input": {
+                "mode": "enter_stealth_with_retry",
+                "retryCount": 0,
+                "attempts": attempts,
+                "exitStealthText": exit_state["text"],
+            },
+        }
+
+    for attempt_index in range(max(1, retry_limit)):
+        INPUT_GUARD.check_or_raise(title)
+        pydirectinput.press(shortcut_key)
+        INPUT_GUARD.refresh_baseline()
+        INPUT_GUARD.guarded_sleep(settle_ms, title)
+        exit_state = detect_exit_stealth_button(hwnd)
+        attempt_payload = {
+            "attemptIndex": attempt_index + 1,
+            "exitStealthVisible": exit_state["visible"],
+            "exitStealthText": exit_state["text"],
+        }
+        attempts.append(attempt_payload)
+        if exit_state["visible"]:
+            return {
+                "id": action_id,
+                "title": title,
+                "status": "performed",
+                "detail": f"Entered stealth on attempt {attempt_index + 1}",
+                "input": {
+                    "mode": "enter_stealth_with_retry",
+                    "retryCount": attempt_index + 1,
+                    "attempts": attempts,
+                    "exitStealthText": exit_state["text"],
+                },
+            }
+        if attempt_index < retry_limit - 1:
+            INPUT_GUARD.guarded_sleep(wait_between_ms, title)
+
+    failed_input = {
+        "mode": "enter_stealth_with_retry",
+        "retryCount": len(attempts),
+        "attempts": attempts,
+        "exitStealthText": exit_state["text"],
+    }
+    raise ActionExecutionError(
+        "Failed to enter stealth after waiting in place for the configured retry budget",
+        error_code="STEALTH_ENTRY_BLOCKED",
+        failed_step=build_failed_step_payload(
+            action,
+            "Stealth entry stayed blocked without entering grey stealth state",
+            failed_input,
+        ),
+    )
+
+
 def run_stealth_front_arc_strike(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "stealth_front_arc_strike")
@@ -3700,6 +4238,29 @@ def run_stealth_front_arc_strike(hwnd: int, action: dict[str, Any]) -> dict[str,
         pydirectinput.keyUp("w")
         INPUT_GUARD.refresh_baseline()
 
+    knockout_state = detect_knockout_context(hwnd)
+    if not knockout_state["visible"]:
+        failed_input = {
+            "mode": "stealth_front_arc_strike",
+            "target": target,
+            "searchTimeoutMs": search_timeout_ms,
+            "turnPulseMs": turn_pulse_ms,
+            "holdForwardMs": hold_forward_ms,
+            "strikeIntervalMs": strike_interval_ms,
+            "strikeCount": strike_count,
+            "searchAttempts": search_attempts,
+            "turnAttempts": turn_attempts,
+        }
+        raise ActionExecutionError(
+            "Stealth strike did not reach the knockout context before the attack window ended",
+            error_code="STEALTH_ALERTED",
+            failed_step=build_failed_step_payload(
+                action,
+                "Strike sequence exposed the player before knockout",
+                failed_input,
+            ),
+        )
+
     return {
         "id": action_id,
         "title": title,
@@ -3708,6 +4269,7 @@ def run_stealth_front_arc_strike(hwnd: int, action: dict[str, Any]) -> dict[str,
         "input": {
             "mode": "stealth_front_arc_strike",
             "target": target,
+            "knockoutText": knockout_state["text"],
             "searchTimeoutMs": search_timeout_ms,
             "turnPulseMs": turn_pulse_ms,
             "holdForwardMs": hold_forward_ms,
@@ -4082,7 +4644,19 @@ def run_stealth_open_loot(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         loot_state = detect_loot_screen(hwnd)
 
     if not loot_state["visible"]:
-        raise RuntimeError("Loot panel did not appear after pressing 4")
+        raise ActionExecutionError(
+            "Loot panel did not appear after pressing 4",
+            error_code="STEALTH_TARGET_RECOVERED",
+            failed_step=build_failed_step_payload(
+                action,
+                "Loot panel failed to open before the target recovered",
+                {
+                    "mode": "stealth_open_loot",
+                    "lootOpenTimeoutMs": loot_open_timeout_ms,
+                    "lootText": loot_state["text"],
+                },
+            ),
+        )
 
     return {
         "id": action_id,
@@ -4096,7 +4670,20 @@ def run_stealth_open_loot(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 def ensure_loot_panel_visible(hwnd: int, title: str) -> dict[str, Any]:
     loot_state = detect_loot_screen(hwnd)
     if not loot_state["visible"]:
-        raise RuntimeError(f"{title} requires the loot panel to stay visible")
+        raise ActionExecutionError(
+            f"{title} requires the loot panel to stay visible",
+            error_code="STEALTH_TARGET_RECOVERED",
+            failed_step={
+                "id": "",
+                "title": title,
+                "status": "failed",
+                "detail": "Loot panel disappeared during the steal flow",
+                "input": {
+                    "mode": "loot_panel_visibility_check",
+                    "lootText": loot_state["text"],
+                },
+            },
+        )
     return loot_state
 
 
@@ -4184,7 +4771,19 @@ def run_stealth_trigger_miaoqu(hwnd: int, action: dict[str, Any]) -> dict[str, A
         steal_state = detect_steal_screen(hwnd)
 
     if not steal_state["visible"]:
-        raise RuntimeError("Steal panel did not appear after pressing 3")
+        raise ActionExecutionError(
+            "Steal panel did not appear after pressing miaoqu shortcut",
+            error_code="STEALTH_TARGET_RECOVERED",
+            failed_step=build_failed_step_payload(
+                action,
+                "Target recovered before the steal panel opened",
+                {
+                    "mode": "stealth_trigger_miaoqu",
+                    "triggerTimeoutMs": trigger_timeout_ms,
+                    "text": steal_state["text"],
+                },
+            ),
+        )
 
     return {
         "id": action_id,
@@ -4244,6 +4843,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     if action_type == "acquire_npc_target":
         return run_acquire_npc_target(hwnd, action)
 
+    if action_type == "retarget_social_target":
+        return run_retarget_social_target(hwnd, action)
+
     if action_type == "open_npc_action_menu":
         return run_open_npc_action_menu(hwnd, action)
 
@@ -4270,6 +4872,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "stealth_front_arc_strike":
         return run_stealth_front_arc_strike(hwnd, action)
+
+    if action_type == "enter_stealth_with_retry":
+        return run_enter_stealth_with_retry(hwnd, action)
 
     if action_type == "stealth_search_target":
         return run_stealth_search_target(hwnd, action)
@@ -4326,6 +4931,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "map_route_to_coordinate":
         return run_map_route_to_coordinate(hwnd, action)
+
+    if action_type == "travel_to_coordinate":
+        return run_travel_to_coordinate(hwnd, action)
 
     if action_type == "open_named_npc_trade":
         return run_open_named_npc_trade(hwnd, action)

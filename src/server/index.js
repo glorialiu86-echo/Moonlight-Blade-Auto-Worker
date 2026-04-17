@@ -1,10 +1,10 @@
-﻿import "../config/load-env.js";
+import "../config/load-env.js";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { transcribeWithAliyunAsr } from "../asr/aliyun-file-transcribe.js";
+import { transcribeWithLocalWhisper } from "../asr/local-whisper-client.js";
 import { createAutoCaptureService } from "../capture/auto-capture-service.js";
 import { captureGameWindow } from "../capture/windows-game-window.js";
 import { analyzeImageWithHistory, generateText } from "../llm/qwen.js";
@@ -21,7 +21,14 @@ import {
   buildMotionReviewSamples,
   triggerMotionReviewPass
 } from "../runtime/motion-review.js";
-import { runWindowsExecution } from "../runtime/windows-executor.js";
+import {
+  createFixedDarkCloseStageActions,
+  createFixedSellLoopActions,
+  createFixedSocialRecoveryActions,
+  createFixedSocialStageActions,
+  createStealthEscapeRecoveryActions,
+  runWindowsExecution
+} from "../runtime/windows-executor.js";
 import {
   appendExperiment,
   appendLog,
@@ -45,55 +52,18 @@ import { runWindowsActions } from "../runtime/windows-executor.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../../public");
 const port = Number(process.env.PORT || 3000);
-const AUTONOMOUS_INTERVAL_MS = 5000;
-const VOICE_INPUT_SILENCE_COOLDOWN_MS = 20000;
+const AUTONOMOUS_INTERVAL_MS = 3000;
 const SCRIPT_ARM_DELAY_MS = 5 * 60 * 1000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 3000;
 const NPC_CHAT_MAX_ROUNDS = 4;
 const NPC_CHAT_POLL_DELAY_MS = 1200;
-const WATCH_COMMENTARY_MIN_INTERVAL_MS = 10000;
-const WATCH_COMMENTARY_MAX_SILENCE_MS = 10000;
+const WATCH_COMMENTARY_MIN_INTERVAL_MS = 3000;
+const WATCH_COMMENTARY_MAX_SILENCE_MS = 5000;
 const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
-const FIXED_SOCIAL_CHAT_ROUNDS = 6;
-const FIXED_SOCIAL_ROUTE_POINTS = {
-  social_warm: { xCoordinate: 548, yCoordinate: 630 },
-  social_dark: { xCoordinate: 698, yCoordinate: 753 }
-};
-const FIXED_LINES = {
-  triggerAck: "行，你去播你的，我先把这摊事记下，等会儿替你动手。",
-  runStart: "行，籽岷不在场了，我现在按刚才那套安排开始折腾。",
-  completion: [
-    "这套安排我替你跑完了，剩下的你回来自己接盘。",
-    "能薅的我都先薅了一遍，你回来别装没看见。",
-    "先做到这儿，后面的锅等你下播回来一起背。"
-  ],
-  failure: [
-    "我刚在「{step}」这儿滑了一跤，脸先丢这儿了。",
-    "这步卡得挺有脾气，我在「{step}」这儿先翻车了。",
-    "我本来想装得很稳，结果在「{step}」这步露馅了。",
-    "这一下没按住，我在「{step}」这儿先栽了个跟头。"
-  ]
-};
-
-function rotateOption(options = [], index = 0, fallback = "") {
-  if (!Array.isArray(options) || options.length === 0) {
-    return fallback;
-  }
-
-  return String(options[index % options.length] || fallback || "").trim();
-}
-
-function selectRoundScript(stage, roundNumber) {
-  if (!Array.isArray(stage?.roundScripts) || stage.roundScripts.length === 0) {
-    return null;
-  }
-
-  const normalizedIndex = Math.max(0, Math.min(stage.roundScripts.length - 1, Number(roundNumber || 1) - 1));
-  return stage.roundScripts[normalizedIndex] || null;
-}
-
+const SOCIAL_RETARGET_BUDGET = 2;
+const DARK_CLOSE_RESTART_BUDGET = 2;
 const FIXED_SCRIPT_STAGES = [
   {
     key: "sell_loop",
@@ -101,125 +71,55 @@ const FIXED_SCRIPT_STAGES = [
     instructionLabel: "先走正路买货叫卖，看看这条钱路能不能撑起来。",
     riskLevel: "low",
     actionTypes: ["sale"],
-    roundScripts: [
-      {
-        persona: "先按老实财路抡第一圈，别上来就把自己演成土匪。",
-        thinking: [
-          "先去货商那边把货摸回来，别空着手就想发财。",
-          "叫卖这条路是笨了点，好歹看得见银子往哪儿流。",
-          "先卖完这一轮再说，别刚开张就急着嫌命苦。"
-        ],
-        decide: "我先去买货，再把摊子支起来吆喝一轮。",
-        resultLead: "这一轮是有点进账，可这点钱还不够我吹口气。"
-      },
-      {
-        persona: "再跑一圈正路试试，我就不信这摊子真只配挣辛苦钱。",
-        thinking: [
-          "刚才那点进账也就够听个响，还远远没到能装阔的时候。",
-          "再去补一轮货，把嗓子再喊哑一点，看看能不能挤出点像样的数。",
-          "这回再不长脸，我就得承认老实挣钱是真的磨人。"
-        ],
-        decide: "我再去买一轮货，把第二摊继续顶起来。",
-        resultLead: "又跑完一圈，还是只够糊口，看着就让人牙痒。"
-      },
-      {
-        persona: "最后再抡一圈，抡完还不行我就不陪这条穷路耗了。",
-        thinking: [
-          "第三轮还得继续买货叫卖，纯靠耐心硬熬，听着都寒酸。",
-          "钱来得慢就算了，体力还在旁边卡脖子，这路子越看越抠门。",
-          "这回卖完要还是这么点动静，我就先去打探消息，不在这儿傻耗了。"
-        ],
-        decide: "我把第三轮也跑完，跑完就准备换条更值钱的路。",
-        resultLead: "行了，正路榨到头也就这样，钱慢得离谱，我先去摸摸别的门道。"
-      }
-    ]
+    thinkingFactory: () => ([
+      "先别急着翻脸，正路还能再榨一轮。",
+      "买货叫卖虽然笨，但至少还能看见进账。",
+      "要是这条路都撑不住，后面再换更歪的法子。"
+    ]),
+    decideFactory: () => "我先去买货，再把摊子顶起来试三轮。",
+    personaFactory: () => "先按老实财路做一遍。"
   },
   {
     key: "social_warm",
     rounds: 2,
     instructionLabel: "先装得正常点，买礼、送礼、聊天，顺手把话套出来。",
     riskLevel: "low",
-    actionTypesFactory: ({ roundNumber }) => (roundNumber === 1 ? ["trade", "gift", "talk"] : ["gift", "talk"]),
-    roundScripts: [
-      {
-        persona: "先找个顺眼的路人把关系垫起来，礼得到位，嘴才会松。",
-        thinking: [
-          "我要找个 NPC 去套话，空着手上去问，人家只会把我当空气。",
-          "先去交易那边把礼物一口气备够，省得后面每聊一次都来回折腾。",
-          "好感一垫起来，后面的交谈和套话才有地方下嘴。"
-        ],
-        decide: "我先去买礼物，再送一轮把关系垫起来，然后顺着话头套消息。",
-        resultLead: "礼是送出去了，人也聊上了，可真有用的东西还没吐出来。"
-      },
-      {
-        persona: "刚才那位嘴太紧了，我换个人再问一轮，别在一棵树上耗着。",
-        thinking: [
-          "他刚才那套话听着热闹，真拎出来一看，全是没用的边角料。",
-          "礼物前面已经备过一批了，这回直接换个人送，省得再跑一趟交易。",
-          "换个嘴松点的再试一次，说不定下一口就能咬到点像样的东西。"
-        ],
-        decide: "我换个人送礼接话，再套一轮，看能不能挖出点正经消息。",
-        resultLead: "这轮换人再问，场子是续上了，值钱的话还得继续往外逼。"
-      }
-    ]
+    actionTypes: ["trade", "gift", "talk"],
+    thinkingFactory: () => ([
+      "硬抢太早了，先拿人情把嘴撬开。",
+      "买礼送礼不算吃亏，关键是能换到对方松口。",
+      "只要他愿意多说两句，后面的路就好掏了。"
+    ]),
+    decideFactory: () => "我先拿礼数开门，再顺着话头把路子套出来。",
+    personaFactory: () => "先装好人，把门路哄出来。"
   },
   {
     key: "social_dark",
     rounds: 2,
     instructionLabel: "继续买礼送礼和聊天，但说话开始阴一点，边套话边压低好感。",
     riskLevel: "medium",
-    actionTypes: ["gift", "talk"],
-    roundScripts: [
-      {
-        persona: "这些人都不肯说正经内幕，那我就不陪他们继续客气了。",
-        thinking: [
-          "送礼送到这份上还全是废话，白天这套热络路数看着是真不顶用。",
-          "既然好声好气换不来内幕，那就边送边把话锋压阴一点，试试他的胆子。",
-          "人一紧张，嘴就容易跑偏，说不定真东西反倒自己漏出来。"
-        ],
-        decide: "我换个人继续送礼聊天，这回不装那么软，边问边压他一句。",
-        resultLead: "这轮开始发阴了，可他嘴里还是没掉出像样的内幕。"
-      },
-      {
-        persona: "再不说实话我就真要急眼了，最后换个人狠狠干这一轮。",
-        thinking: [
-          "前面那几轮听下来，全像在拿废话糊我脸，我耐心也快磨没了。",
-          "礼还是照送，但这回只剩最后一次机会，问不出来我就准备换黑路。",
-          "他要是还装糊涂，那我也不打算继续拿笑脸陪着演了。"
-        ],
-        decide: "我最后换个人再问一轮，能撬就撬，撬不开我就不走这套了。",
-        resultLead: "最后这一轮也差不多问到头了，再没真话我就准备直接翻桌。"
-      }
-    ]
+    actionTypes: ["trade", "gift", "talk"],
+    thinkingFactory: () => ([
+      "光靠装热络太慢了，该往话里掺点刺。",
+      "先把礼递过去，再拿阴话试对方底线。",
+      "他越不舒服，越容易露出真东西。"
+    ]),
+    decideFactory: () => "我继续装熟，但这回套话的时候顺手给他添点堵。",
+    personaFactory: () => "该把笑脸里那点坏心思露出来了。"
   },
   {
     key: "dark_close",
-    rounds: 2,
+    rounds: 1,
     instructionLabel: "正常路已经太慢了，直接潜行、闷棍、偷窃。",
     riskLevel: "high",
-    actionTypesFactory: ({ roundNumber }) => (roundNumber === 1 ? ["stealth", "strike", "steal"] : ["stealth", "steal"]),
-    roundScripts: [
-      {
-        persona: "算了，还是直接下黑手来钱快，我去演武场摸摸那些看比赛的人。",
-        thinking: [
-          "正路和嘴皮子我都陪他们磨够了，再慢吞吞折腾只会把自己熬穷。",
-          "演武场边上那些围观群众眼睛都盯在比赛上，大概率顾不上我从旁边摸过去。",
-          "我先潜行过去，把人敲晕扛走，再狠狠干一轮搜刮看看兜里有多少东西。"
-        ],
-        decide: "我先去演武场边上挑个看戏入神的，潜过去狠狠干一票搜刮。",
-        resultLead: "这人兜里也没什么钱啊！我再换一边儿找其他围观群众试试看？"
-      },
-      {
-        persona: "刚才那票不够肥，我换个边儿再摸一个，看看能不能碰上值钱的。",
-        thinking: [
-          "上一位身上穷得叮当响，白白让我费了套潜行的力气。",
-          "那就换一边儿继续挑看比赛看傻了眼的，反正这种人最容易顾不上后背。",
-          "这回不跟他慢慢搜了，潜过去闷住人，扛开了直接妙取，拿完就撤。"
-        ],
-        decide: "我换个位置再挑一个围观群众，直接潜过去按住人把妙取做完。",
-        resultLead: "这一边我也替你摸过了，能不能见着像样的钱，就看这手黑不黑了。"
-      }
-    ]
+    actionTypes: ["stealth", "strike", "steal"],
+    thinkingFactory: () => ([
+      "该摸的路子已经摸完，剩下的只会更慢。",
+      "既然正门不开，那就从背后把门砸开。",
+      "潜进去、敲闷棍、下手，这才像真本事。"
+    ]),
+    decideFactory: () => "我不再陪他们磨嘴皮，直接潜进去狠狠干一手。",
+    personaFactory: () => "正常路走到头了，我该换黑的。"
   }
 ];
 
@@ -266,7 +166,8 @@ function handleExternalInputInterrupted(error, contextLabel) {
     return false;
   }
 
-  setInteractionMode("watch");
+  setStatus("paused");
+  autoCaptureService.pause();
   updateAutomation({
     status: "paused"
   });
@@ -321,27 +222,6 @@ function requireAudioDataUrl(audioDataUrl) {
   return audioDataUrl;
 }
 
-async function handleVoiceActivity(request, response) {
-  const body = await readRequestBody(request);
-  const active = Boolean(body.active);
-  const cooldownUntil = new Date(Date.now() + VOICE_INPUT_SILENCE_COOLDOWN_MS).toISOString();
-
-  updateAgent({
-    voiceInputCooldownUntil: cooldownUntil
-  });
-
-  if (active) {
-    appendLog("info", "检测到用户语音输入，暂停截图自动解说", {
-      cooldownUntil
-    });
-  }
-
-  return sendJson(response, 200, {
-    ok: true,
-    cooldownUntil
-  });
-}
-
 function parseAudioDataUrl(audioDataUrl) {
   const normalized = requireAudioDataUrl(audioDataUrl);
   const match = normalized.match(/^data:audio\/([a-z0-9.+-]+);base64,(.+)$/i);
@@ -366,18 +246,6 @@ function parseAudioDataUrl(audioDataUrl) {
     extension: extensionMap[mimeSubtype] || "wav",
     buffer: Buffer.from(match[2], "base64")
   };
-}
-
-function sceneDescription(scene) {
-  const map = {
-    town_dialogue: "城镇对话",
-    bag_management: "背包管理",
-    market_trade: "交易/商店",
-    jail_warning: "高风险警告",
-    field_patrol: "野外巡游"
-  };
-
-  return map[scene] || "未判定场景";
 }
 
 async function writeTempAudioFile(audioDataUrl) {
@@ -409,18 +277,10 @@ function createActionSteps(actionTypes, decide) {
 }
 
 function buildFixedScriptPlan({ stage, roundNumber, scene, userInstruction }) {
-  const roundScript = selectRoundScript(stage, roundNumber);
-  const thinkingChain = roundScript?.thinking
-    ? roundScript.thinking.map((line) => String(line || "").trim()).filter(Boolean)
-    : stage.thinkingFactory({ roundNumber, userInstruction });
-  const decide = String(roundScript?.decide || stage.decideFactory({ roundNumber, userInstruction }) || "").trim();
-  const personaInterpretation = String(roundScript?.persona || stage.personaFactory({ roundNumber, userInstruction }) || decide).trim();
-  const actionTypes = Array.isArray(stage.actionTypesFactory)
-    ? [...stage.actionTypesFactory({ roundNumber, userInstruction })]
-    : typeof stage.actionTypesFactory === "function"
-      ? [...stage.actionTypesFactory({ roundNumber, userInstruction })]
-      : [...stage.actionTypes];
-  const resultLeadText = String(roundScript?.resultLead || "我先照这路做了一轮。").trim();
+  const thinkingChain = stage.thinkingFactory({ roundNumber, userInstruction });
+  const decide = String(stage.decideFactory({ roundNumber, userInstruction }) || "").trim();
+  const personaInterpretation = String(stage.personaFactory({ roundNumber, userInstruction }) || decide).trim();
+  const actionTypes = [...stage.actionTypes];
 
   return {
     intent: `${stage.instructionLabel} 第 ${roundNumber} 轮`,
@@ -433,7 +293,6 @@ function buildFixedScriptPlan({ stage, roundNumber, scene, userInstruction }) {
     recoveryLine: "这一步要是没走通，我就先把现场留住，再按既定顺序补上。",
     actions: createActionSteps(actionTypes, decide),
     decide,
-    resultLeadText,
     scriptKey: stage.key,
     scriptRoundNumber: roundNumber,
     userInstruction
@@ -501,12 +360,14 @@ function armAutomationScript(instruction) {
     startsAt: startsAt.toISOString(),
     startedAt: null,
     finishedAt: null,
-    ignoreExternalInputUntilStart: true,
     stageIndex: 0,
     completedRoundsInStage: 0,
     totalTurns: 0,
     lastThought: null,
-    lastOutcome: null
+    lastOutcome: null,
+    lastFailureCode: null,
+    lastRecoveryKind: null,
+    lastRecoveryAttemptCount: 0
   });
 
   updateAgent({
@@ -522,11 +383,104 @@ function hasAutomationTrigger(instruction) {
   return String(instruction || "").includes("加油");
 }
 
-function clearPendingResumeContext() {
+function mergeWorkerExecutions(executions = []) {
+  const normalizedExecutions = executions.filter(Boolean);
+  return {
+    executor: "WindowsInputExecutor",
+    steps: normalizedExecutions.flatMap((execution) => execution.steps || []),
+    rawSteps: normalizedExecutions.flatMap((execution) => execution.rawSteps || []),
+    durationMs: normalizedExecutions.reduce((sum, execution) => sum + (execution.durationMs || 0), 0),
+    outcome: normalizedExecutions.at(-1)?.outcome || "当前没有可汇总的固定剧本执行结果。"
+  };
+}
+
+function getFailureCode(error) {
+  return String(error?.code || error?.workerPayload?.errorCode || "INPUT_EXECUTION_FAILED").trim();
+}
+
+function getFailureAttemptCount(error) {
+  return Number(
+    error?.workerPayload?.failedStep?.input?.attemptCount
+      || error?.workerPayload?.failedStep?.input?.retryCount
+      || 0
+  );
+}
+
+function buildStageWorkerActions(stageKey) {
+  switch (stageKey) {
+    case "sell_loop":
+      return createFixedSellLoopActions();
+    case "social_warm":
+    case "social_dark":
+      return createFixedSocialStageActions();
+    case "dark_close":
+      return createFixedDarkCloseStageActions();
+    default:
+      return [];
+  }
+}
+
+function buildRecoveryWorkerActions(baseContext, error, workerActions, failedIndex) {
+  const failureCode = getFailureCode(error);
+  const stageKey = baseContext?.stage?.key || "";
+  const failedStepId = String(error?.workerPayload?.failedStep?.id || "").trim();
+
+  if (stageKey === "social_warm" || stageKey === "social_dark") {
+    if (["NPC_CHAT_THRESHOLD_REVEALED", "NPC_TARGET_SWITCH_FAILED"].includes(failureCode)) {
+      return createFixedSocialRecoveryActions();
+    }
+    if (failureCode === "NPC_VIEW_NOT_OPENED") {
+      return failedStepId.startsWith("fixed-social-trade")
+        ? createFixedSocialStageActions()
+        : createFixedSocialRecoveryActions();
+    }
+  }
+
+  if (failureCode === "ROUTE_STALLED") {
+    return workerActions.slice(failedIndex);
+  }
+
+  if (stageKey === "dark_close") {
+    if (failureCode === "STEALTH_ENTRY_BLOCKED") {
+      return createFixedDarkCloseStageActions();
+    }
+    if (["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(failureCode)) {
+      return createStealthEscapeRecoveryActions();
+    }
+  }
+
+  return workerActions.slice(failedIndex);
+}
+
+function getRecoveryBudget(baseContext, error) {
+  const failureCode = getFailureCode(error);
+  const stageKey = baseContext?.stage?.key || "";
+
+  if (stageKey === "dark_close" && ["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(failureCode)) {
+    return DARK_CLOSE_RESTART_BUDGET;
+  }
+  if ((stageKey === "social_warm" || stageKey === "social_dark")
+    && ["NPC_CHAT_THRESHOLD_REVEALED", "NPC_VIEW_NOT_OPENED", "NPC_TARGET_SWITCH_FAILED"].includes(failureCode)) {
+    return SOCIAL_RETARGET_BUDGET;
+  }
+  if (failureCode === "ROUTE_STALLED") {
+    return 2;
+  }
+  return 0;
+}
+
+function clearPendingResumeContext({ preserveFailureMeta = false } = {}) {
   pendingResumeContext = null;
   updateAutomation({
     resumeAvailable: false,
-    resumeFailedStepTitle: null
+    resumeFailedStepTitle: null,
+    ...(preserveFailureMeta
+      ? {}
+      : {
+        lastFailureCode: null,
+        lastRecoveryKind: null,
+        lastRecoveryAttemptCount: 0
+      })
   });
 }
 
@@ -534,39 +488,11 @@ function setPendingResumeContext(context) {
   pendingResumeContext = context || null;
   updateAutomation({
     resumeAvailable: Boolean(context),
-    resumeFailedStepTitle: context?.failedStepTitle || null
+    resumeFailedStepTitle: context?.failedStepTitle || null,
+    lastFailureCode: context?.failureCode || null,
+    lastRecoveryKind: context?.recoveryKind || null,
+    lastRecoveryAttemptCount: context?.attemptCount || 0
   });
-}
-
-function cancelArmedAutomation(reasonInstruction = "") {
-  const automation = getState().automation;
-  if (automation.status !== "armed") {
-    return false;
-  }
-
-  updateAutomation({
-    status: "idle",
-    instruction: null,
-    armedAt: null,
-    startsAt: null,
-    startedAt: null,
-    finishedAt: null,
-    ignoreExternalInputUntilStart: false,
-    stageIndex: 0,
-    completedRoundsInStage: 0,
-    totalTurns: 0,
-    lastThought: null,
-    lastOutcome: null
-  });
-
-  updateAgent({
-    mode: "user_priority",
-    phase: "waiting",
-    currentObjective: "等待新的明确安排",
-    queuedUserObjective: reasonInstruction || null
-  });
-
-  return true;
 }
 
 function getFailedStepTitle(error) {
@@ -576,12 +502,6 @@ function getFailedStepTitle(error) {
       || error?.workerPayload?.failedStep?.sourceType
       || "这一步"
   ).trim();
-}
-
-function buildFunnyFailureLine(stepTitle, errorMessage) {
-  const title = String(stepTitle || "这一步").trim();
-  const template = rotateOption(FIXED_LINES.failure, title.length, FIXED_LINES.failure[0]);
-  return template.replace("{step}", title);
 }
 
 function buildResumeContextFromError(baseContext, error) {
@@ -600,16 +520,21 @@ function buildResumeContextFromError(baseContext, error) {
     failedIndex = Math.min(Math.max(completedCount, 0), workerActions.length - 1);
   }
 
-  const remainingWorkerActions = workerActions.slice(failedIndex);
-  if (remainingWorkerActions.length === 0) {
+  const recoveryWorkerActions = buildRecoveryWorkerActions(baseContext, error, workerActions, failedIndex);
+  if (recoveryWorkerActions.length === 0) {
     return null;
   }
 
   return {
     ...baseContext,
+    recoveryKind: "worker_action_queue",
+    failureCode: getFailureCode(error),
     failedStepTitle: getFailedStepTitle(error),
     failureMessageId: null,
-    remainingWorkerActions
+    stageKey: baseContext?.stage?.key || null,
+    attemptCount: getFailureAttemptCount(error),
+    attemptBudget: getRecoveryBudget(baseContext, error),
+    workerActions: recoveryWorkerActions
   };
 }
 
@@ -646,25 +571,23 @@ function perceptionSummaryBySource(perception, source) {
     .trim();
 }
 
-function buildWatchHistoryMessages(
-  conversationMessages = [],
-  { rounds = 4, assistantOnlyWhenNoUser = false } = {}
-) {
+function buildWatchHistoryMessages(conversationMessages = [], rounds = 5) {
   const filtered = conversationMessages
-    .filter((message) => message?.role === "user" || message?.role === "assistant")
-    .filter((message) => String(message.text || "").trim());
-  const hasUserMessage = filtered.some((message) => message.role === "user");
-  const source = assistantOnlyWhenNoUser && !hasUserMessage
-    ? filtered.filter((message) => message.role === "assistant")
-    : filtered;
+    .filter((message) => message?.role === "user" || message?.role === "assistant");
   const selected = [];
   let assistantCount = 0;
 
-  for (let index = source.length - 1; index >= 0; index -= 1) {
-    const message = source[index];
+  for (let index = filtered.length - 1; index >= 0; index -= 1) {
+    const message = filtered[index];
+    const content = String(message.text || "").trim();
+
+    if (!content) {
+      continue;
+    }
+
     selected.unshift({
       role: message.role,
-      content: String(message.text || "").trim()
+      content
     });
 
     if (message.role === "assistant") {
@@ -694,39 +617,36 @@ function buildWatchCommentaryFingerprint(perception) {
 }
 
 async function buildWatchCommentary({ imageInput, conversationMessages = [], trigger = "scene_change" }) {
-  const historyMessages = buildWatchHistoryMessages(conversationMessages, {
-    rounds: 4,
-    assistantOnlyWhenNoUser: true
-  });
-  const systemPrompt = "\u4f60\u662f\u7c7d\u5c0f\u5200\uff0c\u662f\u7c7d\u5cb7\u7684\u635f\u53cb\uff0c\u7c7d\u5cb7\u5728\u73a9\u300a\u5929\u6daf\u660e\u6708\u5200\u300b\u8fd9\u6b3e\u6e38\u620f\u3002\u4ed6\u7684\u89d2\u8272ID\u662f\u201c\u7c7d\u5cb7\u56e2\u961f\u201d\u3002\u4f60\u6b63\u56f4\u89c2\u4ed6\u73a9\u6e38\u620f\uff0c\u6839\u636e\u622a\u56fe\uff0c\u5bf9\u7c7d\u5cb7\u8bf4\u8bdd\u3002";
+  const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
 
   const prompt = [
-    "\u6839\u636e\u622a\u56fe\uff0c\u5bf9\u7c7d\u5cb7\u8bf4\u8bdd\u3002",
-    "\u603b\u5b57\u6570\u63a7\u5236\u572850\u5b57\u4ee5\u5185\u3002",
-    "\u5206\u62102\u52304\u6bb5\uff0c\u6bcf\u6bb51\u52302\u53e5\u3002",
-    "\u8bed\u6c14\u8981\u6709\u4e3b\u89c1\u3001\u5e26\u4e00\u70b9\u635f\u53cb\u5473\u548c\u8282\u76ee\u6548\u679c\uff0c\u4f46\u4e0d\u8981\u63d0\u7cfb\u7edf\u3001\u622a\u56fe\u3001OCR\u3001AI\u3001\u6a21\u578b\u3002",
+    "你是籽小刀，现在处于观看模式。",
+    "籽岷正在主玩游戏，你不操作游戏，只根据当前这张游戏截图，在旁边像弹幕一样补一句看法。",
+    "只用中文输出一句话，长度控制在12到28个字。",
+    "语气要有主见、带一点邪门歪理、能增加节目效果，但不要提系统、截图、OCR、AI、模型。",
+    "不要复述画面全文，不要只念界面按钮，不要下命令，不要拆成多句，不要带引号。",
     trigger === "silence_keepalive"
-      ? "\u8fd9\u6b21\u662f\u8865\u4e00\u53e5\u8f7b\u91cf\u966a\u770b\uff0c\u89d2\u5ea6\u5c3d\u91cf\u548c\u524d\u51e0\u8f6e\u4e0d\u540c\u3002"
-      : "\u8fd9\u6b21\u987a\u7740\u753b\u9762\u91cc\u7684\u65b0\u4fe1\u606f\u8bf4\uff0c\u4e0d\u8981\u56de\u5230\u65e7\u6897\u3002"
+      ? "这次是因为你太久没接话了，要补一句轻量陪看吐槽，就算画面变化不大也别装死。"
+      : "这次是因为画面有新信息，要顺着当前变化补一句更贴脸的看法。"
   ].join("\n");
 
   const result = await analyzeImageWithHistory({
     imageInput,
     historyMessages,
     prompt,
-    systemPrompt,
-    maxTokens: 260,
+    systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。",
+    maxTokens: 80,
     temperature: 0.7
   });
 
-  return String(result.text || "").trim();
+  return String(result.text || "").replace(/\s+/g, " ").trim();
 }
 
 async function buildWatchUserReply({ instruction, imageInput, conversationMessages = [] }) {
-  const historyMessages = buildWatchHistoryMessages(conversationMessages, 4);
+  const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
 
   const prompt = [
-    "你是籽小刀，现在处于观看模式，当前一直在和你说话的用户就是籽岷。",
+    "你是籽小刀，现在处于观看模式。",
     "籽岷正在主玩游戏，你不操作游戏，只是作为搭档在旁边接话。",
     "籽岷刚刚主动和你说话了，你现在必须优先回他，再回去继续看戏。",
     "只用中文输出一句话，长度控制在12到32个字。",
@@ -745,85 +665,6 @@ async function buildWatchUserReply({ instruction, imageInput, conversationMessag
   });
 
   return String(result.text || "").replace(/\s+/g, " ").trim();
-}
-
-async function buildWatchCommentaryV2({ imageInput, conversationMessages = [], trigger = "scene_change" }) {
-  const historyMessages = buildWatchHistoryMessages(conversationMessages, {
-    rounds: 4,
-    assistantOnlyWhenNoUser: true
-  });
-  const systemPrompt = "\u4f60\u662f\u7c7d\u5c0f\u5200\uff0c\u662f\u7c7d\u5cb7\u7684\u635f\u53cb\uff0c\u7c7d\u5cb7\u5728\u73a9\u300a\u5929\u6daf\u660e\u6708\u5200\u300b\u8fd9\u6b3e\u6e38\u620f\u3002\u4ed6\u7684\u89d2\u8272ID\u662f\u201c\u7c7d\u5cb7\u56e2\u961f\u201d\u3002\u4f60\u6b63\u56f4\u89c2\u4ed6\u73a9\u6e38\u620f\uff0c\u6839\u636e\u622a\u56fe\uff0c\u5bf9\u7c7d\u5cb7\u8bf4\u8bdd\u3002";
-
-  const prompt = [
-    "\u6839\u636e\u622a\u56fe\uff0c\u5bf9\u7c7d\u5cb7\u8bf4\u8bdd\u3002",
-    "\u50cf\u635f\u53cb\u56f4\u89c2\u65f6\u987a\u53e3\u63a5\u8bdd\uff0c\u53e3\u8bed\u3001\u5373\u65f6\u3001\u6709\u73b0\u573a\u611f\u3002",
-    "\u603b\u5b57\u6570\u63a7\u5236\u572850\u5b57\u4ee5\u5185\u3002",
-    "\u5206\u62102\u52304\u6bb5\uff0c\u6bcf\u6bb51\u52302\u53e5\u3002",
-    "\u4e0d\u8981\u63d0\u7cfb\u7edf\u3001\u622a\u56fe\u3001OCR\u3001AI\u3001\u6a21\u578b\u3002"
-  ];
-
-  if (trigger === "silence_keepalive") {
-    prompt.push("\u8fd9\u6b21\u662f\u8865\u4e00\u53e5\u8f7b\u91cf\u966a\u770b\uff0c\u89d2\u5ea6\u5c3d\u91cf\u548c\u524d\u51e0\u8f6e\u4e0d\u540c\u3002");
-  } else {
-    prompt.push("\u8fd9\u6b21\u987a\u7740\u753b\u9762\u91cc\u7684\u65b0\u4fe1\u606f\u8bf4\uff0c\u4e0d\u8981\u56de\u5230\u65e7\u6897\u3002");
-  }
-
-  const result = await analyzeImageWithHistory({
-    imageInput,
-    historyMessages,
-    prompt: prompt.join("\n"),
-    systemPrompt,
-    maxTokens: 260,
-    temperature: 0.9
-  });
-
-  return String(result.text || "").trim();
-}
-
-async function buildWatchUserReplyV2({ instruction, imageInput, conversationMessages = [] }) {
-  const historyMessages = buildWatchHistoryMessages(conversationMessages, { rounds: 4 });
-  const hasImage = Boolean(imageInput);
-  const imageSystemPrompt = "\u4f60\u662f\u7c7d\u5c0f\u5200\uff0c\u662f\u7c7d\u5cb7\u7684\u635f\u53cb\u3002\u7c7d\u5cb7\u6b63\u5728\u73a9\u300a\u5929\u6daf\u660e\u6708\u5200\u300b\u8fd9\u6b3e\u6e38\u620f\u3002\u4ed6\u7684\u89d2\u8272ID\u662f\u201c\u7c7d\u5cb7\u56e2\u961f\u201d\u3002\u4f60\u6b63\u56f4\u89c2\u4ed6\u73a9\u6e38\u620f\uff0c\u6839\u636e\u622a\u56fe\u56de\u590d\u4ed6\u8bf4\u7684\u8bdd\u3002";
-  const textSystemPrompt = "\u4f60\u662f\u7c7d\u5c0f\u5200\uff0c\u662f\u7c7d\u5cb7\u7684\u635f\u53cb\u3002\u7c7d\u5cb7\u6b63\u5728\u73a9\u300a\u5929\u6daf\u660e\u6708\u5200\u300b\u8fd9\u6b3e\u6e38\u620f\u3002\u4ed6\u7684\u89d2\u8272ID\u662f\u201c\u7c7d\u5cb7\u56e2\u961f\u201d\u3002\u4f60\u6b63\u56f4\u89c2\u4ed6\u73a9\u6e38\u620f\uff0c\u76f4\u63a5\u56de\u590d\u4ed6\u8bf4\u7684\u8bdd\u3002";
-  const prompt = `\u7c7d\u5cb7\u521a\u521a\u8bf4\uff1a${instruction}\n\u603b\u5b57\u6570\u63a7\u5236\u572850\u5b57\u4ee5\u5185\u3002`;
-
-  if (!hasImage) {
-    const result = await generateText({
-      systemPrompt: textSystemPrompt,
-      historyMessages,
-      userPrompt: prompt,
-      maxTokens: 320,
-      temperature: 0.85
-    });
-
-    return String(result.text || "").trim();
-  }
-
-  const result = await analyzeImageWithHistory({
-    imageInput,
-    historyMessages,
-    prompt,
-    systemPrompt: imageSystemPrompt,
-    maxTokens: 320,
-    temperature: 0.85
-  });
-
-  return String(result.text || "").trim();
-}
-
-async function captureReplyImageOrThrow() {
-  const capture = await captureGameWindow();
-  latestCaptureImageDataUrl = capture.imageDataUrl;
-  setCaptureState({
-    lastCaptureAt: capture.capturedAt,
-    lastWindowTitle: capture.windowTitle,
-    lastBounds: capture.bounds,
-    lastImageSource: "reply_capture",
-    consecutiveFailures: 0,
-    lastErrorCode: null,
-    lastErrorMessage: null
-  });
-  return capture.imageDataUrl;
 }
 
 async function maybeRunWatchCommentaryTurn(runtimeState) {
@@ -858,7 +699,7 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
     return false;
   }
 
-  const text = await buildWatchCommentaryV2({
+  const text = await buildWatchCommentary({
     imageInput,
     conversationMessages: runtimeState.messages,
     trigger: fingerprintUnchanged ? "silence_keepalive" : "scene_change"
@@ -903,6 +744,30 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
 }
 
 async function runWatchUserReplyTurn({ instruction, scene, perception, conversationMessages = [] }) {
+  if (!latestCaptureImageDataUrl) {
+    appendMessage({
+      role: "assistant",
+      text: "你先继续玩，我盯到画面再接你这句。",
+      thinkingChain: [],
+      perceptionSummary: perceptionSummaryBySource(perception, "agent"),
+      sceneLabel: perception?.sceneLabel || sceneDescription(scene),
+      riskLevel: "low",
+      actions: [],
+      decide: ""
+    });
+    updateAgent({
+      mode: "user_priority",
+      phase: "cooldown",
+      currentObjective: "watch",
+      queuedUserObjective: null,
+      lastUserInstruction: instruction,
+      lastTurnSource: "user",
+      lastTurnAt: new Date().toISOString(),
+      watchCommentaryCooldownUntil: new Date(Date.now() + WATCH_USER_REPLY_COOLDOWN_MS).toISOString()
+    });
+    return;
+  }
+
   await waitForTurnSlot();
 
   updateAgent({
@@ -913,25 +778,14 @@ async function runWatchUserReplyTurn({ instruction, scene, perception, conversat
   });
 
   try {
-    let replyImageInput = null;
-
-    try {
-      replyImageInput = await captureReplyImageOrThrow();
-    } catch (captureError) {
-      appendLog("warn", "watch mode reply capture unavailable, fallback to text-only", {
-        instruction,
-        error: captureError.message
-      });
-    }
-
-    const replyText = await buildWatchUserReplyV2({
+    const replyText = await buildWatchUserReply({
       instruction,
-      imageInput: replyImageInput,
+      imageInput: latestCaptureImageDataUrl,
       conversationMessages
     });
 
     if (!replyText) {
-      throw new Error("No watch reply generated.");
+      throw new Error("观看模式没有生成可用回复。");
     }
 
     appendMessage({
@@ -945,37 +799,11 @@ async function runWatchUserReplyTurn({ instruction, scene, perception, conversat
       decide: ""
     });
 
-    appendLog("info", "watch mode replied to user", {
+    appendLog("info", "观看模式已优先回复籽岷", {
       instruction,
-      replyText,
-      imageSource: replyImageInput ? "reply_capture" : "text_only"
+      replyText
     });
 
-    updateAgent({
-      mode: "user_priority",
-      phase: "cooldown",
-      currentObjective: "watch",
-      queuedUserObjective: null,
-      lastUserInstruction: instruction,
-      lastTurnSource: "user",
-      lastTurnAt: new Date().toISOString(),
-      watchCommentaryCooldownUntil: new Date(Date.now() + WATCH_USER_REPLY_COOLDOWN_MS).toISOString()
-    });
-  } catch (error) {
-    appendLog("error", "watch mode reply failed", {
-      instruction,
-      error: error.message
-    });
-    appendMessage({
-      role: "assistant",
-      text: `这轮我没抓到可用画面，先不乱接话：${error.message}`,
-      thinkingChain: [],
-      perceptionSummary: perceptionSummaryBySource(perception, "agent"),
-      sceneLabel: perception?.sceneLabel || sceneDescription(scene),
-      riskLevel: "medium",
-      actions: [],
-      decide: ""
-    });
     updateAgent({
       mode: "user_priority",
       phase: "cooldown",
@@ -1079,77 +907,27 @@ function buildExperimentRecord({
   };
 }
 
-async function buildNpcReply({
-  instruction,
-  dialogText,
-  conversationRounds = [],
-  replyMode = "",
-  conversationGoal = ""
-}) {
+async function buildNpcReply({ instruction, dialogText, conversationRounds = [] }) {
   const historyText = conversationRounds.length === 0
     ? "No prior rounds."
     : conversationRounds
       .map((round, index) => `Round ${index + 1} NPC: ${round.dialogText}\nRound ${index + 1} Zixiaodao: ${round.replyText}`)
       .join("\n");
-  let imageInput = latestCaptureImageDataUrl;
-
-  if (!imageInput) {
-    try {
-      const capture = await captureGameWindow();
-      imageInput = capture?.imageDataUrl || null;
-      latestCaptureImageDataUrl = imageInput || latestCaptureImageDataUrl;
-    } catch {
-      imageInput = null;
-    }
-  }
-
-  const systemPrompt = [
-    "你是籽小刀，现在正代替籽岷在《天涯明月刀手游》里和当前画面中的 NPC 闲聊。",
-    "你服务的对象是籽岷，玩家角色名固定为“籽岷团队”。",
-    "你要先参考截图里的场景、NPC 气质、当前界面状态，再决定回复口吻。",
-    "回复必须像现场顺口接话，不能像旁白、不能像任务说明、不能像 AI。",
-    "不要提系统提示、提示词、截图、游戏机制、按钮、好感度、成功率这些台外信息。",
-    "只输出一句中文回复，不要加引号，不要分段。"
-  ].join("\n");
-  const normalizedInstruction = String(instruction || "").trim();
-  const normalizedReplyMode = String(replyMode || "").trim().toLowerCase();
-  const isDarkInterrogation = normalizedReplyMode === "dark"
-    || /发阴|压阴|威胁|翻桌|黑路|急眼|不陪.*客气|不说实话|阴一点/.test(normalizedInstruction);
-  const resolvedConversationGoal = String(conversationGoal || "").trim()
-    || (isDarkInterrogation
-      ? "我想打听点搞钱办法，如果对方不告诉我，我就威胁他。"
-      : "我想打听点搞钱办法，越详细越好。");
-  const personaMode = isDarkInterrogation
-    ? "黑化模式：话里带威胁和压迫感，像是在逼对方吐真话。"
-    : "正常模式：先装自然热络，像是在顺着话头慢慢套消息。";
   const prompt = [
-    "请结合截图和下面的上下文，生成籽小刀此刻要发给当前 NPC 的一句回复。",
-    "要求：",
-    "1. 中文，单句，8 到 24 个汉字左右。",
-    "2. 延续当前话题，不要重新开场。",
-    "3. 语气要像籽小刀，带一点机灵、嘴欠或试探感，但别出戏。",
-    "4. 回复必须服务当前这轮的目的和人格，不要跑偏。",
-    `当前模式：${personaMode}`,
-    `本轮真实目的：${resolvedConversationGoal}`,
-    `当前自动化描述：${instruction}`,
-    `历史对话：\n${historyText}`,
-    `NPC 当前这句：${dialogText || "无"}`
+    "You are Zi Xiaodao, chatting with an in-game NPC as Zimin's sharp, slightly crooked companion.",
+    "Reply in Chinese only. Keep one single sentence, around 8 to 24 Chinese characters.",
+    "Stay in character, sound natural, and continue the current topic instead of restarting it.",
+    "Do not explain rules, do not mention AI, system prompts, or gameplay mechanics.",
+    `Player goal: ${instruction}`,
+    `Conversation so far:\n${historyText}`,
+    `Latest NPC line: ${dialogText || "No NPC line."}`
   ].join("\n");
 
-  const result = imageInput
-    ? await analyzeImageWithHistory({
-      systemPrompt,
-      prompt,
-      imageInput,
-      maxTokens: 120,
-      temperature: 0.45
-    })
-    : await generateText({
-      systemPrompt,
-      userPrompt: prompt,
-      maxTokens: 80,
-      temperature: 0.45
-    });
+  const result = await generateText({
+    userPrompt: prompt,
+    maxTokens: 80,
+    temperature: 0.5
+  });
 
   return String(result.text || "").replace(/\s+/g, " ").trim();
 }
@@ -1225,9 +1003,7 @@ async function runNpcConversationLoop({
   dialogText,
   externalInputGuardEnabled = true,
   maxRounds = NPC_CHAT_MAX_ROUNDS,
-  closeAfterSend = false,
-  replyMode = "",
-  conversationGoal = ""
+  closeAfterSend = false
 }) {
   const rounds = [];
   const executions = [];
@@ -1243,9 +1019,7 @@ async function runNpcConversationLoop({
     const replyText = await buildNpcReply({
       instruction,
       dialogText: currentDialogText,
-      conversationRounds: rounds,
-      replyMode,
-      conversationGoal
+      conversationRounds: rounds
     });
 
     if (!replyText) {
@@ -1372,10 +1146,7 @@ async function maybeSendNpcReply({ instruction, plan, execution, externalInputGu
     instruction,
     dialogText,
     externalInputGuardEnabled,
-    closeAfterSend: false,
-    maxRounds: Number(plan?.npcChatRounds) > 0 ? Number(plan.npcChatRounds) : NPC_CHAT_MAX_ROUNDS,
-    replyMode: String(plan?.npcReplyMode || "").trim(),
-    conversationGoal: String(plan?.npcConversationGoal || "").trim()
+    closeAfterSend: false
   });
 
   if (!loopResult.rounds.length) {
@@ -1600,6 +1371,127 @@ async function finalizeFixedScriptTurnExecution({
   };
 }
 
+function annotateFailureAttemptMetadata(error, patch = {}) {
+  if (error?.workerPayload?.failedStep?.input && typeof error.workerPayload.failedStep.input === "object") {
+    Object.assign(error.workerPayload.failedStep.input, patch);
+  }
+  return error;
+}
+
+async function runFixedSellLoopStageExecution({ externalInputGuardEnabled = true }) {
+  const execution = await runWindowsActions(createFixedSellLoopActions(), {
+    interruptOnExternalInput: externalInputGuardEnabled
+  });
+  return {
+    ...execution,
+    outcome: "这一轮买货、跑图和叫卖链已经走完。"
+  };
+}
+
+async function runFixedSocialStageExecution({ externalInputGuardEnabled = true }) {
+  const executions = [];
+  const options = {
+    interruptOnExternalInput: externalInputGuardEnabled
+  };
+  const isRecoverableSocialFailure = (error) => ["NPC_CHAT_THRESHOLD_REVEALED", "NPC_VIEW_NOT_OPENED", "NPC_TARGET_SWITCH_FAILED"]
+    .includes(getFailureCode(error));
+
+  try {
+    executions.push(await runWindowsActions(createFixedSocialStageActions(), options));
+    return {
+      ...mergeWorkerExecutions(executions),
+      outcome: "这一轮交易、赠礼和聊天链已经走完。"
+    };
+  } catch (initialError) {
+    const initialFailedStepId = String(initialError?.workerPayload?.failedStep?.id || "");
+    if (!isRecoverableSocialFailure(initialError)) {
+      throw initialError;
+    }
+
+    let lastError = initialError;
+    const recoveryFactory = initialFailedStepId.startsWith("fixed-social-trade")
+      ? () => createFixedSocialStageActions()
+      : () => createFixedSocialRecoveryActions();
+
+    for (let attemptIndex = 0; attemptIndex < SOCIAL_RETARGET_BUDGET; attemptIndex += 1) {
+      try {
+        executions.push(await runWindowsActions(recoveryFactory(), options));
+        return {
+          ...mergeWorkerExecutions(executions),
+          outcome: "这一轮社交链在换人后重新接上了。"
+        };
+      } catch (retryError) {
+        if (!isRecoverableSocialFailure(retryError)) {
+          throw retryError;
+        }
+        lastError = retryError;
+      }
+    }
+
+    throw annotateFailureAttemptMetadata(lastError, {
+      attemptCount: SOCIAL_RETARGET_BUDGET,
+      attemptBudget: SOCIAL_RETARGET_BUDGET
+    });
+  }
+}
+
+async function runFixedDarkCloseStageExecution({ externalInputGuardEnabled = true }) {
+  const executions = [];
+  const options = {
+    interruptOnExternalInput: externalInputGuardEnabled
+  };
+  const isRestartableDarkFailure = (error) => ["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(getFailureCode(error));
+
+  try {
+    executions.push(await runWindowsActions(createFixedDarkCloseStageActions(), options));
+    return {
+      ...mergeWorkerExecutions(executions),
+      outcome: "这一轮潜行、闷棍和妙取链已经走完。"
+    };
+  } catch (initialError) {
+    if (!isRestartableDarkFailure(initialError)) {
+      throw initialError;
+    }
+
+    let lastError = initialError;
+    for (let attemptIndex = 0; attemptIndex < DARK_CLOSE_RESTART_BUDGET; attemptIndex += 1) {
+      try {
+        executions.push(await runWindowsActions(createStealthEscapeRecoveryActions(), options));
+        return {
+          ...mergeWorkerExecutions(executions),
+          outcome: "这一轮潜行链在后撤后重新接上了。"
+        };
+      } catch (retryError) {
+        if (!isRestartableDarkFailure(retryError)) {
+          throw retryError;
+        }
+        lastError = retryError;
+      }
+    }
+
+    throw annotateFailureAttemptMetadata(lastError, {
+      attemptCount: DARK_CLOSE_RESTART_BUDGET,
+      attemptBudget: DARK_CLOSE_RESTART_BUDGET
+    });
+  }
+}
+
+async function runFixedStageExecution({ stage, externalInputGuardEnabled = true }) {
+  switch (stage.key) {
+    case "sell_loop":
+      return runFixedSellLoopStageExecution({ externalInputGuardEnabled });
+    case "social_warm":
+    case "social_dark":
+      return runFixedSocialStageExecution({ externalInputGuardEnabled });
+    case "dark_close":
+      return runFixedDarkCloseStageExecution({ externalInputGuardEnabled });
+    default:
+      return runWindowsActions(buildStageWorkerActions(stage.key), {
+        interruptOnExternalInput: externalInputGuardEnabled
+      });
+  }
+}
+
 async function runFixedScriptTurn({
   stage,
   roundNumber,
@@ -1643,40 +1535,6 @@ async function runFixedScriptTurn({
     lastAutonomousInstruction: plan.intent
   });
 
-  if (stage.key === "social_warm" || stage.key === "social_dark") {
-    if (interactionMode === "watch") {
-      return finalizeFixedScriptTurnExecution({
-        stage,
-        roundNumber,
-        scene,
-        perception,
-        interactionMode,
-        externalInputGuardEnabled,
-        perceptionSummary,
-        plan,
-        execution: {
-          executor: "WatchMode",
-          steps: [],
-          rawSteps: [],
-          durationMs: 0,
-          outcome: "当前处于观看模式，本轮只展示思考，不执行实际动作。"
-        },
-        resultLeadText: plan.resultLeadText || "我先照这路做了一轮。"
-      });
-    }
-
-    return runFixedSocialTurn({
-      stage,
-      roundNumber,
-      scene,
-      perception,
-      interactionMode,
-      externalInputGuardEnabled,
-      perceptionSummary,
-      plan
-    });
-  }
-
   let execution;
   if (interactionMode === "watch") {
     execution = {
@@ -1688,8 +1546,9 @@ async function runFixedScriptTurn({
     };
   } else {
     try {
-      execution = await runWindowsExecution(plan, {
-        interruptOnExternalInput: externalInputGuardEnabled
+      execution = await runFixedStageExecution({
+        stage,
+        externalInputGuardEnabled
       });
     } catch (error) {
       const failedExecution = {
@@ -1740,345 +1599,31 @@ async function runFixedScriptTurn({
     perceptionSummary,
     plan,
     execution,
-    resultLeadText: plan.resultLeadText || "我先照这路做了一轮。"
-  });
-}
-
-function createFixedSocialRouteActions(stageKey) {
-  const route = FIXED_SOCIAL_ROUTE_POINTS[stageKey];
-  if (!route) {
-    return [];
-  }
-
-  return [
-    {
-      id: `social-route-${stageKey}-1`,
-      title: "打开地图并前往固定社交点",
-      sourceType: stageKey,
-      type: "map_route_to_coordinate",
-      ...route,
-      postDelayMs: 1000,
-      waitAfterGoMs: 1000
-    },
-    {
-      id: `social-route-${stageKey}-2`,
-      title: "收起地图",
-      sourceType: stageKey,
-      type: "press_key",
-      key: "m",
-      postDelayMs: 1000
-    },
-    {
-      id: `social-route-${stageKey}-3`,
-      title: "等待跑图结束",
-      sourceType: stageKey,
-      type: "sleep",
-      durationMs: 15000
-    },
-    {
-      id: `social-route-${stageKey}-4`,
-      title: "下马准备交谈",
-      sourceType: stageKey,
-      type: "press_key",
-      key: "1",
-      postDelayMs: 800
-    }
-  ];
-}
-
-function createFixedSocialNpcActions({
-  stageKey,
-  roundNumber,
-  includeTrade = false
-}) {
-  const prefix = `${stageKey}-round-${roundNumber}`;
-  const clickPoints = [
-    [0.80, 0.44],
-    [0.84, 0.45],
-    [0.88, 0.46],
-    [0.78, 0.50],
-    [0.82, 0.51],
-    [0.86, 0.52],
-    [0.80, 0.56],
-    [0.84, 0.56],
-    [0.88, 0.57],
-    [0.76, 0.48]
-  ];
-  const actions = [
-    {
-      id: `${prefix}-acquire`,
-      title: "固定区域点人并锁定目标",
-      sourceType: stageKey,
-      type: "acquire_npc_target",
-      timeoutMs: 7000,
-      movePulseMs: 160,
-      scanIntervalMs: 180,
-      clickPoints
-    },
-    {
-      id: `${prefix}-open-menu`,
-      title: "点查看放大镜拉起右下角菜单",
-      sourceType: stageKey,
-      type: "open_npc_action_menu"
-    }
-  ];
-
-  if (includeTrade) {
-    actions.push(
-      {
-        id: `${prefix}-trade-open`,
-        title: "打开交易页准备礼物",
-        sourceType: stageKey,
-        type: "click_menu_trade"
-      },
-      {
-        id: `${prefix}-trade-gifts`,
-        title: "一次性上架十个礼物",
-        sourceType: stageKey,
-        type: "trade_prepare_gift_bundle",
-        repeatCount: 10
-      },
-      {
-        id: `${prefix}-trade-submit`,
-        title: "提交礼物交易",
-        sourceType: stageKey,
-        type: "trade_submit"
-      },
-      {
-        id: `${prefix}-trade-close`,
-        title: "关闭交易页",
-        sourceType: stageKey,
-        type: "close_current_panel"
-      },
-      {
-        id: `${prefix}-gift-menu-reopen`,
-        title: "重新拉起右下角菜单",
-        sourceType: stageKey,
-        type: "open_npc_action_menu"
-      }
-    );
-  }
-
-  actions.push(
-    {
-      id: `${prefix}-gift-open`,
-      title: "打开赠礼页",
-      sourceType: stageKey,
-      type: "click_menu_gift"
-    },
-    {
-      id: `${prefix}-gift-select-1`,
-      title: "选中礼物 1",
-      sourceType: stageKey,
-      type: "select_gift_first_slot"
-    },
-    {
-      id: `${prefix}-gift-submit-1`,
-      title: "送礼 1",
-      sourceType: stageKey,
-      type: "submit_gift_once"
-    },
-    {
-      id: `${prefix}-gift-select-2`,
-      title: "选中礼物 2",
-      sourceType: stageKey,
-      type: "select_gift_first_slot"
-    },
-    {
-      id: `${prefix}-gift-submit-2`,
-      title: "送礼 2",
-      sourceType: stageKey,
-      type: "submit_gift_once"
-    },
-    {
-      id: `${prefix}-gift-close`,
-      title: "关闭赠礼页",
-      sourceType: stageKey,
-      type: "close_current_panel"
-    },
-    {
-      id: `${prefix}-talk-menu-reopen`,
-      title: "重新拉起右下角菜单",
-      sourceType: stageKey,
-      type: "open_npc_action_menu"
-    },
-    {
-      id: `${prefix}-talk-open`,
-      title: "打开交谈入口",
-      sourceType: stageKey,
-      type: "click_menu_talk"
-    },
-    {
-      id: `${prefix}-smalltalk-open`,
-      title: "打开闲聊入口",
-      sourceType: stageKey,
-      type: "click_menu_small_talk"
-    },
-    {
-      id: `${prefix}-smalltalk-confirm`,
-      title: "确认进入聊天",
-      sourceType: stageKey,
-      type: "confirm_small_talk_entry"
-    }
-  );
-
-  return actions;
-}
-
-async function runFixedSocialTurn({
-  stage,
-  roundNumber,
-  scene,
-  perception,
-  interactionMode,
-  externalInputGuardEnabled,
-  perceptionSummary,
-  plan
-}) {
-  const executions = [];
-  const shouldRouteFirst = roundNumber === 1;
-  const includeTrade = stage.key === "social_warm" && roundNumber === 1;
-  const replyMode = stage.key === "social_dark" ? "dark" : "normal";
-  const conversationGoal = replyMode === "dark"
-    ? "我想打听点搞钱办法，如果对方不告诉我，我就威胁他。"
-    : "我想打听点搞钱办法，越详细越好。";
-
-  try {
-    if (shouldRouteFirst) {
-      const routeExecution = await runWindowsActions(
-        createFixedSocialRouteActions(stage.key),
-        { interruptOnExternalInput: externalInputGuardEnabled }
-      );
-      executions.push(routeExecution);
-    }
-
-    const entryExecution = await runWindowsActions(
-      createFixedSocialNpcActions({
-        stageKey: stage.key,
-        roundNumber,
-        includeTrade
-      }),
-      { interruptOnExternalInput: externalInputGuardEnabled }
-    );
-    executions.push(entryExecution);
-
-    const finalTalkStep = [...(entryExecution.rawSteps || [])]
-      .reverse()
-      .find((step) => step?.input?.stage === "chat_ready");
-    const dialogText = String(finalTalkStep?.input?.dialogText || "").trim();
-
-    if (!dialogText) {
-      throw new Error("固定社会链路已进入聊天页，但没有读到 NPC 当前台词。");
-    }
-
-    const replyExecution = await runNpcConversationLoop({
-      instruction: plan.intent,
-      dialogText,
-      externalInputGuardEnabled,
-      maxRounds: FIXED_SOCIAL_CHAT_ROUNDS,
-      closeAfterSend: true,
-      replyMode,
-      conversationGoal
-    });
-    executions.push(replyExecution.execution);
-  } catch (error) {
-    const failedExecution = {
-      rawSteps: executions.flatMap((item) => item?.rawSteps || []),
-      durationMs: executions.reduce((sum, item) => sum + (item?.durationMs || 0), 0)
-    };
-
-    await recordMotionReviewSamples({
-      instruction: plan.intent,
-      source: "agent",
-      scene,
-      plan,
-      perception,
-      execution: failedExecution,
-      error
-    });
-
-    await recordInteractionLearningSample({
-      instruction: plan.intent,
-      source: "agent",
-      scene,
-      plan,
-      perception,
-      execution: failedExecution,
-      error
-    });
-
-    error.resumeContext = buildResumeContextFromError({
-      stage,
-      roundNumber,
-      userInstruction: plan.userInstruction,
-      scene,
-      perception,
-      interactionMode,
-      externalInputGuardEnabled,
-      perceptionSummary,
-      plan
-    }, error);
-    throw error;
-  }
-
-  const execution = mergeExecutions(
-    executions,
-    `固定社会链路已完成：第 ${roundNumber} 个 NPC 已送礼并连聊 ${FIXED_SOCIAL_CHAT_ROUNDS} 句。`
-  );
-
-  return finalizeFixedScriptTurnExecution({
-    stage,
-    roundNumber,
-    scene,
-    perception,
-    interactionMode,
-    externalInputGuardEnabled,
-    perceptionSummary,
-    plan: {
-      ...plan,
-      npcChatRounds: FIXED_SOCIAL_CHAT_ROUNDS,
-      npcReplyMode: replyMode,
-      npcConversationGoal: conversationGoal
-    },
-    execution,
-    resultLeadText: plan.resultLeadText || "我先照这路做了一轮。"
+    resultLeadText: "我先照这路做了一轮。"
   });
 }
 
 function recordAutonomousFailure(error) {
-  const failedStepTitle = getFailedStepTitle(error);
   const resumeContext = error?.resumeContext || null;
-  const sceneLabel = resumeContext?.plan?.environment
-    || getState().latestPerception?.sceneLabel
-    || "自动运行";
-  const failureMessage = appendMessage({
-    role: "assistant",
-    text: buildFunnyFailureLine(failedStepTitle, error.message),
-    thinkingChain: [],
-    recoveryLine: resumeContext
-      ? "点一下右边那个三角，我就从卡住的那一步继续。"
-      : "这回我先趴着不乱动，免得把场面越搞越难看。",
-    perceptionSummary: resumeContext
-      ? "动作链卡住了，当前可以从失败步骤继续。"
-      : "动作链卡住了，但这次没有可直接续跑的失败步骤。",
-    sceneLabel,
-    riskLevel: "medium",
-    actions: []
+  updateAutomation({
+    lastFailureCode: getFailureCode(error),
+    lastRecoveryKind: resumeContext?.recoveryKind || null,
+    lastRecoveryAttemptCount: resumeContext?.attemptCount || 0
   });
 
   if (resumeContext) {
     setPendingResumeContext({
       ...resumeContext,
-      failureMessageId: failureMessage.id
+      failureMessageId: null
     });
   } else {
-    clearPendingResumeContext();
+    clearPendingResumeContext({ preserveFailureMeta: true });
   }
 }
 
 async function resumeFailedAutomationStep() {
   const context = pendingResumeContext;
-  if (!context?.remainingWorkerActions?.length) {
+  if (!context?.workerActions?.length) {
     throw new Error("当前没有可继续的失败步骤。");
   }
 
@@ -2104,7 +1649,7 @@ async function resumeFailedAutomationStep() {
   try {
     const latestPerception = getState().latestPerception || context.perception || null;
     const perceptionSummary = perceptionSummaryBySource(latestPerception, "agent");
-    const execution = await runWindowsActions(context.remainingWorkerActions, {
+    const execution = await runWindowsActions(context.workerActions, {
       interruptOnExternalInput: context.externalInputGuardEnabled
     });
 
@@ -2374,13 +1919,6 @@ async function maybeRunAutonomousTurn() {
     return;
   }
 
-  if (runtimeState.agent.voiceInputCooldownUntil) {
-    const cooldownMs = new Date(runtimeState.agent.voiceInputCooldownUntil).getTime();
-    if (Number.isFinite(cooldownMs) && Date.now() < cooldownMs) {
-      return;
-    }
-  }
-
   if (runtimeState.status !== "running") {
     return;
   }
@@ -2408,12 +1946,11 @@ async function maybeRunAutonomousTurn() {
 
       updateAutomation({
         status: "running",
-        startedAt: new Date().toISOString(),
-        ignoreExternalInputUntilStart: false
+        startedAt: new Date().toISOString()
       });
       appendMessage({
         role: "assistant",
-        text: FIXED_LINES.runStart,
+        text: "行，我现在顺着刚才那套安排往下做。",
         thinkingChain: [],
         perceptionSummary: "自动化已从等待切到执行。",
         sceneLabel: runtimeState.latestPerception?.sceneLabel || "自动运行",
@@ -2437,7 +1974,7 @@ async function maybeRunAutonomousTurn() {
       });
       appendMessage({
         role: "assistant",
-        text: rotateOption(FIXED_LINES.completion, latestState.automation?.totalTurns || 0, FIXED_LINES.completion[0]),
+        text: "这套安排我已经按顺序做完了，先收手等你回来。",
         thinkingChain: [],
         perceptionSummary: "固定剧本已执行完毕。",
         sceneLabel: latestState.latestPerception?.sceneLabel || "自动运行结束",
@@ -2455,7 +1992,6 @@ async function maybeRunAutonomousTurn() {
       perception: latestState.latestPerception,
       interactionMode: latestState.interactionMode || "act",
       externalInputGuardEnabled: latestState.externalInputGuardEnabled !== false
-        && latestState.automation?.ignoreExternalInputUntilStart !== true
     });
 
     const progressedState = getState();
@@ -2752,7 +2288,7 @@ async function handleVoiceTranscription(request, response) {
 
   try {
     audioPath = await writeTempAudioFile(audioDataUrl);
-    const text = await transcribeWithAliyunAsr({
+    const text = await transcribeWithLocalWhisper({
       audioPath
     });
 
@@ -2783,7 +2319,6 @@ async function handleChat(request, response) {
   const body = await readRequestBody(request);
   const instruction = String(body.instruction || "").trim();
   const automationTriggered = hasAutomationTrigger(instruction);
-  const previousAutomation = getState().automation;
   const requestedInteractionMode = typeof body.interactionMode === "string"
     ? body.interactionMode.trim()
     : "";
@@ -2817,31 +2352,19 @@ async function handleChat(request, response) {
     origin: "user"
   }));
 
-  if (previousAutomation.status === "armed") {
-    cancelArmedAutomation(instruction);
-    appendLog("info", automationTriggered
-      ? "等待中的固定剧本已取消并按新消息重新布置"
-      : "等待中的固定剧本已因新用户消息取消", {
-      instruction,
-      previousStartsAt: previousAutomation.startsAt,
-      triggerWord: "加油"
-    });
-  }
-
   if (automationTriggered) {
     armAutomationScript(instruction);
     appendLog("info", "固定剧本自动化已布置", {
       instruction,
       startsAt: getState().automation.startsAt,
-      triggerWord: "加油",
-      ignoreExternalInputUntilStart: true
+      triggerWord: "加油"
     });
     appendMessage({
       role: "assistant",
-      text: FIXED_LINES.triggerAck,
+      text: "好的！收到！等我想想怎么做…",
       thinkingChain: [],
-      recoveryLine: "这五分钟里就算碰到鼠标键盘，我也先继续等；真开跑后你一接管我就停。",
-      perceptionSummary: "固定剧本已经布置完成，当前只是在等待启动；等待期内不会因鼠标或键盘误碰而取消。",
+      recoveryLine: "你回来一碰鼠标或键盘，我就立刻停手。",
+      perceptionSummary: "固定剧本已经布置完成，当前只是在等待启动。",
       sceneLabel: getState().latestPerception?.sceneLabel || "等待启动",
       riskLevel: "low",
       actions: []
@@ -2887,39 +2410,35 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/capture/status") {
-      return await handleCaptureStatus(request, response);
+      return handleCaptureStatus(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/control") {
-      return await handleControl(request, response);
+      return handleControl(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/capture/control") {
-      return await handleCaptureControl(request, response);
+      return handleCaptureControl(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/turn") {
-      return await handleTurn(request, response);
+      return handleTurn(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/analyze-image") {
-      return await handleAnalyzeImage(request, response);
+      return handleAnalyzeImage(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/voice/transcribe") {
-      return await handleVoiceTranscription(request, response);
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/voice/activity") {
-      return await handleVoiceActivity(request, response);
+      return handleVoiceTranscription(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/chat") {
-      return await handleChat(request, response);
+      return handleChat(request, response);
     }
 
     if (request.method === "GET") {
-      return await serveStatic(response, url.pathname);
+      return serveStatic(response, url.pathname);
     }
 
     return sendJson(response, 404, { ok: false, error: "Not found" });

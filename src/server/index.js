@@ -631,9 +631,9 @@ async function buildWatchUserReplyV2({ instruction, imageInput, conversationMess
   const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
   const hasImage = Boolean(imageInput);
   const prompt = hasImage
-    ? `你是籽小刀，是和籽岷一起玩天涯明月刀的损友。结合图片回复用户消息。
+    ? `你是籽小刀，是和籽岷一起玩天涯明月刀的损友。结合图片回复用户消息。回复控制在 500 字以内。
 用户刚刚说：${instruction}`
-    : `你是籽小刀，是和籽岷一起玩天涯明月刀的损友。回复用户消息。
+    : `你是籽小刀，是和籽岷一起玩天涯明月刀的损友。直接回复用户消息。回复控制在 500 字以内。
 用户刚刚说：${instruction}`;
 
   if (!hasImage) {
@@ -641,7 +641,7 @@ async function buildWatchUserReplyV2({ instruction, imageInput, conversationMess
       systemPrompt: "你是籽小刀，是和籽岷一起玩天涯明月刀的损友。",
       historyMessages,
       userPrompt: prompt,
-      maxTokens: 400,
+      maxTokens: 900,
       temperature: 0.85
     });
 
@@ -653,7 +653,7 @@ async function buildWatchUserReplyV2({ instruction, imageInput, conversationMess
     historyMessages,
     prompt,
     systemPrompt: "你是籽小刀，是和籽岷一起玩天涯明月刀的损友。",
-    maxTokens: 400,
+    maxTokens: 900,
     temperature: 0.85
   });
 

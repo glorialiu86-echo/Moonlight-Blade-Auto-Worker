@@ -62,6 +62,12 @@ function Write-JsonResult {
   $Payload | ConvertTo-Json -Depth 6 -Compress
 }
 
+function Get-JpegCodec {
+  return [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
+    Where-Object { $_.MimeType -eq "image/jpeg" } |
+    Select-Object -First 1
+}
+
 try {
   $matches = New-Object System.Collections.Generic.List[object]
 
@@ -173,9 +179,17 @@ try {
   $graphics.CopyFromScreen($left, $top, 0, 0, (New-Object System.Drawing.Size($clampedWidth, $clampedHeight)))
 
   $memory = New-Object System.IO.MemoryStream
-  $bitmap.Save($memory, [System.Drawing.Imaging.ImageFormat]::Png)
+  $jpegCodec = Get-JpegCodec
+  if (-not $jpegCodec) {
+    throw "JPEG codec not available."
+  }
+  $qualityEncoder = [System.Drawing.Imaging.Encoder]::Quality
+  $encoderParameters = New-Object System.Drawing.Imaging.EncoderParameters 1
+  $encoderParameters.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter($qualityEncoder, [long]88)
+  $bitmap.Save($memory, $jpegCodec, $encoderParameters)
   $graphics.Dispose()
   $bitmap.Dispose()
+  $encoderParameters.Dispose()
 
   $base64 = [Convert]::ToBase64String($memory.ToArray())
   $memory.Dispose()
@@ -189,7 +203,7 @@ try {
       width = $clampedWidth
       height = $clampedHeight
     }
-    imageDataUrl = "data:image/png;base64,$base64"
+    imageDataUrl = "data:image/jpeg;base64,$base64"
     capturedAt = [DateTime]::UtcNow.ToString("o")
   })
 } catch {

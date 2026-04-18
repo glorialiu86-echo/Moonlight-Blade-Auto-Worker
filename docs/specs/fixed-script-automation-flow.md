@@ -39,6 +39,7 @@
 - 第五段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_collect_fixed_items -> loot_submit_once`
 - 第五段里的 `闷棍` 现在按“到点、进潜行、直接按 3，由游戏自动吃附近目标”来设计；当前已确认按小时最多 `4` 次，但固定剧本当前只跑 `2` 轮
 - 第六段是独立妙取链，固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
+- 第五段和第六段里，`enter_stealth_with_retry`、`stealth_front_arc_strike`、`exit_stealth` 已切到图像快检：分别看整屏灰度压低、右下动作轮切换、整屏回彩与右下技能组恢复，不再 OCR 读 `退出潜行` 或动作字样
 - 第七段是收尾卖货链，固定执行：
   - 先在原地最多 `2` 次尝试 `acquire_npc_target -> open_npc_action_menu -> click_menu_trade`
   - 如果两次都没真正进入左右两栏货架交易页，就改走 `travel_to_coordinate(548,630) -> 下马 -> 重新找路人 -> 查看 -> 交易`

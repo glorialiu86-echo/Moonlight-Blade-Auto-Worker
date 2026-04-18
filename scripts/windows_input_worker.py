@@ -189,6 +189,10 @@ STEALTH_ROIS = {
     "exit_button": (0.86, 0.44, 0.99, 0.58),
     "result_banner": (0.26, 0.22, 0.74, 0.56),
     "steal_button_stack": (0.82, 0.28, 0.99, 0.94),
+    "scene_color_probe": (0.04, 0.05, 0.94, 0.92),
+    "knockout_action_cluster": (0.74, 0.56, 0.98, 0.96),
+    "knockout_plus_upper": (0.84, 0.56, 0.95, 0.72),
+    "knockout_plus_lower": (0.74, 0.79, 0.86, 0.96),
     "loot_submit_button": (0.47, 0.83, 0.66, 0.96),
     "loot_right_panel": (0.66, 0.02, 0.99, 0.98),
 }
@@ -1291,21 +1295,98 @@ def detect_steal_screen_ready(hwnd: int) -> dict[str, Any]:
     }
 
 
-def detect_exit_stealth_button(hwnd: int) -> dict[str, Any]:
-    button_text = ocr_text(capture_window_region(hwnd, STEALTH_ROIS["exit_button"]))
-    normalized_text = normalize_npc_name(button_text)
+def summarize_color_suppression(image: np.ndarray) -> dict[str, float]:
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    saturation = hsv[:, :, 1].astype(np.float32)
+    value = hsv[:, :, 2].astype(np.float32)
+    low_saturation_ratio = float(np.mean((saturation < 42.0) & (value > 24.0)))
+    colorful_ratio = float(np.mean((saturation > 65.0) & (value > 60.0)))
     return {
-        "visible": "退出潜行" in normalized_text,
-        "text": button_text,
-        "normalizedText": normalized_text,
+        "meanSaturation": round(float(np.mean(saturation)), 3),
+        "lowSaturationRatio": round(low_saturation_ratio, 4),
+        "colorfulRatio": round(colorful_ratio, 4),
+    }
+
+
+def detect_stealth_scene_visual(hwnd: int) -> dict[str, Any]:
+    metrics = summarize_color_suppression(capture_window_region(hwnd, STEALTH_ROIS["scene_color_probe"]))
+    return {
+        "visible": metrics["lowSaturationRatio"] >= 0.68 and metrics["meanSaturation"] <= 48.0 and metrics["colorfulRatio"] <= 0.22,
+        **metrics,
+    }
+
+
+def detect_exit_stealth_button_visual(hwnd: int) -> dict[str, Any]:
+    image = capture_window_region(hwnd, STEALTH_ROIS["exit_button"])
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    dark_ratio = float(np.mean(gray < 88.0))
+    bright_ratio = float(np.mean(gray > 178.0))
+    edge_ratio = float(np.mean(cv2.Canny(gray, 80, 160) > 0))
+    return {
+        "visible": dark_ratio >= 0.32 and bright_ratio >= 0.02 and edge_ratio >= 0.015,
+        "darkRatio": round(dark_ratio, 4),
+        "brightRatio": round(bright_ratio, 4),
+        "edgeRatio": round(edge_ratio, 4),
+    }
+
+
+def detect_plus_marker_visual(image: np.ndarray) -> dict[str, Any]:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    bright_mask = gray > 180
+    height, width = bright_mask.shape
+    center_row = bright_mask[max(0, height // 2 - 3): min(height, height // 2 + 4), :]
+    center_col = bright_mask[:, max(0, width // 2 - 3): min(width, width // 2 + 4)]
+    bright_ratio = float(np.mean(bright_mask))
+    row_ratio = float(np.mean(center_row)) if center_row.size else 0.0
+    col_ratio = float(np.mean(center_col)) if center_col.size else 0.0
+    return {
+        "visible": bright_ratio >= 0.035 and row_ratio >= 0.14 and col_ratio >= 0.14,
+        "brightRatio": round(bright_ratio, 4),
+        "rowRatio": round(row_ratio, 4),
+        "colRatio": round(col_ratio, 4),
+    }
+
+
+def detect_knockout_action_wheel_visual(hwnd: int) -> dict[str, Any]:
+    cluster_image = capture_window_region(hwnd, STEALTH_ROIS["knockout_action_cluster"])
+    cluster_gray = cv2.cvtColor(cluster_image, cv2.COLOR_BGR2GRAY)
+    cluster_bright_ratio = float(np.mean(cluster_gray > 150.0))
+    cluster_edge_ratio = float(np.mean(cv2.Canny(cluster_gray, 70, 150) > 0))
+    upper_plus = detect_plus_marker_visual(capture_window_region(hwnd, STEALTH_ROIS["knockout_plus_upper"]))
+    lower_plus = detect_plus_marker_visual(capture_window_region(hwnd, STEALTH_ROIS["knockout_plus_lower"]))
+    plus_count = int(upper_plus["visible"]) + int(lower_plus["visible"])
+    return {
+        "visible": plus_count == 0 and cluster_bright_ratio >= 0.045 and cluster_edge_ratio >= 0.06,
+        "plusCount": plus_count,
+        "clusterBrightRatio": round(cluster_bright_ratio, 4),
+        "clusterEdgeRatio": round(cluster_edge_ratio, 4),
+        "upperPlus": upper_plus,
+        "lowerPlus": lower_plus,
+    }
+
+
+def detect_exit_stealth_button(hwnd: int) -> dict[str, Any]:
+    scene_state = detect_stealth_scene_visual(hwnd)
+    button_state = detect_exit_stealth_button_visual(hwnd)
+    return {
+        "visible": scene_state["visible"] and button_state["visible"],
+        "text": "",
+        "normalizedText": "",
+        "source": "visual",
+        "scene": scene_state,
+        "button": button_state,
     }
 
 
 def detect_knockout_context(hwnd: int) -> dict[str, Any]:
-    action_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["bottom_right_actions"]))
+    scene_state = detect_stealth_scene_visual(hwnd)
+    action_wheel = detect_knockout_action_wheel_visual(hwnd)
     return {
-        "visible": count_keywords(action_text, KNOCKOUT_CONTEXT_KEYWORDS) >= 2,
-        "text": action_text,
+        "visible": scene_state["visible"] and action_wheel["visible"],
+        "text": "",
+        "source": "visual",
+        "scene": scene_state,
+        "actionWheel": action_wheel,
     }
 
 
@@ -4731,8 +4812,8 @@ def run_exit_stealth(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
             "detail": "Stealth mode was already inactive",
             "input": {
                 "mode": "exit_stealth",
-                "beforeText": exit_state["text"],
-                "afterText": exit_state["text"],
+                "beforeVisual": exit_state,
+                "afterVisual": exit_state,
                 "pointName": "exit_stealth",
                 "click": None,
                 "exitTriggered": False,
@@ -4753,8 +4834,8 @@ def run_exit_stealth(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         "detail": "Clicked the fixed exit stealth button and left stealth mode",
         "input": {
             "mode": "exit_stealth",
-            "beforeText": exit_state["text"],
-            "afterText": next_exit_state["text"],
+            "beforeVisual": exit_state,
+            "afterVisual": next_exit_state,
             "pointName": "exit_stealth",
             "click": step_click,
             "exitTriggered": True,
@@ -4996,7 +5077,7 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
                 "mode": "enter_stealth_with_retry",
                 "retryCount": 0,
                 "attempts": attempts,
-                "exitStealthText": exit_state["text"],
+                "stealthVisual": exit_state,
             },
         }
 
@@ -5009,7 +5090,7 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
         attempt_payload = {
             "attemptIndex": attempt_index + 1,
             "exitStealthVisible": exit_state["visible"],
-            "exitStealthText": exit_state["text"],
+            "stealthVisual": exit_state,
         }
         attempts.append(attempt_payload)
         if exit_state["visible"]:
@@ -5022,7 +5103,7 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
                     "mode": "enter_stealth_with_retry",
                     "retryCount": attempt_index + 1,
                     "attempts": attempts,
-                    "exitStealthText": exit_state["text"],
+                    "stealthVisual": exit_state,
                 },
             }
         if attempt_index < retry_limit - 1:
@@ -5032,7 +5113,7 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
         "mode": "enter_stealth_with_retry",
         "retryCount": len(attempts),
         "attempts": attempts,
-        "exitStealthText": exit_state["text"],
+        "stealthVisual": exit_state,
     }
     raise ActionExecutionError(
         "Failed to enter stealth after waiting in place for the configured retry budget",
@@ -5090,7 +5171,7 @@ def run_stealth_front_arc_strike(hwnd: int, action: dict[str, Any]) -> dict[str,
         "detail": "Entered knockout context by directly striking a nearby target",
         "input": {
             "mode": "stealth_front_arc_strike",
-            "knockoutText": knockout_state["text"],
+            "knockoutVisual": knockout_state,
             "knockoutTimeoutMs": knockout_timeout_ms,
             "retryPressMs": retry_press_ms,
             "strikeCount": strike_count,
@@ -5234,7 +5315,7 @@ def run_stealth_knock_loot_flow(hwnd: int, action: dict[str, Any]) -> dict[str, 
                 "x2": roi[2],
                 "y2": roi[3],
             },
-            "knockoutText": knockout_state["text"],
+            "knockoutVisual": knockout_state,
             **loot_state,
             "dropClick": drop_click,
             "lootClicks": loot_clicks,
@@ -5376,7 +5457,7 @@ def run_stealth_rush_knockout(hwnd: int, action: dict[str, Any]) -> dict[str, An
         "detail": "Reached knockout context",
         "input": {
             "mode": "stealth_rush_knockout",
-            "knockoutText": knockout_state["text"],
+            "knockoutVisual": knockout_state,
             "strikeCount": strike_count,
             "knockoutTimeoutMs": knockout_timeout_ms,
             "strikeIntervalMs": strike_interval_ms,
@@ -5399,7 +5480,7 @@ def run_stealth_carry_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any
         "title": title,
         "status": "performed",
         "detail": "Pressed 2 to carry target",
-        "input": {"mode": "stealth_carry_target", "knockoutText": knockout_state["text"]},
+        "input": {"mode": "stealth_carry_target", "knockoutVisual": knockout_state},
     }
 
 

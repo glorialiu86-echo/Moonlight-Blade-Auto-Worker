@@ -280,6 +280,43 @@ export function createRetargetSocialTargetActions(options = {}) {
   ];
 }
 
+function getFixedSocialStageConfig(stageKey = "social_warm") {
+  switch (stageKey) {
+    case "social_dark":
+      return {
+        approachIdPrefix: "fixed-social-dark-approach",
+        travelTitle: "去第二个卦摊",
+        xCoordinate: 698,
+        yCoordinate: 753,
+        dismountTitle: "到第二个卦摊前先下马"
+      };
+    case "social_warm":
+    default:
+      return {
+        approachIdPrefix: "fixed-social-warm-approach",
+        travelTitle: "去第一个卦摊",
+        xCoordinate: 548,
+        yCoordinate: 630,
+        dismountTitle: "到第一个卦摊前先下马"
+      };
+  }
+}
+
+export function createFixedSocialApproachActions(stageKey = "social_warm") {
+  const config = getFixedSocialStageConfig(stageKey);
+  return [
+    createTravelToCoordinateAction({
+      id: `${config.approachIdPrefix}-1`,
+      title: config.travelTitle,
+      xCoordinate: config.xCoordinate,
+      yCoordinate: config.yCoordinate
+    }),
+    createPressKeyAction(`${config.approachIdPrefix}-2`, config.dismountTitle, "1", {
+      postDelayMs: 1000
+    })
+  ];
+}
+
 export function createFixedSocialTradeActions(options = {}) {
   const prefix = options.idPrefix || "social-trade";
   const steps = [];
@@ -341,8 +378,9 @@ export function createFixedSocialTalkActions(options = {}) {
   return steps;
 }
 
-export function createFixedSocialStageActions() {
+export function createFixedSocialStageActions(stageKey = "social_warm") {
   return [
+    ...createFixedSocialApproachActions(stageKey),
     ...createFixedSocialTradeActions({ includeAcquire: true, idPrefix: "fixed-social-trade" }),
     ...createFixedSocialGiftActions({ includeAcquire: false, idPrefix: "fixed-social-gift" }),
     ...createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-talk" })

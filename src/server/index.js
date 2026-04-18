@@ -22,13 +22,17 @@ import {
   triggerMotionReviewPass
 } from "../runtime/motion-review.js";
 import {
+  createFixedSocialApproachActions,
   createFixedDarkCloseStageActions,
   createFixedEndingTradeActions,
   createFixedDarkMiaoquRecoveryActions,
   createFixedDarkMiaoquStageActions,
+  createFixedSocialGiftActions,
   createFixedSellLoopActions,
   createFixedSocialRecoveryActions,
   createFixedSocialStageActions,
+  createFixedSocialTalkActions,
+  createFixedSocialTradeActions,
   createStealthEscapeRecoveryActions,
   runWindowsExecution
 } from "../runtime/windows-executor.js";
@@ -133,14 +137,14 @@ const FIXED_SCRIPT_STAGE_VOICES = {
   social_warm: [
     {
       thinkingChain: [
-        "摆摊摆到手都快抽筋了，不如找人聊两句换条快路。",
-        "礼先递出去，话先热起来，总比我自己跟自己讲生意经强。",
-        "他肯多说一句，我就能少绕十步弯，这买卖怎么算都不亏。"
+        "摆摊那条路还是太磨人，我先去第一个卦摊碰碰运气。",
+        "卦摊边上人多嘴也杂，最适合顺手打听消息。",
+        "礼先递出去，话先热起来，总比我自己闷着头瞎猜强。"
       ],
-      decide: "面子先给足，话头先带活，真有门路的人，这会儿也该漏点风了。",
+      decide: "我先去第一个卦摊问问，人多口杂，真有门路总该能漏点风出来。",
       persona: "先拿礼数把门推开，再慢慢往实处问。",
       progress: {
-        trade: "先借交易把门推开，场面不搭上，后头的话都容易掉地上。",
+        trade: "先去第一个卦摊把场面搭起来，人都挤在这儿，真有消息总比别处更容易漏风。",
         gift: "礼送到了，脸也得跟着挂起来，省得我话还没问就先把人吓跑。",
         talk: "行，他接茬了，我顺着往下聊，耳朵先竖起来听他到底说真话还是绕口令。",
         recover: "这人嘴太滑，我换个愿意接话的继续问，不在这张嘴上白磨工夫。",
@@ -169,14 +173,14 @@ const FIXED_SCRIPT_STAGE_VOICES = {
     },
     {
       thinkingChain: [
-        "光靠摆摊挣钱还是太慢，我再换个人打听一轮，别真把自己耗成木头。",
-        "礼也送了，话也聊了，总该有人肯吐点有用的东西出来吧。",
-        "我再顺着他们的口风磨一圈，看看这层客气后头有没有真路子。"
+        "第一个卦摊人多是多，我还是得亲自过去听听他们嘴上都挂着什么风声。",
+        "那边人挤人，真要有人漏一句半句，反倒比冷清地方更好捡。",
+        "我先把礼数铺开，再顺着他们的口风慢慢往里探。"
       ],
-      decide: "我换个话头继续问，门路问不出来，也得先把他们嘴里的虚话筛干净。",
+      decide: "先把第一个卦摊这群人问一轮，门路问不出来，也得先把嘴上的虚话筛干净。",
       persona: "继续客客气气地打听，但已经不想再陪他们白绕。",
       progress: {
-        trade: "先把场面重新铺平，省得一会儿刚问到门路，人先跟我装生分。",
+        trade: "先把第一个卦摊这边的场面重新铺平，省得一会儿刚问到门路，人先跟我装生分。",
         gift: "礼数已经补上了，总该有人愿意认真跟我说两句人话吧。",
         talk: "行，我继续顺着他说，但这回得把话往实处拽，不让它老在空中飘。",
         recover: "这人太会打滑，我换个更愿意张嘴的，不在他身上白耗。",
@@ -207,14 +211,14 @@ const FIXED_SCRIPT_STAGE_VOICES = {
   social_dark: [
     {
       thinkingChain: [
-        "礼我送了，时间我也耗了，他再打太极，就别怪我把茶杯往桌上一磕。",
-        "客气话讲到这儿也该见骨头了，不然我还陪他演到天黑？",
-        "我不是来听评书的，他再绕，我这口气就得往里压重一点。"
+        "第一个卦摊这帮人太会打太极，这边显然问不出什么东西。",
+        "我换个卦摊再问问，省得继续在一群滑嘴的人身上白耗。",
+        "第二个卦摊要还是只会绕，那我这口气就得往里压重一点。"
       ],
-      decide: "笑脸我还挂着，但他这回再不说真话，我就真不打算替他留台阶了。",
+      decide: "这边人不行，我换到第二个卦摊再问；他们要还装傻，我就不替谁留台阶了。",
       persona: "礼数还在，阴劲已经开始往话里钻了。",
       progress: {
-        trade: "先把门照样推开，脸上还挂着笑，火气先压进话缝里。",
+        trade: "第一个卦摊那边问不出东西，我换到第二个卦摊继续开门，脸上还挂着笑，火气先压进话缝里。",
         gift: "礼我照送，但他接下来要还拿空话堵我，就别怪我口气开始发硬。",
         talk: "行，门开了，我这回一边陪聊，一边往他耳边递点不好听的提醒。",
         recover: "这人嘴太油，我换个更经不起压的继续问，不让他就这么滑过去。",
@@ -243,14 +247,14 @@ const FIXED_SCRIPT_STAGE_VOICES = {
     },
     {
       thinkingChain: [
-        "笑脸我已经陪够了，再软下去，就真成了让他们牵着鼻子走。",
-        "礼数照旧，但这回话得更重一点，不然他们真当我只会陪笑。",
-        "他只要听出我快翻脸了，嘴里的真话反而更容易自己往外掉。"
+        "这边第一个卦摊的人已经陪我绕够了，我没必要继续站那儿当笑话。",
+        "换到第二个卦摊再问，至少还能看看是不是另一拨人更经不起压。",
+        "礼数照旧，但这回话得更重一点，不然他们真当我只会陪笑。"
       ],
-      decide: "我继续陪他说，但每一句都得让他知道，我这点耐心已经快用完了。",
+      decide: "我换到第二个卦摊继续问，但每一句都得让他们知道，我这点耐心已经快用完了。",
       persona: "表面还讲礼数，话锋已经开始往下压了。",
       progress: {
-        trade: "先把场面撑住，别还没开口就先把桌子掀了，那也太没趣。",
+        trade: "先在第二个卦摊把场面撑住，别还没开口就先把桌子掀了，那也太没趣。",
         gift: "礼数还是要做，可我今天不是来陪他舒舒服服收礼的。",
         talk: "行，我继续陪笑，但这回每一句都得让他听出我已经快翻脸了。",
         recover: "这人太会打滑，我换个没那么经压的继续问，省得火气白费。",
@@ -888,7 +892,7 @@ function buildStageWorkerActions(stageKey) {
       return createFixedSellLoopActions();
     case "social_warm":
     case "social_dark":
-      return createFixedSocialStageActions();
+      return createFixedSocialStageActions(stageKey);
     case "dark_close":
       return createFixedDarkCloseStageActions();
     case "dark_miaoqu":
@@ -911,7 +915,7 @@ function buildRecoveryWorkerActions(baseContext, error, workerActions, failedInd
     }
     if (failureCode === "NPC_VIEW_NOT_OPENED") {
       return failedStepId.startsWith("fixed-social-trade")
-        ? createFixedSocialStageActions()
+        ? createFixedSocialStageActions(stageKey)
         : createFixedSocialRecoveryActions();
     }
   }
@@ -2091,8 +2095,13 @@ async function runFixedSocialStageExecution({
     .includes(getFailureCode(error));
 
   try {
+    const approachActions = createFixedSocialApproachActions(stage.key);
+    const tradeActions = createFixedSocialTradeActions({ includeAcquire: true, idPrefix: "fixed-social-trade" });
+    const giftActions = createFixedSocialGiftActions({ includeAcquire: false, idPrefix: "fixed-social-gift" });
+    const talkActions = createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-talk" });
+
     await runFixedActionChunk({
-      actions: createFixedSocialTradeActions({ includeAcquire: true, idPrefix: "fixed-social-trade" }),
+      actions: [...approachActions, ...tradeActions],
       options,
       plan,
       perceptionSummary,
@@ -2100,7 +2109,7 @@ async function runFixedSocialStageExecution({
       executions
     });
     await runFixedActionChunk({
-      actions: createFixedSocialGiftActions({ includeAcquire: false, idPrefix: "fixed-social-gift" }),
+      actions: giftActions,
       options,
       plan,
       perceptionSummary,
@@ -2108,7 +2117,7 @@ async function runFixedSocialStageExecution({
       executions
     });
     await runFixedActionChunk({
-      actions: createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-talk" }),
+      actions: talkActions,
       options,
       plan,
       perceptionSummary,
@@ -2127,7 +2136,7 @@ async function runFixedSocialStageExecution({
 
     let lastError = initialError;
     const recoveryFactory = initialFailedStepId.startsWith("fixed-social-trade")
-      ? () => createFixedSocialStageActions()
+      ? () => createFixedSocialStageActions(stage.key)
       : () => createFixedSocialRecoveryActions();
 
     for (let attemptIndex = 0; attemptIndex < SOCIAL_RETARGET_BUDGET; attemptIndex += 1) {

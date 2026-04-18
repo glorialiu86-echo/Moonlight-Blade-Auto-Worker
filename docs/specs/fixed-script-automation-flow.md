@@ -20,8 +20,8 @@
 ## 固定剧本
 
 1. 正常思考，执行 `买货 -> 叫卖`，循环 `2` 轮
-2. 正常思考，执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
-3. 黑化思考，执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
+2. 正常思考，先跑图到第一个卦摊 `548,630`，再执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
+3. 黑化思考，先跑图到第二个卦摊 `698,753`，再执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
 4. 黑化思考，执行 `潜行 -> 闷棍 -> 扛走 -> 搜刮`，循环 `3` 次
 5. 黑化思考，执行 `潜行 -> 妙取 -> 脱离 -> 退出潜行`，循环 `5` 次
 6. 正常思考，执行 `随便找个路人 -> 交易 -> 连续上架 10 个道具 -> 提交交易 -> 回到街道`，循环 `1` 次
@@ -29,7 +29,7 @@
 说明：
 
 - 第三段与第二段的动作链保持一致，变化的是思考文案与聊天语气
-- 第二段和第三段的社交链现在固定为同一目标 owner：首次拿人继续扫圈，聊天门槛暴露后才换人，`Tab` 只负责换到新的“可查看”目标
+- 第二段和第三段的社交链现在固定为同一目标 owner：先跑到各自卦摊坐标并下马，再在卦摊附近扫圈拿人；聊天门槛暴露后才换人，`Tab` 只负责换到新的“可查看”目标
 - 第四段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_select_item_once/loot_put_in_once -> loot_submit_once`
 - 第四段里的 `闷棍` 现在按“到点、进潜行、直接按 3，由游戏自动吃附近目标”来设计；当前已确认按小时最多 `4` 次，但固定剧本仍按 `搜刮` 上限只跑 `3` 轮
 - 第五段是独立妙取链，固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`

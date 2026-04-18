@@ -528,14 +528,18 @@ textarea:focus {
 .message-role {
   margin-bottom: 10px;
   color: var(--accent);
-  font-size: 12px;
+  font-size: 15px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
 .chat-text,
+.message-text {
+  font-size: 1.12rem;
+}
+
+.chat-text,
 .chat-meta,
-.message-text,
 .message-meta,
 .message-perception,
 .message-interpretation,

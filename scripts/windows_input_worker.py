@@ -2841,6 +2841,35 @@ def parse_favor_value(text: str) -> int | None:
     return int(match.group(1))
 
 
+def parse_favor_limit(text: str) -> int | None:
+    normalized = re.sub(r"\s+", "", str(text or ""))
+    match = re.search(r"好感度[:：]?(\d+)/(\d+)", normalized)
+    if not match:
+        return None
+    return int(match.group(2))
+
+
+def inspect_gift_chat_threshold(stage_state: dict[str, Any]) -> dict[str, Any]:
+    gift_panel_text = str(stage_state["texts"].get("gift_panel") or "")
+    favor_before = parse_favor_value(gift_panel_text)
+    favor_limit = parse_favor_limit(gift_panel_text)
+    if favor_limit == 99:
+        gift_policy = "chat_direct"
+    elif favor_limit == 199:
+        gift_policy = "gift_two"
+    elif favor_limit is not None:
+        gift_policy = "retarget"
+    else:
+        gift_policy = "gift_two"
+    return {
+        "favorBefore": favor_before,
+        "favorLimit": favor_limit,
+        "favorLimitDetected": favor_limit is not None,
+        "giftPolicy": gift_policy,
+        "giftPanelText": gift_panel_text,
+    }
+
+
 def detect_target_threshold(hwnd: int) -> dict[str, Any]:
     text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["selected_target"]))
     is_special = "<" in text and ">" in text
@@ -4281,6 +4310,30 @@ def run_click_menu_gift(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def run_inspect_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "inspect_gift_chat_threshold")
+    stage_state = detect_npc_interaction_stage(hwnd)
+    if stage_state["stage"] != "gift_screen":
+        raise RuntimeError(
+            "inspect_gift_chat_threshold requires gift_screen. "
+            f"Detected stage: {stage_state['stage'] or 'none'}"
+        )
+
+    threshold_info = inspect_gift_chat_threshold(stage_state)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Gift threshold resolved to {threshold_info['giftPolicy']}",
+        "input": {
+            "mode": "inspect_gift_chat_threshold",
+            **collect_npc_stage_input(hwnd, stage_state),
+            **threshold_info,
+        },
+    }
+
+
 def run_select_gift_first_slot(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "select_gift_first_slot")
@@ -4346,6 +4399,106 @@ def run_submit_gift_once(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
             "favorAfter": parse_favor_value(next_stage_state["texts"]["gift_panel"]),
         },
     }
+
+
+def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "resolve_gift_chat_threshold")
+    stage_state = detect_npc_interaction_stage(hwnd)
+    if stage_state["stage"] != "gift_screen":
+        raise RuntimeError(
+            "resolve_gift_chat_threshold requires gift_screen. "
+            f"Detected stage: {stage_state['stage'] or 'none'}"
+        )
+
+    threshold_info = inspect_gift_chat_threshold(stage_state)
+    expected_policy = str(action.get("giftPolicy") or "").strip()
+    gift_policy = expected_policy or str(threshold_info["giftPolicy"])
+    post_delay_ms = max(200, int(action.get("postDelayMs") or 300))
+
+    if gift_policy == "chat_direct":
+        close_click = click_named_point(hwnd, "close_panel")
+        INPUT_GUARD.guarded_sleep(post_delay_ms, title)
+        next_stage_state = detect_npc_interaction_stage(hwnd)
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": "Favor cap is low enough to skip gifting and go directly to chat",
+            "input": {
+                "mode": "resolve_gift_chat_threshold",
+                **collect_npc_stage_input(hwnd, next_stage_state),
+                **threshold_info,
+                "giftPolicy": gift_policy,
+                "closeClick": close_click,
+                "giftRounds": [],
+            },
+        }
+
+    if gift_policy == "gift_two":
+        gift_rounds: list[dict[str, Any]] = []
+        current_stage_state = stage_state
+        for round_index in range(2):
+            select_click = click_named_point(hwnd, "gift_first_slot")
+            INPUT_GUARD.guarded_sleep(150, title)
+            before_panel_text = str(current_stage_state["texts"].get("gift_panel") or "")
+            favor_before = parse_favor_value(before_panel_text)
+            submit_click = click_named_point(hwnd, "gift_submit")
+            INPUT_GUARD.guarded_sleep(450, title)
+            current_stage_state = detect_npc_interaction_stage(hwnd)
+            if current_stage_state["stage"] != "gift_screen":
+                raise RuntimeError(
+                    "Gift submit left gift_screen unexpectedly while resolving threshold. "
+                    f"Last stage: {current_stage_state['stage'] or 'none'}"
+                )
+            gift_rounds.append(
+                {
+                    "roundIndex": round_index + 1,
+                    "selectClick": select_click,
+                    "submitClick": submit_click,
+                    "favorBefore": favor_before,
+                    "favorAfter": parse_favor_value(current_stage_state["texts"].get("gift_panel") or ""),
+                }
+            )
+
+        close_click = click_named_point(hwnd, "close_panel")
+        INPUT_GUARD.guarded_sleep(post_delay_ms, title)
+        next_stage_state = detect_npc_interaction_stage(hwnd)
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": "Sent two fixed gift rounds and closed the gift screen",
+            "input": {
+                "mode": "resolve_gift_chat_threshold",
+                **collect_npc_stage_input(hwnd, next_stage_state),
+                **threshold_info,
+                "giftPolicy": gift_policy,
+                "closeClick": close_click,
+                "giftRounds": gift_rounds,
+            },
+        }
+
+    close_click = click_named_point(hwnd, "close_panel")
+    INPUT_GUARD.guarded_sleep(post_delay_ms, title)
+    next_stage_state = detect_npc_interaction_stage(hwnd)
+    failed_input = {
+        "mode": "resolve_gift_chat_threshold",
+        **collect_npc_stage_input(hwnd, next_stage_state),
+        **threshold_info,
+        "giftPolicy": gift_policy,
+        "closeClick": close_click,
+        "giftRounds": [],
+    }
+    raise ActionExecutionError(
+        "Gift screen revealed a favor cap that should be skipped instead of gifting",
+        error_code="NPC_CHAT_THRESHOLD_REVEALED",
+        failed_step=build_failed_step_payload(
+            action,
+            "Gift threshold is too high for the fixed two-gift chat route",
+            failed_input,
+        ),
+    )
 
 
 def run_click_menu_trade(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
@@ -5514,11 +5667,17 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     if action_type == "click_menu_gift":
         return run_click_menu_gift(hwnd, action)
 
+    if action_type == "inspect_gift_chat_threshold":
+        return run_inspect_gift_chat_threshold(hwnd, action)
+
     if action_type == "select_gift_first_slot":
         return run_select_gift_first_slot(hwnd, action)
 
     if action_type == "submit_gift_once":
         return run_submit_gift_once(hwnd, action)
+
+    if action_type == "resolve_gift_chat_threshold":
+        return run_resolve_gift_chat_threshold(hwnd, action)
 
     if action_type == "click_menu_trade":
         return run_click_menu_trade(hwnd, action)

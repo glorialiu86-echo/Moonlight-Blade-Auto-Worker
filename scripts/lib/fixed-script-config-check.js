@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 export const expectedVariantCounts = {
+  street_wander: 1,
   sell_loop: 3,
   social_warm: 2,
   social_dark: 2,
@@ -11,6 +12,7 @@ export const expectedVariantCounts = {
 };
 
 export const expectedRounds = {
+  street_wander: 1,
   sell_loop: 2,
   social_warm: 2,
   social_dark: 2,
@@ -32,6 +34,7 @@ export const retiredLines = [
 ];
 
 const expectedDocVariantCopy = {
+  street_wander: "每轮都会从 `1` 组不同话术里取 `4` 句；下面这一组就是当前固定文案：",
   sell_loop: "每轮都会从 `3` 组不同话术里取 `4` 句；下面这一组是其中一个示例：",
   social_warm: "每轮都会从 `2` 组不同话术里取 `4` 句；下面这一组是其中一个示例：",
   social_dark: "每轮都会从 `2` 组不同话术里取 `4` 句；下面这一组是其中一个示例：",

@@ -12,7 +12,12 @@ import {
   verifyRuntimeDoc,
   verifyStartupAndEndingCopy
 } from "../scripts/lib/fixed-script-config-check.js";
-import { createFixedSellLoopActions } from "../src/runtime/windows-executor.js";
+import {
+  createFixedSocialGiftEntryActions,
+  createFixedSocialGiftResolveActions,
+  createFixedSellLoopActions,
+  createFixedStreetWanderActions
+} from "../src/runtime/windows-executor.js";
 
 test("fixed-script smoke: stage voice pool counts and rounds stay aligned", async () => {
   const summary = await checkFixedScriptConfig();
@@ -90,4 +95,50 @@ test("fixed-script smoke: sell loop keeps the new vendor approach chain", () => 
   assert.equal(roundTwoActions[4].title, "买满散酒并关闭面板");
   assert.equal(roundTwoActions[4].itemName, "散酒");
   assert.equal(roundTwoActions[9].title, "选中第一格散酒并最大化后上架");
+});
+
+test("fixed-script smoke: social gift flow keeps the favor-cap branch split", () => {
+  const giftEntryActions = createFixedSocialGiftEntryActions({ includeAcquire: false, idPrefix: "smoke-gift-entry" });
+  const giftResolveActions = createFixedSocialGiftResolveActions({ idPrefix: "smoke-gift-resolve" });
+
+  assert.deepEqual(
+    giftEntryActions.map((action) => action.title),
+    [
+      "拉起路人交互菜单",
+      "打开赠礼页",
+      "查看这人的聊天门槛"
+    ]
+  );
+
+  assert.deepEqual(
+    giftEntryActions.map((action) => action.type),
+    [
+      "open_npc_action_menu",
+      "click_menu_gift",
+      "inspect_gift_chat_threshold"
+    ]
+  );
+
+  assert.deepEqual(giftResolveActions.map((action) => action.type), [
+    "resolve_gift_chat_threshold"
+  ]);
+});
+
+test("fixed-script smoke: stage 0 keeps the street wander opener", () => {
+  const actions = createFixedStreetWanderActions();
+
+  assert.deepEqual(actions.map((action) => action.type), [
+    "press_key",
+    "press_key",
+    "press_key",
+    "press_key",
+    "sleep"
+  ]);
+
+  assert.deepEqual(actions.slice(0, 4).map((action) => action.key), [
+    "w",
+    "a",
+    "s",
+    "d"
+  ]);
 });

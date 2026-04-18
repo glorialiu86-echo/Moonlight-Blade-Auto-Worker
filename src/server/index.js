@@ -28,11 +28,15 @@ import {
   createFixedDarkMiaoquRecoveryActions,
   createFixedDarkMiaoquStageActions,
   createFixedSocialGiftActions,
+  createFixedSocialGiftEntryActions,
+  createFixedSocialGiftResolveActions,
   createFixedSellLoopActions,
   createFixedSocialRecoveryActions,
   createFixedSocialStageActions,
   createFixedSocialTalkActions,
   createFixedSocialTradeActions,
+  createFixedStreetWanderActions,
+  createRetargetSocialTargetActions,
   createStealthEscapeRecoveryActions,
   runWindowsExecution
 } from "../runtime/windows-executor.js";
@@ -81,6 +85,24 @@ function pickRoundVariant(variants, roundNumber) {
 }
 
 const FIXED_SCRIPT_STAGE_VOICES = {
+  street_wander: [
+    {
+      thinkingChain: [
+        "到底咋办呢我琢磨琢磨。",
+        "街上这么闹，我先别急着冲，先原地乱晃两圈看看风向。",
+        "脑子还没拧顺之前，脚先别站死，说不定走两步就有主意了。"
+      ],
+      decide: "我先在原地瞎转一圈，看看这条街到底都在忙什么。",
+      persona: "先乱晃一圈，把街面热闹先看进脑子里。",
+      progress: {
+        wander: "我先装作没拿定主意，在这儿东一下西一下乱晃两圈。",
+        pause: "刚刚看到大街上人这么热闹，赚钱是不是可以卖货。"
+      },
+      resultFactory: ({ recovered }) => recovered
+        ? "刚才那几步差点乱过头，好在我还是把主意重新拽回来了，先去试试卖货。"
+        : "行，街上的热闹我先看明白一点了，先去找货商试试这门生意。"
+    }
+  ],
   sell_loop: [
     {
       thinkingChain: [
@@ -507,6 +529,16 @@ function appendFixedScriptCommentary({ text, plan, perceptionSummary }) {
 
 const FIXED_SCRIPT_STAGES = [
   {
+    key: "street_wander",
+    rounds: 1,
+    instructionLabel: "先原地乱跑乱晃，把街上的热闹看进脑子里再决定第一笔钱从哪儿挣。",
+    riskLevel: "low",
+    actionTypes: ["wander"],
+    thinkingFactory: ({ roundNumber }) => getFixedStageVoice("street_wander", roundNumber).thinkingChain,
+    decideFactory: ({ roundNumber }) => getFixedStageVoice("street_wander", roundNumber).decide,
+    personaFactory: ({ roundNumber }) => getFixedStageVoice("street_wander", roundNumber).persona
+  },
+  {
     key: "sell_loop",
     rounds: 2,
     instructionLabel: "先走正路买货叫卖，看看这条钱路能不能撑起来。",
@@ -888,6 +920,8 @@ function getFailureAttemptCount(error) {
 
 function buildStageWorkerActions(stageKey) {
   switch (stageKey) {
+    case "street_wander":
+      return createFixedStreetWanderActions();
     case "sell_loop":
       return createFixedSellLoopActions();
     case "social_warm":
@@ -2080,6 +2114,73 @@ async function runFixedSellLoopStageExecution({
   };
 }
 
+async function runFixedStreetWanderStageExecution({
+  roundNumber,
+  plan,
+  perceptionSummary,
+  externalInputGuardEnabled = true
+}) {
+  const executions = [];
+  const options = {
+    interruptOnExternalInput: externalInputGuardEnabled
+  };
+
+  await runFixedActionChunk({
+    actions: createFixedStreetWanderActions(),
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageProgressText("street_wander", roundNumber, "wander"),
+    executions
+  });
+  appendFixedScriptCommentary({
+    text: getFixedStageProgressText("street_wander", roundNumber, "pause"),
+    plan,
+    perceptionSummary
+  });
+
+  return {
+    ...mergeWorkerExecutions(executions),
+    outcomeKind: "completed"
+  };
+}
+
+async function runFixedSocialGiftSequence({
+  stage,
+  roundNumber,
+  plan,
+  perceptionSummary,
+  executions,
+  options,
+  entryIdPrefix,
+  resolveIdPrefix,
+  decisionAttempt = 1
+}) {
+  const giftEntryExecution = await runFixedActionChunk({
+    actions: createFixedSocialGiftEntryActions({ includeAcquire: false, idPrefix: entryIdPrefix }),
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageProgressText(stage.key, roundNumber, "gift"),
+    executions
+  });
+  const giftPolicy = getGiftPolicyFromExecution(giftEntryExecution) || "gift_two";
+  appendFixedScriptCommentary({
+    text: getSocialGiftDecisionCommentary(giftPolicy, roundNumber, decisionAttempt),
+    plan,
+    perceptionSummary
+  });
+  const resolveExecution = await runWindowsActions(
+    createFixedSocialGiftResolveActions({ idPrefix: resolveIdPrefix }),
+    options
+  );
+  executions.push(resolveExecution);
+  return {
+    giftPolicy,
+    execution: resolveExecution
+  };
+}
+
 async function runFixedSocialStageExecution({
   stage,
   roundNumber,
@@ -2097,7 +2198,6 @@ async function runFixedSocialStageExecution({
   try {
     const approachActions = createFixedSocialApproachActions(stage.key);
     const tradeActions = createFixedSocialTradeActions({ includeAcquire: true, idPrefix: "fixed-social-trade" });
-    const giftActions = createFixedSocialGiftActions({ includeAcquire: false, idPrefix: "fixed-social-gift" });
     const talkActions = createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-talk" });
 
     await runFixedActionChunk({
@@ -2108,13 +2208,16 @@ async function runFixedSocialStageExecution({
       commentaryText: getFixedStageProgressText(stage.key, roundNumber, "trade"),
       executions
     });
-    await runFixedActionChunk({
-      actions: giftActions,
-      options,
+    await runFixedSocialGiftSequence({
+      stage,
+      roundNumber,
       plan,
       perceptionSummary,
-      commentaryText: getFixedStageProgressText(stage.key, roundNumber, "gift"),
-      executions
+      executions,
+      options,
+      entryIdPrefix: "fixed-social-gift-entry",
+      resolveIdPrefix: "fixed-social-gift-resolve",
+      decisionAttempt: 1
     });
     await runFixedActionChunk({
       actions: talkActions,
@@ -2135,9 +2238,7 @@ async function runFixedSocialStageExecution({
     }
 
     let lastError = initialError;
-    const recoveryFactory = initialFailedStepId.startsWith("fixed-social-trade")
-      ? () => createFixedSocialStageActions(stage.key)
-      : () => createFixedSocialRecoveryActions();
+    const rerunTrade = initialFailedStepId.startsWith("fixed-social-trade");
 
     for (let attemptIndex = 0; attemptIndex < SOCIAL_RETARGET_BUDGET; attemptIndex += 1) {
       try {
@@ -2146,7 +2247,55 @@ async function runFixedSocialStageExecution({
           plan,
           perceptionSummary
         });
-        executions.push(await runWindowsActions(recoveryFactory(), options));
+
+        if (rerunTrade) {
+          await runFixedActionChunk({
+            actions: [
+              ...createFixedSocialApproachActions(stage.key),
+              ...createFixedSocialTradeActions({
+                includeAcquire: true,
+                idPrefix: `fixed-social-recovery-trade-${attemptIndex + 1}`
+              })
+            ],
+            options,
+            plan,
+            perceptionSummary,
+            commentaryText: getFixedStageProgressText(stage.key, roundNumber, "trade"),
+            executions
+          });
+        } else {
+          executions.push(
+            await runWindowsActions(
+              createRetargetSocialTargetActions({
+                id: `fixed-social-recovery-retarget-${attemptIndex + 1}`
+              }),
+              options
+            )
+          );
+        }
+
+        await runFixedSocialGiftSequence({
+          stage,
+          roundNumber,
+          plan,
+          perceptionSummary,
+          executions,
+          options,
+          entryIdPrefix: `fixed-social-recovery-gift-entry-${attemptIndex + 1}`,
+          resolveIdPrefix: `fixed-social-recovery-gift-resolve-${attemptIndex + 1}`,
+          decisionAttempt: attemptIndex + 2
+        });
+        await runFixedActionChunk({
+          actions: createFixedSocialTalkActions({
+            includeAcquire: false,
+            idPrefix: `fixed-social-recovery-talk-${attemptIndex + 1}`
+          }),
+          options,
+          plan,
+          perceptionSummary,
+          commentaryText: getFixedStageProgressText(stage.key, roundNumber, "talk"),
+          executions
+        });
         return {
           ...mergeWorkerExecutions(executions),
           outcomeKind: "recovered"
@@ -2368,6 +2517,8 @@ async function runFixedStageExecution({
   externalInputGuardEnabled = true
 }) {
   switch (stage.key) {
+    case "street_wander":
+      return runFixedStreetWanderStageExecution({ roundNumber, plan, perceptionSummary, externalInputGuardEnabled });
     case "sell_loop":
       return runFixedSellLoopStageExecution({ roundNumber, plan, perceptionSummary, externalInputGuardEnabled });
     case "social_warm":

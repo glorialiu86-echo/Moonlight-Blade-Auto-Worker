@@ -82,6 +82,28 @@ function createSleepAction(id, title, durationMs) {
   });
 }
 
+export function createFixedStreetWanderActions() {
+  return [
+    createPressKeyAction("fixed-street-wander-1", "原地先往前晃一小段", "w", {
+      durationMs: 1600,
+      postDelayMs: 260
+    }),
+    createPressKeyAction("fixed-street-wander-2", "原地往左侧乱拐一小段", "a", {
+      durationMs: 1200,
+      postDelayMs: 260
+    }),
+    createPressKeyAction("fixed-street-wander-3", "原地往后退着晃一小段", "s", {
+      durationMs: 1800,
+      postDelayMs: 260
+    }),
+    createPressKeyAction("fixed-street-wander-4", "原地往右侧再晃一小段", "d", {
+      durationMs: 1400,
+      postDelayMs: 320
+    }),
+    createSleepAction("fixed-street-wander-5", "停下来缓一口气", 700)
+  ];
+}
+
 export function createTravelToCoordinateAction({
   id,
   title,
@@ -342,7 +364,6 @@ export function createFixedSocialTradeActions(options = {}) {
 
 export function createFixedSocialGiftActions(options = {}) {
   const prefix = options.idPrefix || "social-gift";
-  const giftRounds = Math.max(1, options.giftRounds || 2);
   const steps = [];
   if (options.includeAcquire) {
     steps.push(createAcquireNpcTargetAction(`${prefix}-1`, "锁定路人目标", {
@@ -353,12 +374,32 @@ export function createFixedSocialGiftActions(options = {}) {
   }
   steps.push(createOpenNpcActionMenuAction(`${prefix}-${steps.length + 1}`, "拉起路人交互菜单"));
   steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, "打开赠礼页", "click_menu_gift"));
-  for (let roundIndex = 0; roundIndex < giftRounds; roundIndex += 1) {
-    steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, `选中礼物槽位 ${roundIndex + 1}`, "select_gift_first_slot"));
-    steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, `送出一轮礼物 ${roundIndex + 1}`, "submit_gift_once"));
-  }
-  steps.push(createCloseCurrentPanelAction(`${prefix}-${steps.length + 1}`));
+  steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, "查看这人的聊天门槛", "inspect_gift_chat_threshold"));
+  steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, "按当前聊天门槛处理赠礼", "resolve_gift_chat_threshold"));
   return steps;
+}
+
+export function createFixedSocialGiftEntryActions(options = {}) {
+  const prefix = options.idPrefix || "social-gift-entry";
+  const steps = [];
+  if (options.includeAcquire) {
+    steps.push(createAcquireNpcTargetAction(`${prefix}-1`, "锁定路人目标", {
+      timeoutMs: 4500,
+      movePulseMs: 160,
+      scanIntervalMs: 180
+    }));
+  }
+  steps.push(createOpenNpcActionMenuAction(`${prefix}-${steps.length + 1}`, "拉起路人交互菜单"));
+  steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, "打开赠礼页", "click_menu_gift"));
+  steps.push(createWorkerAction(`${prefix}-${steps.length + 1}`, "查看这人的聊天门槛", "inspect_gift_chat_threshold"));
+  return steps;
+}
+
+export function createFixedSocialGiftResolveActions(options = {}) {
+  const prefix = options.idPrefix || "social-gift-resolve";
+  return [
+    createWorkerAction(`${prefix}-1`, "按当前聊天门槛处理赠礼", "resolve_gift_chat_threshold")
+  ];
 }
 
 export function createFixedSocialTalkActions(options = {}) {

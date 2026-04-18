@@ -19,23 +19,29 @@
 
 ## 固定剧本
 
-1. 正常思考，执行 `买货 -> 叫卖`，循环 `2` 轮
-2. 正常思考，先跑图到第一个卦摊 `548,630`，再执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
-3. 黑化思考，先跑图到第二个卦摊 `698,753`，再执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
-4. 黑化思考，执行 `潜行 -> 闷棍 -> 扛走 -> 搜刮`，循环 `3` 次
-5. 黑化思考，执行 `潜行 -> 妙取 -> 脱离 -> 退出潜行`，循环 `5` 次
-6. 正常思考，执行 `随便找个路人 -> 交易 -> 连续上架 10 个道具 -> 提交交易 -> 回到街道`，循环 `1` 次
+1. 正常思考，先执行 `原地乱跑 -> 停下重新拿主意`，循环 `1` 轮
+2. 正常思考，执行 `买货 -> 叫卖`，循环 `2` 轮
+3. 正常思考，先跑图到第一个卦摊 `548,630`，再执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
+4. 黑化思考，先跑图到第二个卦摊 `698,753`，再执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
+5. 黑化思考，执行 `潜行 -> 闷棍 -> 扛走 -> 搜刮`，循环 `3` 次
+6. 黑化思考，执行 `潜行 -> 妙取 -> 脱离 -> 退出潜行`，循环 `5` 次
+7. 正常思考，执行 `随便找个路人 -> 交易 -> 连续上架 10 个道具 -> 提交交易 -> 回到街道`，循环 `1` 次
 
 说明：
 
-- 第三段与第二段的动作链保持一致，变化的是思考文案与聊天语气
-- 第二段和第三段的社交链现在固定为同一目标 owner：先跑到各自卦摊坐标并下马，再在卦摊附近扫圈拿人；聊天门槛暴露后才换人，`Tab` 只负责换到新的“可查看”目标
-- 第四段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_select_item_once/loot_put_in_once -> loot_submit_once`
-- 第四段里的 `闷棍` 现在按“到点、进潜行、直接按 3，由游戏自动吃附近目标”来设计；当前已确认按小时最多 `4` 次，但固定剧本仍按 `搜刮` 上限只跑 `3` 轮
-- 第五段是独立妙取链，固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
-- 第六段是收尾卖货链，固定执行 `acquire_npc_target -> open_npc_action_menu -> click_menu_trade -> trade_prepare_gift_bundle(10) -> trade_select_right_money_slot -> trade_scale_quantity -> trade_right_item_up_shelf -> trade_submit -> close_current_panel`
-- 第一段买货现在按轮次固定切货：第 `1` 轮买 `墨锭`，第 `2` 轮买 `散酒`
-- 第一段里的叫卖已经按固定 UI 收敛成：`4 打开叫卖 -> 库存第一格当前货物 -> 最大化 -> 上架 -> 出摊 -> 原地等右下角先变改货/收摊，再等回正常 HUD`
+- 第一段只负责原地乱跑和补一句“这街上这么热闹，是不是能先卖货”的念头，不改后面的地图、进货和叫卖 owner
+- 第四段与第三段的动作链保持一致，变化的是思考文案与聊天语气
+- 第三段和第四段的社交链现在固定为同一目标 owner：先跑到各自卦摊坐标并下马，再在卦摊附近扫圈拿人；聊天门槛暴露后才换人，`Tab` 只负责换到新的“可查看”目标
+- 社交赠礼页现在先读 `好感度上限` 再分流：
+  - `99`：不送礼，直接关面板去聊天
+  - `199`：固定送 `2` 次礼，再聊天
+  - `299/599/...`：直接关面板换人，不再白送两轮
+- 第五段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_select_item_once/loot_put_in_once -> loot_submit_once`
+- 第五段里的 `闷棍` 现在按“到点、进潜行、直接按 3，由游戏自动吃附近目标”来设计；当前已确认按小时最多 `4` 次，但固定剧本仍按 `搜刮` 上限只跑 `3` 轮
+- 第六段是独立妙取链，固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
+- 第七段是收尾卖货链，固定执行 `acquire_npc_target -> open_npc_action_menu -> click_menu_trade -> trade_prepare_gift_bundle(10) -> trade_select_right_money_slot -> trade_scale_quantity -> trade_right_item_up_shelf -> trade_submit -> close_current_panel`
+- 第二段买货现在按轮次固定切货：第 `1` 轮买 `墨锭`，第 `2` 轮买 `散酒`
+- 第二段里的叫卖已经按固定 UI 收敛成：`4 打开叫卖 -> 库存第一格当前货物 -> 最大化 -> 上架 -> 出摊 -> 原地等右下角先变改货/收摊，再等回正常 HUD`
 - 不允许前端展示“当前阶段 / 当前轮次 / 倒计时 / 固定剧本编号”
 - 前端只允许看到人格化思考、执行结果、暂停和完成状态
 
@@ -46,6 +52,10 @@
 - 旧 planner 仍保留给独立调试入口使用，不再负责自主自动化主链路
 - 真正的游戏窗口截图与输入执行仍由 Windows 链路负责
 - 地图寻路 owner 已收敛到 `travel_to_coordinate`，它负责开图、填坐标、前往、关图、小地图坐标校验和 reroute
+- 社交赠礼页的聊天门槛 owner 已前移到 `gift_screen`：
+  - `99` 直接跳聊
+  - `199` 固定送两次
+  - 其他上限直接换人
 - 社交恢复默认按失败码收敛：
   - `NPC_CHAT_THRESHOLD_REVEALED` 时换人后重跑 `赠礼 -> 聊天`
   - `NPC_VIEW_NOT_OPENED` 时根据失败位置决定重跑整段社交链或只跑恢复链

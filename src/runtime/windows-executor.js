@@ -308,8 +308,8 @@ function getFixedSocialStageConfig(stageKey = "social_warm") {
       return {
         approachIdPrefix: "fixed-social-dark-approach",
         travelTitle: "去第二个卦摊",
-        xCoordinate: 698,
-        yCoordinate: 753,
+        xCoordinate: 709,
+        yCoordinate: 483,
         dismountTitle: "到第二个卦摊前先下马"
       };
     case "social_warm":

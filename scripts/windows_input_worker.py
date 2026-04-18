@@ -275,10 +275,10 @@ ACTION_POINTS = {
     "chat_exit": (872 / 2048, 536 / 1152),
     # The user has pinned the in-game render resolution to 2560x1440, so the
     # coordinate route bar uses one fixed reference layout again.
-    "map_coord_y_input": (1741 / GAME_FIXED_CLIENT_WIDTH, 1292 / GAME_FIXED_CLIENT_HEIGHT),
-    "map_coord_x_input": (1900 / GAME_FIXED_CLIENT_WIDTH, 1290 / GAME_FIXED_CLIENT_HEIGHT),
+    "map_coord_y_input": (1668 / GAME_FIXED_CLIENT_WIDTH, 1258 / GAME_FIXED_CLIENT_HEIGHT),
+    "map_coord_x_input": (1900 / GAME_FIXED_CLIENT_WIDTH, 1278 / GAME_FIXED_CLIENT_HEIGHT),
     "map_go": (2093 / GAME_FIXED_CLIENT_WIDTH, 1284 / GAME_FIXED_CLIENT_HEIGHT),
-    "teleport_confirm": (0.569, 0.742),
+    "teleport_confirm": (1450 / GAME_FIXED_CLIENT_WIDTH, 1272 / GAME_FIXED_CLIENT_HEIGHT),
     "drop_carried_target": (1372 / 2048, 667 / 1152),
     "loot_transfer_item": (1422 / 2048, 359 / 1152),
     "loot_put_in": (1134 / 2048, 858 / 1152),
@@ -287,32 +287,32 @@ ACTION_POINTS = {
 
 MAP_KEYPAD_POINTS = {
     "vertical": {
-        "1": (1049 / GAME_FIXED_CLIENT_WIDTH, 760 / GAME_FIXED_CLIENT_HEIGHT),
-        "2": (1210 / GAME_FIXED_CLIENT_WIDTH, 761 / GAME_FIXED_CLIENT_HEIGHT),
-        "3": (1373 / GAME_FIXED_CLIENT_WIDTH, 761 / GAME_FIXED_CLIENT_HEIGHT),
-        "4": (1049 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
-        "5": (1211 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
-        "6": (1374 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
-        "7": (1050 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
-        "8": (1210 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
-        "9": (1373 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
-        "0": (1534 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
-        "delete": (1534 / GAME_FIXED_CLIENT_WIDTH, 761 / GAME_FIXED_CLIENT_HEIGHT),
-        "confirm": (1534 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
+        "1": (995 / GAME_FIXED_CLIENT_WIDTH, 784 / GAME_FIXED_CLIENT_HEIGHT),
+        "2": (1155 / GAME_FIXED_CLIENT_WIDTH, 784 / GAME_FIXED_CLIENT_HEIGHT),
+        "3": (1317 / GAME_FIXED_CLIENT_WIDTH, 784 / GAME_FIXED_CLIENT_HEIGHT),
+        "4": (995 / GAME_FIXED_CLIENT_WIDTH, 944 / GAME_FIXED_CLIENT_HEIGHT),
+        "5": (1155 / GAME_FIXED_CLIENT_WIDTH, 944 / GAME_FIXED_CLIENT_HEIGHT),
+        "6": (1317 / GAME_FIXED_CLIENT_WIDTH, 944 / GAME_FIXED_CLIENT_HEIGHT),
+        "7": (995 / GAME_FIXED_CLIENT_WIDTH, 1105 / GAME_FIXED_CLIENT_HEIGHT),
+        "8": (1155 / GAME_FIXED_CLIENT_WIDTH, 1105 / GAME_FIXED_CLIENT_HEIGHT),
+        "9": (1317 / GAME_FIXED_CLIENT_WIDTH, 1105 / GAME_FIXED_CLIENT_HEIGHT),
+        "0": (1478 / GAME_FIXED_CLIENT_WIDTH, 944 / GAME_FIXED_CLIENT_HEIGHT),
+        "delete": (1478 / GAME_FIXED_CLIENT_WIDTH, 784 / GAME_FIXED_CLIENT_HEIGHT),
+        "confirm": (1478 / GAME_FIXED_CLIENT_WIDTH, 1105 / GAME_FIXED_CLIENT_HEIGHT),
     },
     "horizontal": {
-        "1": (1049 / GAME_FIXED_CLIENT_WIDTH, 760 / GAME_FIXED_CLIENT_HEIGHT),
-        "2": (1210 / GAME_FIXED_CLIENT_WIDTH, 761 / GAME_FIXED_CLIENT_HEIGHT),
-        "3": (1373 / GAME_FIXED_CLIENT_WIDTH, 761 / GAME_FIXED_CLIENT_HEIGHT),
-        "4": (1049 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
-        "5": (1211 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
-        "6": (1374 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
-        "7": (1050 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
-        "8": (1210 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
-        "9": (1373 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
-        "0": (1534 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
-        "delete": (1534 / GAME_FIXED_CLIENT_WIDTH, 761 / GAME_FIXED_CLIENT_HEIGHT),
-        "confirm": (1534 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
+        "1": (1155 / GAME_FIXED_CLIENT_WIDTH, 784 / GAME_FIXED_CLIENT_HEIGHT),
+        "2": (1316 / GAME_FIXED_CLIENT_WIDTH, 784 / GAME_FIXED_CLIENT_HEIGHT),
+        "3": (1478 / GAME_FIXED_CLIENT_WIDTH, 784 / GAME_FIXED_CLIENT_HEIGHT),
+        "4": (1155 / GAME_FIXED_CLIENT_WIDTH, 944 / GAME_FIXED_CLIENT_HEIGHT),
+        "5": (1316 / GAME_FIXED_CLIENT_WIDTH, 944 / GAME_FIXED_CLIENT_HEIGHT),
+        "6": (1478 / GAME_FIXED_CLIENT_WIDTH, 944 / GAME_FIXED_CLIENT_HEIGHT),
+        "7": (1155 / GAME_FIXED_CLIENT_WIDTH, 1105 / GAME_FIXED_CLIENT_HEIGHT),
+        "8": (1316 / GAME_FIXED_CLIENT_WIDTH, 1105 / GAME_FIXED_CLIENT_HEIGHT),
+        "9": (1478 / GAME_FIXED_CLIENT_WIDTH, 1105 / GAME_FIXED_CLIENT_HEIGHT),
+        "0": (1640 / GAME_FIXED_CLIENT_WIDTH, 944 / GAME_FIXED_CLIENT_HEIGHT),
+        "delete": (1640 / GAME_FIXED_CLIENT_WIDTH, 784 / GAME_FIXED_CLIENT_HEIGHT),
+        "confirm": (1640 / GAME_FIXED_CLIENT_WIDTH, 1105 / GAME_FIXED_CLIENT_HEIGHT),
     },
 }
 
@@ -6138,15 +6138,25 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         if not key:
             raise RuntimeError("press_key action requires key")
         focus_window(hwnd)
-        pydirectinput.press(key)
+        duration_ms = int(action.get("durationMs") or 0)
+        if duration_ms > 0:
+            pydirectinput.keyDown(key)
+            INPUT_GUARD.refresh_baseline()
+            INPUT_GUARD.guarded_sleep(duration_ms, title)
+            pydirectinput.keyUp(key)
+        else:
+            pydirectinput.press(key)
         INPUT_GUARD.refresh_baseline()
         INPUT_GUARD.guarded_sleep(post_delay_ms, title)
         return {
             "id": action_id,
             "title": title,
             "status": "performed",
-            "detail": f"Sent key {key}",
-            "input": {"key": key},
+            "detail": f"Held key {key} for {duration_ms}ms" if duration_ms > 0 else f"Sent key {key}",
+            "input": {
+                "key": key,
+                **({"durationMs": duration_ms} if duration_ms > 0 else {}),
+            },
         }
 
     if action_type == "press_shortcut":

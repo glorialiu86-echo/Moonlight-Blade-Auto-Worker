@@ -459,8 +459,8 @@ export function createFixedSellLoopActions(options = {}) {
     createTravelToCoordinateAction({
       id: "fixed-sale-1",
       title: "去货商坐标",
-      xCoordinate: 667,
-      yCoordinate: 554
+      xCoordinate: 666,
+      yCoordinate: 555
     }),
     createPressKeyAction("fixed-sale-2", "下马准备进货", "1", { postDelayMs: 1000 }),
     createWorkerAction("fixed-sale-3", "转到阿依娜正前方并贴近到出现对话[F]", "align_named_vendor_interact_prompt", {

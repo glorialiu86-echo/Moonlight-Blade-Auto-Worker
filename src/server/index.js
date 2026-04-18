@@ -538,6 +538,8 @@ function appendFixedScriptCommentary({ text, plan, perceptionSummary }) {
 
 function buildFixedScriptOpeningThinkingChain(stageKey, thinkingChain) {
   if (stageKey === "street_wander") {
+    // Stage 0 thoughts should be interleaved with movement commentary instead
+    // of being dumped in the opening bubble all at once.
     return [];
   }
   return Array.isArray(thinkingChain) ? thinkingChain : [];
@@ -1132,12 +1134,33 @@ async function serveStatic(response, pathname) {
       : pathname;
   const filePath = path.join(publicDir, target);
   const ext = path.extname(filePath);
-  const content = await readFile(filePath);
+  let content;
+
+  try {
+    content = await readFile(filePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return sendJson(response, 404, { ok: false, error: "Not found" });
+    }
+    throw error;
+  }
 
   response.writeHead(200, {
     "Content-Type": contentTypes[ext] || "application/octet-stream"
   });
   response.end(content);
+}
+
+function sceneDescription(scene) {
+  const map = {
+    town_dialogue: "城镇对话",
+    bag_management: "背包管理",
+    market_trade: "交易/商店",
+    jail_warning: "高风险警告",
+    field_patrol: "野外巡游"
+  };
+
+  return map[scene] || "未判定场景";
 }
 
 function perceptionSummaryBySource(perception, source) {

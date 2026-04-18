@@ -10,6 +10,13 @@ import numpy as np
 from PIL import Image
 from rapidocr_onnxruntime import RapidOCR
 
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(encoding="utf-8")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 
 def emit(payload):
     sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")

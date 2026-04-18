@@ -3,11 +3,11 @@ import readline from "node:readline";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { getLocalPerceptionConfig } from "../config/env.js";
+import { getLocalAsrConfig } from "../config/env.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "../../");
-const workerScriptPath = path.resolve(projectRoot, "scripts/local_ocr_worker.py");
+const workerScriptPath = path.resolve(projectRoot, "scripts/local_asr_worker.py");
 
 let workerProcess = null;
 let workerReadyPromise = null;
@@ -20,7 +20,6 @@ function defaultPythonCandidates() {
   if (process.platform === "win32") {
     return [
       path.resolve(projectRoot, ".venv/Scripts/python.exe"),
-      "py",
       "python"
     ];
   }
@@ -33,13 +32,13 @@ function defaultPythonCandidates() {
 }
 
 function resolvePythonPath() {
-  const config = getLocalPerceptionConfig();
+  const config = getLocalAsrConfig();
 
   if (config.pythonPath) {
     return config.pythonPath;
   }
 
-  return defaultPythonCandidates().find((candidate) => ["py", "python", "python3"].includes(candidate) || existsSync(candidate)) || "python3";
+  return defaultPythonCandidates().find((candidate) => candidate === "python3" || candidate === "python" || existsSync(candidate)) || "python3";
 }
 
 function rejectPendingRequests(error) {
@@ -54,13 +53,13 @@ function resetWorkerState(error = null) {
   workerProcess = null;
 
   if (workerReadyReject) {
-    workerReadyReject(error || new Error("Local OCR worker stopped unexpectedly"));
+    workerReadyReject(error || new Error("Local ASR worker stopped unexpectedly"));
   }
 
   workerReadyPromise = null;
   workerReadyResolve = null;
   workerReadyReject = null;
-  rejectPendingRequests(error || new Error("Local OCR worker stopped unexpectedly"));
+  rejectPendingRequests(error || new Error("Local ASR worker stopped unexpectedly"));
 }
 
 function handleWorkerMessage(rawLine) {
@@ -87,7 +86,7 @@ function handleWorkerMessage(rawLine) {
   }
 
   if (payload.type === "fatal") {
-    const error = new Error(payload.error || "Local OCR worker failed to start");
+    const error = new Error(payload.error || "Local ASR worker failed to start");
 
     if (workerReadyReject) {
       workerReadyReject(error);
@@ -105,14 +104,11 @@ function handleWorkerMessage(rawLine) {
   pendingRequests.delete(payload.id);
 
   if (payload.type === "result") {
-    resolve({
-      text: payload.text || "",
-      lines: Array.isArray(payload.lines) ? payload.lines : []
-    });
+    resolve(payload.text || "");
     return;
   }
 
-  reject(new Error(payload.error || "Local OCR worker request failed"));
+  reject(new Error(payload.error || "Local ASR worker request failed"));
 }
 
 function ensureWorker() {
@@ -125,19 +121,20 @@ function ensureWorker() {
     workerReadyReject = reject;
   });
 
-  const config = getLocalPerceptionConfig();
+  const config = getLocalAsrConfig();
   const pythonPath = resolvePythonPath();
-  const args = pythonPath === "py"
-    ? ["-3", workerScriptPath]
-    : [workerScriptPath];
-
-  const child = spawn(pythonPath, args, {
+  const child = spawn(pythonPath, [workerScriptPath], {
     cwd: projectRoot,
     stdio: ["pipe", "pipe", "pipe"],
     env: {
       ...process.env,
-      PYTHONIOENCODING: "utf-8",
-      LOCAL_OCR_MAX_IMAGE_SIDE: String(config.maxImageSide)
+      LOCAL_ASR_MODEL: config.model,
+      LOCAL_ASR_LANGUAGE: config.language,
+      LOCAL_ASR_DEVICE: config.device,
+      LOCAL_ASR_COMPUTE_TYPE: config.computeType,
+      LOCAL_ASR_CPU_THREADS: String(config.cpuThreads),
+      LOCAL_ASR_INITIAL_PROMPT: config.initialPrompt,
+      LOCAL_ASR_MODEL_CACHE_DIR: config.modelCacheDir
     }
   });
 
@@ -149,7 +146,7 @@ function ensureWorker() {
     const message = chunk.toString("utf8").trim();
 
     if (message) {
-      console.error(`[local-ocr] ${message}`);
+      console.error(`[local-asr] ${message}`);
     }
   });
 
@@ -159,22 +156,22 @@ function ensureWorker() {
 
   child.on("exit", (code, signal) => {
     const reason = signal
-      ? new Error(`Local OCR worker exited via signal ${signal}`)
-      : new Error(`Local OCR worker exited with code ${code}`);
+      ? new Error(`Local ASR worker exited via signal ${signal}`)
+      : new Error(`Local ASR worker exited with code ${code}`);
     resetWorkerState(reason);
   });
 
   return workerReadyPromise;
 }
 
-export async function extractTextFromImageLocal({ imageInput }) {
+export async function transcribeWithLocalWhisper({ audioPath, language }) {
   await ensureWorker();
 
   if (!workerProcess?.stdin) {
-    throw new Error("Local OCR worker is not available");
+    throw new Error("Local ASR worker is not available");
   }
 
-  const requestId = `ocr-${nextRequestId}`;
+  const requestId = `asr-${nextRequestId}`;
   nextRequestId += 1;
 
   const promise = new Promise((resolve, reject) => {
@@ -182,9 +179,10 @@ export async function extractTextFromImageLocal({ imageInput }) {
   });
 
   workerProcess.stdin.write(`${JSON.stringify({
-    type: "ocr",
+    type: "transcribe",
     id: requestId,
-    image_input: imageInput
+    audio_path: audioPath,
+    language
   })}\n`);
 
   return promise;

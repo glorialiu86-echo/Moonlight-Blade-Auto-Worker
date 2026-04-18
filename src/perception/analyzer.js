@@ -54,11 +54,19 @@ function dedupe(values, limit) {
   return unique;
 }
 
+function isCleanHudStreetScene(text) {
+  return ["对话[F]", "叫卖[4]", "感知[3]"].every((keyword) => text.includes(keyword));
+}
+
 function detectSceneType(ocrText) {
   const text = normalizeText(ocrText);
 
   if (!text) {
     return "unknown";
+  }
+
+  if (isCleanHudStreetScene(text)) {
+    return "town_dialogue";
   }
 
   if (includesAny(text, ["通缉", "缉拿", "抓捕", "监狱", "大牢", "罪恶", "悬赏"])) {
@@ -69,7 +77,8 @@ function detectSceneType(ocrText) {
     return "market_trade";
   }
 
-  if (includesAny(text, ["背包", "整理", "拆分", "装备", "道具", "格子"])) {
+  if (includesAny(text, ["背包", "整理", "拆分", "装备", "道具", "格子"])
+    && !includesAny(text, ["对话[F]", "叫卖[4]", "感知[3]"])) {
     return "bag_management";
   }
 

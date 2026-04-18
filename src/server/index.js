@@ -1509,24 +1509,47 @@ function buildNpcConversationHistoryText(conversationRounds = []) {
     .join("\n");
 }
 
-function buildNpcReplyStylePrompt(plan) {
-  if (plan?.scriptKey === "social_dark") {
-    return "你的回复要阴阳怪气、带点刺，顺手吐槽对方不说实话，让他听着有点发虚，但不要直接把话聊崩。";
-  }
-
-  return "你的回复要先装得自然一点，像熟人闲聊一样顺着接话，不要一上来就露凶相。";
+function hasNpcConversationHistory(conversationRounds = []) {
+  return Array.isArray(conversationRounds) && conversationRounds.length > 0;
 }
 
-function buildNpcConversationGoal({ instruction, plan }) {
+function buildNpcReplyStylePrompt(plan, hasHistory = false) {
   if (plan?.scriptKey === "social_dark") {
-    return "继续聊天，阴阳怪气地吐槽对方不说实话，但别直接聊崩，还是要一步步把发财计划套出来。";
+    if (!hasHistory) {
+      return "这是空态首轮。你的回复要先像普通打招呼那样把话接住，再自然带出自己想搞钱；口气可以带一点敷衍和刺，但表面上仍然像在请教。";
+    }
+
+    return "你的回复要阴阳怪气、带点刺，顺手吐槽对方不说实话，让他听着有点发虚，但不要直接把话聊崩；重点是继续追问更具体的细节。";
+  }
+
+  if (!hasHistory) {
+    return "这是空态首轮。你的回复要先像普通打招呼那样把话接住，再自然带出自己想搞钱、想听建议；整体像真心请教，不要显得咄咄逼人。";
+  }
+
+  return "你的回复要先装得自然一点，像熟人闲聊一样顺着接话，不要一上来就露凶相；重点是继续追问更具体的细节。";
+}
+
+function buildNpcConversationGoal({ instruction, plan, hasHistory = false }) {
+  if (plan?.scriptKey === "social_dark") {
+    if (!hasHistory) {
+      return "这是空态首轮。先打招呼，再说自己最近手紧、也想搞钱，问对方有没有什么建议；不要直接索要完整计划。";
+    }
+
+    return "继续聊天，阴阳怪气地吐槽对方不说实话，但别直接聊崩；不要收下笼统答案，要不断追问发财计划里的具体细节，比如人、货、价、地点和时机。";
   }
 
   if (plan?.scriptKey === "social_warm") {
-    return "继续聊天，先装得自然一点，像普通闲聊一样一步步套话，把发财计划套出来。";
+    if (!hasHistory) {
+      return "这是空态首轮。先打招呼，再说自己想搞钱，问对方有没有什么建议；先把话题自然带到搞钱门道上，不要直接索要完整计划。";
+    }
+
+    return "继续聊天，先装得自然一点，像普通闲聊一样一步步套话；不要收下笼统答案，要不断追问发财计划里的具体细节，比如人、货、价、地点和时机。";
   }
 
-  return String(instruction || "继续聊天，一步步把发财计划套出来。").trim();
+  return String(
+    instruction
+      || "继续聊天，不要收下笼统答案，要不断追问发财计划里的具体细节，比如人、货、价、地点和时机。"
+  ).trim();
 }
 
 function parseJsonObjectFromLlmText(rawText) {
@@ -1571,18 +1594,22 @@ async function analyzeNpcChatRound({
   latestCaptureImageDataUrl = capture.imageDataUrl;
 
   const historyText = buildNpcConversationHistoryText(conversationRounds);
+  const hasHistory = hasNpcConversationHistory(conversationRounds);
   const conversationGoal = buildNpcConversationGoal({
     instruction,
-    plan
+    plan,
+    hasHistory
   });
   const prompt = [
     "你现在要看一张游戏截图，判断当前是不是 NPC 聊天页，并替籽小刀准备下一句回复。",
     `当前聊天目标：${conversationGoal}`,
-    buildNpcReplyStylePrompt(plan),
+    buildNpcReplyStylePrompt(plan, hasHistory),
     "如果画面里已经不是 NPC 聊天页，或者根本看不出当前在聊什么，就保守返回 not_chat，不要编造。",
     "如果还是聊天页，请抓当前 NPC 最新一句台词；实在读不全时，可以提炼成一句贴近原意的短句，但不要瞎编新情节。",
     "回复必须只用中文，一句话，8 到 24 个字，像真人接话，不要提系统、截图、OCR、AI、模型、好感度数值。",
-    "不管是正常套话还是黑化套话，最终目的都还是一步步把发财计划套出来。",
+    hasHistory
+      ? "不管是正常套话还是黑化套话，最终目的都还是一步步把发财计划套出来，而且默认要继续追问细节，不要因为对方给了空话就停下。"
+      : "如果当前还没有历史对话，就先把招呼打稳，再自然带出自己想搞钱、想听建议；先开口，不要一上来就把话问穿。",
     `历史对话：\n${historyText}`,
     "严格只输出 JSON，不要带代码块，不要加解释。",
     "格式：{\"screenState\":\"chat_ready|not_chat\",\"npcLine\":\"...\",\"replyText\":\"...\"}"

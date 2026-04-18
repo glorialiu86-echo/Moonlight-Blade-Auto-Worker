@@ -29,6 +29,9 @@ DEFAULT_CAMERA_DRAG_MS = 220
 DEFAULT_VERIFY_SETTLE_MS = 180
 OCR_ENGINE = None
 TMP_DIR = Path(__file__).resolve().parents[1] / "tmp"
+CLICK_TRACE_DIR = TMP_DIR / "click-trace"
+GAME_FIXED_CLIENT_WIDTH = 2560
+GAME_FIXED_CLIENT_HEIGHT = 1440
 WORLD_HUD_KEYWORDS = ["感知", "潜行", "微风拂柳", "[Shift]", "[Space]", "叫卖"]
 EXTERNAL_INPUT_MOUSE_DELTA_PX = 2
 EXTERNAL_INPUT_CHECK_INTERVAL_MS = 40
@@ -270,11 +273,11 @@ ACTION_POINTS = {
     # until the text-entry chain is wired in.
     "chat_send": (938 / 2537, 1289 / 1384),
     "chat_exit": (872 / 2048, 536 / 1152),
-    # Fixed map-route controls are calibrated against the current client-area UI
-    # and must stay window-relative so resized windows keep the same hit targets.
-    "map_coord_y_input": (1262 / 1721, 770 / 895),
-    "map_coord_x_input": (1344 / 1721, 770 / 895),
-    "map_go": (1434 / 1721, 770 / 895),
+    # The user has pinned the in-game render resolution to 2560x1440, so the
+    # coordinate route bar uses one fixed reference layout again.
+    "map_coord_y_input": (1741 / GAME_FIXED_CLIENT_WIDTH, 1292 / GAME_FIXED_CLIENT_HEIGHT),
+    "map_coord_x_input": (1900 / GAME_FIXED_CLIENT_WIDTH, 1290 / GAME_FIXED_CLIENT_HEIGHT),
+    "map_go": (2093 / GAME_FIXED_CLIENT_WIDTH, 1284 / GAME_FIXED_CLIENT_HEIGHT),
     "teleport_confirm": (0.569, 0.742),
     "drop_carried_target": (1372 / 2048, 667 / 1152),
     "loot_transfer_item": (1422 / 2048, 359 / 1152),
@@ -284,32 +287,32 @@ ACTION_POINTS = {
 
 MAP_KEYPAD_POINTS = {
     "vertical": {
-        "1": (832 / 1721, 537 / 895),
-        "2": (938 / 1721, 537 / 895),
-        "3": (1044 / 1721, 537 / 895),
-        "4": (832 / 1721, 643 / 895),
-        "5": (938 / 1721, 643 / 895),
-        "6": (1044 / 1721, 643 / 895),
-        "7": (832 / 1721, 748 / 895),
-        "8": (938 / 1721, 748 / 895),
-        "9": (1044 / 1721, 748 / 895),
-        "0": (1151 / 1721, 643 / 895),
-        "delete": (1151 / 1721, 537 / 895),
-        "confirm": (1151 / 1721, 748 / 895),
+        "1": (1049 / GAME_FIXED_CLIENT_WIDTH, 760 / GAME_FIXED_CLIENT_HEIGHT),
+        "2": (1210 / GAME_FIXED_CLIENT_WIDTH, 761 / GAME_FIXED_CLIENT_HEIGHT),
+        "3": (1373 / GAME_FIXED_CLIENT_WIDTH, 761 / GAME_FIXED_CLIENT_HEIGHT),
+        "4": (1049 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
+        "5": (1211 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
+        "6": (1374 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
+        "7": (1050 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
+        "8": (1210 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
+        "9": (1373 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
+        "0": (1534 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
+        "delete": (1534 / GAME_FIXED_CLIENT_WIDTH, 761 / GAME_FIXED_CLIENT_HEIGHT),
+        "confirm": (1534 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
     },
     "horizontal": {
-        "1": (832 / 1721, 537 / 895),
-        "2": (938 / 1721, 537 / 895),
-        "3": (1044 / 1721, 537 / 895),
-        "4": (832 / 1721, 643 / 895),
-        "5": (938 / 1721, 643 / 895),
-        "6": (1044 / 1721, 643 / 895),
-        "7": (832 / 1721, 748 / 895),
-        "8": (938 / 1721, 748 / 895),
-        "9": (1044 / 1721, 748 / 895),
-        "0": (1151 / 1721, 643 / 895),
-        "delete": (1151 / 1721, 537 / 895),
-        "confirm": (1151 / 1721, 748 / 895),
+        "1": (1049 / GAME_FIXED_CLIENT_WIDTH, 760 / GAME_FIXED_CLIENT_HEIGHT),
+        "2": (1210 / GAME_FIXED_CLIENT_WIDTH, 761 / GAME_FIXED_CLIENT_HEIGHT),
+        "3": (1373 / GAME_FIXED_CLIENT_WIDTH, 761 / GAME_FIXED_CLIENT_HEIGHT),
+        "4": (1049 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
+        "5": (1211 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
+        "6": (1374 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
+        "7": (1050 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
+        "8": (1210 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
+        "9": (1373 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
+        "0": (1534 / GAME_FIXED_CLIENT_WIDTH, 920 / GAME_FIXED_CLIENT_HEIGHT),
+        "delete": (1534 / GAME_FIXED_CLIENT_WIDTH, 761 / GAME_FIXED_CLIENT_HEIGHT),
+        "confirm": (1534 / GAME_FIXED_CLIENT_WIDTH, 1079 / GAME_FIXED_CLIENT_HEIGHT),
     },
 }
 
@@ -770,6 +773,45 @@ def save_debug_image(
     file_path = TMP_DIR / name
     debug_image.save(file_path)
     return str(file_path)
+
+
+def slugify_debug_label(text: str) -> str:
+    normalized = re.sub(r"\s+", "_", str(text or "").strip())
+    normalized = re.sub(r"[^0-9A-Za-z_\-\u4e00-\u9fff]", "_", normalized)
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    return normalized or "click"
+
+
+def save_pre_click_trace(
+    hwnd: int,
+    screen_x: int,
+    screen_y: int,
+    label: str,
+) -> dict[str, Any]:
+    bounds = get_window_bounds(hwnd)
+    image = capture_screen_rect(
+        int(bounds["left"]),
+        int(bounds["top"]),
+        int(bounds["width"]),
+        int(bounds["height"]),
+    )
+    relative_x = max(0, min(int(bounds["width"]) - 1, int(screen_x) - int(bounds["left"])))
+    relative_y = max(0, min(int(bounds["height"]) - 1, int(screen_y) - int(bounds["top"])))
+    CLICK_TRACE_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    trace_name = f"{timestamp}-{int(time.time() * 1000) % 1000:03d}-{slugify_debug_label(label)}.png"
+    trace_path = save_debug_image(
+        image,
+        str(Path("click-trace") / trace_name),
+        click_point=(relative_x, relative_y),
+    )
+    return {
+        "path": trace_path,
+        "windowBounds": bounds,
+        "clientX": relative_x,
+        "clientY": relative_y,
+        "label": label,
+    }
 
 
 def ocr_text(image: np.ndarray) -> str:
@@ -1797,10 +1839,22 @@ def detect_bottom_right_menu_stage(hwnd: int) -> dict[str, Any]:
     }
 
 
-def click_npc_candidate(hwnd: int, x_ratio: float, y_ratio: float, button: str = "left") -> dict[str, Any]:
+def click_npc_candidate(
+    hwnd: int,
+    x_ratio: float,
+    y_ratio: float,
+    button: str = "left",
+    trace_label: str = "",
+) -> dict[str, Any]:
     bounds = focus_window(hwnd)
     click_x = round(bounds["left"] + bounds["width"] * x_ratio)
     click_y = round(bounds["top"] + bounds["height"] * y_ratio)
+    trace = save_pre_click_trace(
+        hwnd,
+        click_x,
+        click_y,
+        trace_label or f"ratio_{x_ratio:.4f}_{y_ratio:.4f}",
+    )
     pydirectinput.click(x=click_x, y=click_y, button=button)
     INPUT_GUARD.refresh_baseline()
     return {
@@ -1809,12 +1863,13 @@ def click_npc_candidate(hwnd: int, x_ratio: float, y_ratio: float, button: str =
         "screenY": click_y,
         "xRatio": x_ratio,
         "yRatio": y_ratio,
+        "preClickTrace": trace,
     }
 
 
 def click_named_point(hwnd: int, point_name: str) -> dict[str, Any]:
     x_ratio, y_ratio = ACTION_POINTS[point_name]
-    return click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
+    return click_npc_candidate(hwnd, x_ratio, y_ratio, "left", trace_label=point_name)
 
 
 def execute_fixed_trade_flow(hwnd: int, title: str) -> dict[str, Any]:
@@ -1890,14 +1945,27 @@ def execute_trade_gift_bundle_flow(hwnd: int, title: str, repeat_count: int = 10
     }
 
 
-def click_screen_point(hwnd: int, screen_x: int, screen_y: int, button: str = "left") -> dict[str, Any]:
+def click_screen_point(
+    hwnd: int,
+    screen_x: int,
+    screen_y: int,
+    button: str = "left",
+    trace_label: str = "",
+) -> dict[str, Any]:
     focus_window(hwnd)
+    trace = save_pre_click_trace(
+        hwnd,
+        screen_x,
+        screen_y,
+        trace_label or f"screen_{screen_x}_{screen_y}",
+    )
     pydirectinput.click(x=screen_x, y=screen_y, button=button)
     INPUT_GUARD.refresh_baseline()
     return {
         "button": button,
         "screenX": screen_x,
         "screenY": screen_y,
+        "preClickTrace": trace,
     }
 
 

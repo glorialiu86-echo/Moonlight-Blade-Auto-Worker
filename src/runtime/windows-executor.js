@@ -357,7 +357,25 @@ export function createFixedSocialRecoveryActions() {
   ];
 }
 
-export function createFixedSellLoopActions() {
+function getFixedSellLoopRoundConfig(roundNumber = 1) {
+  const normalizedRound = Math.max(1, Number(roundNumber) || 1);
+  if (normalizedRound % 2 === 0) {
+    return {
+      itemName: "散酒",
+      buyTitle: "买满散酒并关闭面板",
+      stockTitle: "选中第一格散酒并最大化后上架"
+    };
+  }
+
+  return {
+    itemName: "墨锭",
+    buyTitle: "买满墨锭并关闭面板",
+    stockTitle: "选中第一格墨锭并最大化后上架"
+  };
+}
+
+export function createFixedSellLoopActions(options = {}) {
+  const sellConfig = getFixedSellLoopRoundConfig(options.roundNumber);
   return [
     createTravelToCoordinateAction({
       id: "fixed-sale-1",
@@ -378,8 +396,8 @@ export function createFixedSellLoopActions() {
       interactAttempts: 3,
       postDelayMs: 1000
     }),
-    createWorkerAction("fixed-sale-5", "买满墨锭并关闭面板", "buy_current_vendor_item", {
-      itemName: "墨锭",
+    createWorkerAction("fixed-sale-5", sellConfig.buyTitle, "buy_current_vendor_item", {
+      itemName: sellConfig.itemName,
       quantity: 1,
       postDelayMs: 1000
     }),
@@ -392,11 +410,13 @@ export function createFixedSellLoopActions() {
     createPressKeyAction("fixed-sale-7", "下马准备叫卖", "1", { postDelayMs: 1000 }),
     createPressKeyAction("fixed-sale-8", "矫正视角准备叫卖", "v", { postDelayMs: 1000 }),
     createPressShortcutAction("fixed-sale-9", "打开叫卖界面", "hawking", { postDelayMs: 2000 }),
-    createWorkerAction("fixed-sale-10", "选中货物并上架", "stock_first_hawking_item", {
+    createWorkerAction("fixed-sale-10", sellConfig.stockTitle, "stock_first_hawking_item", {
       postDelayMs: 1000
     }),
-    createWorkerAction("fixed-sale-11", "开始出摊", "submit_hawking", {
-      postDelayMs: 1000
+    createWorkerAction("fixed-sale-11", "点击出摊并等卖完回到正常街道", "submit_hawking", {
+      submitReadyDelayMs: 1000,
+      activeTimeoutMs: 8000,
+      finishTimeoutMs: 120000
     })
   ];
 }
@@ -865,15 +885,17 @@ export function createPrimitiveActions(sequenceName) {
         },
         {
           id: "primitive-8",
-          title: "选中第一件货物上架",
+          title: "选中第一格墨锭并最大化后上架",
           type: "stock_first_hawking_item",
           postDelayMs: 1000
         },
         {
           id: "primitive-9",
-          title: "开始出摊",
+          title: "点击出摊并等卖完回到正常街道",
           type: "submit_hawking",
-          postDelayMs: 1000
+          submitReadyDelayMs: 1000,
+          activeTimeoutMs: 8000,
+          finishTimeoutMs: 120000
         }
       ];
     case "sale":
@@ -954,15 +976,17 @@ export function createPrimitiveActions(sequenceName) {
         },
         {
           id: "primitive-10",
-          title: "选中货物并上架",
+          title: "选中第一格墨锭并最大化后上架",
           type: "stock_first_hawking_item",
           postDelayMs: 1000
         },
         {
           id: "primitive-11",
-          title: "开始出摊",
+          title: "点击出摊并等卖完回到正常街道",
           type: "submit_hawking",
-          postDelayMs: 1000
+          submitReadyDelayMs: 1000,
+          activeTimeoutMs: 8000,
+          finishTimeoutMs: 120000
         }
       ];
     case "stealth":

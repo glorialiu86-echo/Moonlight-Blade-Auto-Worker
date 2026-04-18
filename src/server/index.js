@@ -88,6 +88,7 @@ const FIXED_SCRIPT_STAGE_VOICES = {
       persona: "先按最正经的买卖路数一遍账。",
       progress: {
         stock: "先把货补上，空着手站街上，活像来晒太阳的。",
+        moding: "这里文人墨客扎堆，墨锭肯定最好卖，我先多抱一点在手里。",
         hawk: "货到手了，摊子也该支起来了，我倒要看看今天有没有人肯来凑这个热闹。"
       },
       resultFactory: ({ recovered }) => recovered
@@ -96,14 +97,15 @@ const FIXED_SCRIPT_STAGE_VOICES = {
     },
     {
       thinkingChain: [
-        "做生意是慢，可慢归慢，总得先看街上肯不肯给我开张。",
-        "来来往往这么多人，总不能人人看完就走，把我当摆设。",
-        "我再把摊子撑一会儿，看看到底是货不行，还是这条路天生磨人。"
+        "墨锭上一轮算是试过了，老抱着一种货不放，也未必就最划算。",
+        "要不这轮换换别的，看看街上到底是爱墨香，还是更吃烟火气。",
+        "散酒要是比墨锭走得快，那我也省得守着一种货死磕。"
       ],
-      decide: "我再补一趟货，把这摊普通生意继续撑下去，先把账算明白。",
+      decide: "这轮我换成散酒试试，看看是不是比墨锭更招人。",
       persona: "先继续算正经买卖这笔慢账。",
       progress: {
         stock: "先把货架再补齐，摊子想继续撑，总不能先把脸面撑空了。",
+        moding: "这轮我不死守墨锭了，先换成散酒看看，说不定酒气比墨香更勾人。",
         hawk: "行，货又齐了，我把摊子一摆，再看今天到底能不能真顺出去几笔。"
       },
       resultFactory: ({ recovered }) => recovered
@@ -120,6 +122,7 @@ const FIXED_SCRIPT_STAGE_VOICES = {
       persona: "先把正经路做到底，再决定要不要翻篇。",
       progress: {
         stock: "再补一波货，把这条摆摊路数继续试明白，省得我回头还替它找借口。",
+        moding: "街上文人扎堆，墨锭不愁没人要，这一手总该比乱抓货更稳当。",
         hawk: "货已经抱回来了，我把摊子一撑，看看这口正经钱到底还能不能再往前挪一点。"
       },
       resultFactory: ({ recovered }) => recovered
@@ -2035,18 +2038,26 @@ async function runFixedSellLoopStageExecution({
   perceptionSummary,
   externalInputGuardEnabled = true
 }) {
-  const actions = createFixedSellLoopActions();
+  const actions = createFixedSellLoopActions({ roundNumber });
   const executions = [];
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
 
   await runFixedActionChunk({
-    actions: actions.slice(0, 5),
+    actions: actions.slice(0, 4),
     options,
     plan,
     perceptionSummary,
     commentaryText: getFixedStageProgressText("sell_loop", roundNumber, "stock"),
+    executions
+  });
+  await runFixedActionChunk({
+    actions: actions.slice(4, 5),
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageProgressText("sell_loop", roundNumber, "moding"),
     executions
   });
   await runFixedActionChunk({

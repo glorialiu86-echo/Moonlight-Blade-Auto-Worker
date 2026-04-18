@@ -243,11 +243,12 @@ ACTION_POINTS = {
     "vendor_purchase_max_quantity": (747 / 2048, 593 / 1152),
     "vendor_purchase_close": (1927 / 2048, 48 / 1152),
     "vendor_purchase_option": (1676 / 2048, 202 / 1152),
+    "vendor_purchase_item_sanjiu": (1676 / 2048, 215 / 1152),
     "vendor_purchase_item_moding": (1676 / 2048, 518 / 1152),
-    "hawking_inventory_first_slot": (1691 / 2048, 257 / 1151),
-    "hawking_max_quantity": (1464 / 2048, 661 / 1151),
-    "hawking_stock_button": (1298 / 2048, 843 / 1151),
-    "hawking_submit": (2459 / 2644, 1227 / 1399),
+    "hawking_inventory_first_slot": (1701 / 2048, 218 / 1152),
+    "hawking_max_quantity": (1470 / 2048, 620 / 1152),
+    "hawking_stock_button": (1285 / 2048, 796 / 1152),
+    "hawking_submit": (1914 / 2048, 789 / 1152),
     "steal_button_1": (1701 / 2048, 389 / 1152),
     "steal_button_2": (1916 / 2048, 704 / 1360),
     "steal_button_3": (1916 / 2048, 893 / 1360),
@@ -1190,6 +1191,20 @@ def detect_hawking_screen(hwnd: int) -> dict[str, Any]:
     return {
         "visible": contains_any_keyword(panel_text, HAWKING_SCREEN_KEYWORDS),
         "text": panel_text,
+    }
+
+
+def detect_hawking_runtime_state(hwnd: int) -> dict[str, Any]:
+    action_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["bottom_right_actions"]))
+    normalized_text = normalize_npc_name(action_text)
+    active_keywords = ["收摊", "改货", "议价"]
+    ready_keywords = ["叫卖", "感知", "寻迹", "潜行", "微风拂柳"]
+    return {
+        "active": any(keyword in normalized_text for keyword in active_keywords),
+        "ready": any(keyword in normalized_text for keyword in ready_keywords)
+        and not any(keyword in normalized_text for keyword in active_keywords),
+        "text": action_text,
+        "normalizedText": normalized_text,
     }
 
 
@@ -3060,41 +3075,6 @@ def find_text_button_in_roi(hwnd: int, roi: tuple[float, float, float, float], t
     }
 
 
-def find_vendor_item_button(hwnd: int, item_name: str) -> dict[str, Any] | None:
-    roi = NPC_STAGE_ROIS["trade_panel"]
-    bounds = get_window_bounds(hwnd)
-    image = capture_window_region(hwnd, roi)
-    items = ocr_items(image)
-    keywords = [part for part in re.split(r"\s+", normalize_npc_name(item_name)) if part]
-
-    if not keywords:
-        return None
-
-    best_match = None
-    best_score = None
-    for item in items:
-        normalized = normalize_npc_name(item["text"])
-        if not normalized:
-            continue
-        if not any(keyword in normalized or normalized in keyword for keyword in keywords):
-            continue
-        score = float(item["score"])
-        if best_score is None or score > best_score:
-            best_score = score
-            best_match = item
-
-    if best_match is None:
-        return None
-
-    return {
-        "text": best_match["text"],
-        "score": round(best_match["score"], 3),
-        "screenX": round(bounds["left"] + bounds["width"] * roi[0] + best_match["centerX"]),
-        "screenY": round(bounds["top"] + bounds["height"] * roi[1] + max(best_match["centerY"] - 70, 16)),
-        "source": "vendor_item_text",
-    }
-
-
 def run_open_named_npc_trade(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "open_named_npc_trade")
@@ -3414,19 +3394,13 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
 
     item_key = normalize_npc_name(item_name)
     if item_key == normalize_npc_name("墨锭"):
-        item_button = find_vendor_item_button(hwnd, item_name) or {"pointName": "vendor_purchase_item_moding"}
+        item_button = {"pointName": "vendor_purchase_item_moding"}
+    elif item_key == normalize_npc_name("散酒"):
+        item_button = {"pointName": "vendor_purchase_item_sanjiu"}
     else:
         raise RuntimeError(f"Unsupported fixed vendor item: {item_name}")
 
-    if item_button.get("pointName"):
-        item_click = click_named_point(hwnd, str(item_button["pointName"]))
-    else:
-        item_click = click_screen_point(
-            hwnd,
-            int(item_button["screenX"]),
-            int(item_button["screenY"]),
-            "left",
-        )
+    item_click = click_named_point(hwnd, str(item_button["pointName"]))
     INPUT_GUARD.guarded_sleep(1000, title)
 
     max_quantity_click = click_named_point(hwnd, "vendor_purchase_max_quantity")
@@ -3486,7 +3460,9 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
     max_quantity_click = click_named_point(hwnd, "hawking_max_quantity")
     INPUT_GUARD.guarded_sleep(1000, title)
     stock_click = click_named_point(hwnd, "hawking_stock_button")
-    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 1000), title)
+    settle_ms = int(action.get("postDelayMs") or 1000)
+    INPUT_GUARD.guarded_sleep(settle_ms, title)
+    after_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
 
     return {
         "id": action_id,
@@ -3499,6 +3475,8 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
             "inventoryClick": inventory_click,
             "maxQuantityClick": max_quantity_click,
             "stockClick": stock_click,
+            "afterText": after_text,
+            "settleMs": settle_ms,
         },
     }
 
@@ -3510,18 +3488,100 @@ def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     if not hawking_state["visible"]:
         raise RuntimeError("Current screen is not hawking screen")
 
+    submit_ready_delay_ms = max(400, int(action.get("submitReadyDelayMs") or 1000))
+    active_timeout_ms = max(3000, int(action.get("activeTimeoutMs") or 8000))
+    finish_timeout_ms = max(15000, int(action.get("finishTimeoutMs") or 120000))
+
     submit_click = click_named_point(hwnd, "hawking_submit")
-    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 1000), title)
+    INPUT_GUARD.guarded_sleep(submit_ready_delay_ms, title)
+
+    active_history: list[dict[str, Any]] = []
+    runtime_state = detect_hawking_runtime_state(hwnd)
+    active_deadline = time.time() + active_timeout_ms / 1000.0
+
+    while time.time() <= active_deadline:
+        active_history.append(
+            {
+                "phase": "wait_active",
+                "active": bool(runtime_state["active"]),
+                "ready": bool(runtime_state["ready"]),
+                "text": runtime_state["text"],
+            }
+        )
+        if runtime_state["active"]:
+            break
+        INPUT_GUARD.guarded_sleep(600, title)
+        runtime_state = detect_hawking_runtime_state(hwnd)
+
+    if not runtime_state["active"]:
+        raise ActionExecutionError(
+            "Hawking state did not switch into 改货/收摊 after submit",
+            failed_step=build_failed_step_payload(
+                action,
+                "Clicked 出摊 but the bottom-right actions did not switch into the hawking runtime state",
+                {
+                    "mode": "submit_hawking",
+                    "beforeText": hawking_state["text"],
+                    "submitClick": submit_click,
+                    "submitReadyDelayMs": submit_ready_delay_ms,
+                    "activeTimeoutMs": active_timeout_ms,
+                    "finishTimeoutMs": finish_timeout_ms,
+                    "activeHistory": active_history,
+                },
+            ),
+        )
+
+    finish_history: list[dict[str, Any]] = []
+    finish_deadline = time.time() + finish_timeout_ms / 1000.0
+
+    while time.time() <= finish_deadline:
+        finish_history.append(
+            {
+                "phase": "wait_finish",
+                "active": bool(runtime_state["active"]),
+                "ready": bool(runtime_state["ready"]),
+                "text": runtime_state["text"],
+            }
+        )
+        if runtime_state["ready"]:
+            break
+        INPUT_GUARD.guarded_sleep(1000, title)
+        runtime_state = detect_hawking_runtime_state(hwnd)
+
+    if not runtime_state["ready"]:
+        raise ActionExecutionError(
+            "Hawking state did not return to the normal world HUD before timeout",
+            failed_step=build_failed_step_payload(
+                action,
+                "Entered the hawking runtime state but did not return to the normal 12345 HUD in time",
+                {
+                    "mode": "submit_hawking",
+                    "beforeText": hawking_state["text"],
+                    "submitClick": submit_click,
+                    "submitReadyDelayMs": submit_ready_delay_ms,
+                    "activeTimeoutMs": active_timeout_ms,
+                    "finishTimeoutMs": finish_timeout_ms,
+                    "activeHistory": active_history,
+                    "finishHistory": finish_history,
+                },
+            ),
+        )
 
     return {
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Submitted current hawking shelf setup",
+        "detail": "Submitted hawking, observed 改货/收摊, and waited until the normal world HUD returned",
         "input": {
             "mode": "submit_hawking",
             "beforeText": hawking_state["text"],
             "submitClick": submit_click,
+            "submitReadyDelayMs": submit_ready_delay_ms,
+            "activeTimeoutMs": active_timeout_ms,
+            "finishTimeoutMs": finish_timeout_ms,
+            "activeHistory": active_history,
+            "finishHistory": finish_history,
+            "afterText": runtime_state["text"],
         },
     }
 

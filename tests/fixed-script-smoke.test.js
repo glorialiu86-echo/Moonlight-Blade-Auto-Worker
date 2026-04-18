@@ -53,8 +53,11 @@ test("fixed-script smoke: retired startup and ending lines stay absent", async (
 
 test("fixed-script smoke: sell loop keeps the new vendor approach chain", () => {
   const actions = createFixedSellLoopActions();
+  const roundTwoActions = createFixedSellLoopActions({ roundNumber: 2 });
   const vendorSetupTitles = actions.slice(0, 5).map((action) => action.title);
   const vendorSetupTypes = actions.slice(0, 5).map((action) => action.type);
+  const hawkingTitles = actions.slice(8, 11).map((action) => action.title);
+  const hawkingTypes = actions.slice(8, 11).map((action) => action.type);
 
   assert.deepEqual(vendorSetupTitles, [
     "去货商坐标",
@@ -71,4 +74,20 @@ test("fixed-script smoke: sell loop keeps the new vendor approach chain", () => 
     "open_named_vendor_purchase",
     "buy_current_vendor_item"
   ]);
+
+  assert.deepEqual(hawkingTitles, [
+    "打开叫卖界面",
+    "选中第一格墨锭并最大化后上架",
+    "点击出摊并等卖完回到正常街道"
+  ]);
+
+  assert.deepEqual(hawkingTypes, [
+    "press_shortcut",
+    "stock_first_hawking_item",
+    "submit_hawking"
+  ]);
+
+  assert.equal(roundTwoActions[4].title, "买满散酒并关闭面板");
+  assert.equal(roundTwoActions[4].itemName, "散酒");
+  assert.equal(roundTwoActions[9].title, "选中第一格散酒并最大化后上架");
 });

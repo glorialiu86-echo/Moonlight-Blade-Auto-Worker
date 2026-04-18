@@ -19,7 +19,7 @@
 
 ## 固定剧本
 
-1. 正常思考，执行 `买货 -> 叫卖`，循环 `3` 轮
+1. 正常思考，执行 `买货 -> 叫卖`，循环 `2` 轮
 2. 正常思考，执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
 3. 黑化思考，执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
 4. 黑化思考，执行 `潜行 -> 闷棍 -> 扛走 -> 搜刮`，循环 `3` 次
@@ -34,6 +34,8 @@
 - 第四段里的 `闷棍` 现在按“到点、进潜行、直接按 3，由游戏自动吃附近目标”来设计；当前已确认按小时最多 `4` 次，但固定剧本仍按 `搜刮` 上限只跑 `3` 轮
 - 第五段是独立妙取链，固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
 - 第六段是收尾卖货链，固定执行 `acquire_npc_target -> open_npc_action_menu -> click_menu_trade -> trade_prepare_gift_bundle(10) -> trade_select_right_money_slot -> trade_scale_quantity -> trade_right_item_up_shelf -> trade_submit -> close_current_panel`
+- 第一段买货现在按轮次固定切货：第 `1` 轮买 `墨锭`，第 `2` 轮买 `散酒`
+- 第一段里的叫卖已经按固定 UI 收敛成：`4 打开叫卖 -> 库存第一格当前货物 -> 最大化 -> 上架 -> 出摊 -> 原地等右下角先变改货/收摊，再等回正常 HUD`
 - 不允许前端展示“当前阶段 / 当前轮次 / 倒计时 / 固定剧本编号”
 - 前端只允许看到人格化思考、执行结果、暂停和完成状态
 

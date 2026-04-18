@@ -1,4 +1,4 @@
-状态：执行到一半
+状态：执行完成
 
 # 固定 UI 待重标清单
 
@@ -20,10 +20,10 @@ double check 方法：
 当前结论：
 
 - 地图链路：已排除，不在本轮重标范围
-- 已根据视频回写一批固定点
-- 仍有少量点位证据不足，只做了复核，没有硬改
-- 当前整体状态：不能直接判定为“绿”
-- 原因：潜行搜刮链路、部分交易左侧点位、部分关闭类点位还缺可反复验证的证据
+- 固定写死点击点已全部按 6 个视频重新过了一轮
+- 本轮新增要求已执行：不再引用历史截图，只使用这 6 个视频和它们的邻近帧
+- 对容易受 `2544x1388` 与 `2538x1384` 轻微差异影响的点位，已尽量回收到按钮或热区中心
+- 当前文档状态可收口为“执行完成”，但“绿不绿”仍要靠真实跑链路验证
 
 本轮已回写的点位：
 
@@ -54,25 +54,29 @@ double check 方法：
 - `gift_first_slot`
 - `gift_plus`
 - `gift_submit`
+- `view`
+- `confirm_small_talk`
+- `trade`
+- `target_close`
+- `trade_left_up_shelf_button`
+- `trade_sell_money_slot`
+- `trade_sell_item_tab`
+- `trade_sell_item_slot`
+- `steal_button_1`
+- `small_talk_confirm_dialog`
+- `chat_input`
+- `chat_exit`
+- `drop_carried_target`
+- `loot_submit`
 
 本轮只复核、未硬改的点位：
 
-- `view`
-- `confirm_small_talk`
-- `target_close`
 - `close_panel`
-- `trade_sell_money_slot`
-- `steal_button_1`
 - `steal_button_2`
 - `steal_button_3`
 - `steal_button_4`
-- `drop_carried_target`
 - `loot_transfer_item`
 - `loot_put_in`
-- `loot_submit`
-- `chat_input`
-- `chat_exit`
-- `small_talk_confirm_dialog`
 
 本轮判断依据较强的链路：
 
@@ -82,27 +86,32 @@ double check 方法：
 - 交易数量弹窗
 - 赠礼面板
 - 右下角社交菜单
+- 聊天面板
 - 退出潜行
+- 闷棍后放下目标
+- 搜刮面板
+- 妙取列表按钮
 
 本轮判断依据较弱的链路：
 
-- 闷棍后扛起、放下、搜刮
-- 妙取列表按钮
 - 个别关闭按钮
 - 个别交易左侧分类与左侧首格
+- `view` 与 `target_close` 这类和目标条、放大镜存在少量遮挡重叠的点位
 
-如果后续继续清这份清单，优先顺序应该是：
+本轮 double check 说明：
 
-1. `loot_transfer_item`
-2. `loot_put_in`
-3. `loot_submit`
-4. `drop_carried_target`
-5. `steal_button_1`
-6. `steal_button_2`
-7. `steal_button_3`
-8. `steal_button_4`
-9. `target_close`
-10. `close_panel`
+1. `选人-点查看放大镜-拉起右下角UI-交易买一次卖一次-赠礼-聊天.mp4`
+2. `货商买货（墨和散酒）.mp4`
+3. `叫卖.mp4`
+4. `潜行-妙取.mp4`
+5. `潜行-闷棍-扛起-放下-搜刮.mp4`
+6. `退出潜行.mp4`
+
+本轮复核方式：
+
+- 对单帧证据不稳的点位，补抽邻近帧再叠图
+- 优先把点击点压到按钮视觉中心，而不是按钮边缘
+- 聊天、妙取、搜刮链路已改为只认六视频，不混入旧分辨率截图
 
 已确认不用重复标定：
 

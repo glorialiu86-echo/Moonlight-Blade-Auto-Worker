@@ -98,7 +98,7 @@ const FIXED_SCRIPT_STAGE_VOICES = {
       decide: "我先在原地瞎转一圈，看看这条街到底都在忙什么。",
       persona: "先乱晃一圈，把街面热闹先看进脑子里。",
       progress: {
-        wander: "我先装作没拿定主意，在这儿东一下西一下乱晃两圈。",
+        wander: "我是真没拿定主意，在这儿东一下西一下乱晃两圈。",
         pause: "刚刚看到大街上人这么热闹，赚钱是不是可以卖货。"
       },
       resultFactory: ({ recovered }) => recovered

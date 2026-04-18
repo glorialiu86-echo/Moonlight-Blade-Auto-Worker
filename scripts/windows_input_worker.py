@@ -2338,9 +2338,13 @@ def run_travel_to_coordinate(hwnd: int, action: dict[str, Any]) -> dict[str, Any
     coordinate_tolerance = int(action.get("coordinateTolerance") or 5)
     reroute_limit = int(action.get("rerouteLimit") or 2)
     confirm_point_name = str(action.get("confirmPointName") or "").strip()
+    # The game shows minimap coordinates as "vertical, horizontal":
+    # left value is the vertical coordinate, right value is the horizontal one.
+    # Route input already follows that UI order, so success checking must map
+    # the OCR'd first value back to y_coordinate and the second value to x_coordinate.
     target_coordinate = {
-        "x": x_coordinate,
-        "y": y_coordinate,
+        "x": y_coordinate,
+        "y": x_coordinate,
     }
     attempts: list[dict[str, Any]] = []
 

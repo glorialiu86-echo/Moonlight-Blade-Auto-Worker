@@ -483,8 +483,8 @@ export function createFixedDarkCloseStageActions() {
     createTravelToCoordinateAction({
       id: "fixed-dark-close-1",
       title: "去潜行点",
-      xCoordinate: 740,
-      yCoordinate: 944,
+      xCoordinate: 405,
+      yCoordinate: 812,
       confirmPointName: "teleport_confirm"
     }),
     createPressKeyAction("fixed-dark-close-2", "下马准备潜行", "1", { postDelayMs: 800 }),
@@ -534,8 +534,8 @@ export function createFixedDarkMiaoquStageActions() {
     createTravelToCoordinateAction({
       id: "fixed-dark-miaoqu-1",
       title: "去妙取潜行点",
-      xCoordinate: 740,
-      yCoordinate: 944,
+      xCoordinate: 405,
+      yCoordinate: 812,
       confirmPointName: "teleport_confirm"
     }),
     createPressKeyAction("fixed-dark-miaoqu-2", "下马准备妙取", "1", { postDelayMs: 800 }),
@@ -797,8 +797,8 @@ function createStealthPrimitiveActions() {
     createTravelToCoordinateAction({
       id: "primitive-1",
       title: "Route To Stealth Point",
-      xCoordinate: 740,
-      yCoordinate: 944,
+      xCoordinate: 405,
+      yCoordinate: 812,
       confirmPointName: "teleport_confirm"
     }),
     {

@@ -277,7 +277,7 @@ ACTION_POINTS = {
     # coordinate route bar uses one fixed reference layout again.
     "map_coord_y_input": (1668 / GAME_FIXED_CLIENT_WIDTH, 1258 / GAME_FIXED_CLIENT_HEIGHT),
     "map_coord_x_input": (1900 / GAME_FIXED_CLIENT_WIDTH, 1278 / GAME_FIXED_CLIENT_HEIGHT),
-    "map_go": (2093 / GAME_FIXED_CLIENT_WIDTH, 1284 / GAME_FIXED_CLIENT_HEIGHT),
+    "map_go": (2093 / GAME_FIXED_CLIENT_WIDTH, 1264 / GAME_FIXED_CLIENT_HEIGHT),
     "teleport_confirm": (1450 / GAME_FIXED_CLIENT_WIDTH, 1272 / GAME_FIXED_CLIENT_HEIGHT),
     "drop_carried_target": (1372 / 2048, 667 / 1152),
     "loot_transfer_item": (1422 / 2048, 359 / 1152),

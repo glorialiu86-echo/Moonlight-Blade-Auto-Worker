@@ -227,51 +227,47 @@ NPC_CAPTURE_SCAN_POINTS = [
 
 ACTION_POINTS = {
     "view": (0.32, 0.57),
-    "talk": (1562 / 2048, 1042 / 1152),
-    "small_talk": (1446 / 2048, 904 / 1152),
+    "talk": (1830 / 2544, 1217 / 1388),
+    "small_talk": (1640 / 2544, 1147 / 1388),
     "confirm_small_talk": (1237 / 2048, 799 / 1152),
     "trade": (1735 / 2048, 1033 / 1152),
-    "gift": (1910 / 2048, 1031 / 1152),
+    "gift": (2328 / 2544, 1221 / 1388),
     "target_close": (1115 / 2537, 691 / 1384),
     "close_panel": (2004 / 2048, 32 / 1152),
-    "trade_left_item_tab": (52 / 2048, 410 / 1152),
-    "trade_left_item_slot": (221 / 2048, 438 / 1152),
+    "trade_left_item_tab": (49 / 2544, 530 / 1388),
+    "trade_left_item_slot": (166 / 2544, 388 / 1388),
     "trade_left_up_shelf_button": (740 / 2048, 930 / 1152),
     "trade_sell_money_slot": (219 / 2048, 320 / 1152),
-    "trade_gift_item_tab": (49 / 2048, 447 / 1152),
-    "trade_gift_item_slot": (189 / 2048, 510 / 1152),
+    "trade_gift_item_tab": (49 / 2544, 530 / 1388),
+    "trade_gift_item_slot": (166 / 2544, 388 / 1388),
     "trade_sell_item_tab": (1977 / 2048, 260 / 1152),
     "trade_sell_item_slot": (1792 / 2048, 148 / 1152),
-    "trade_right_money_slot": (1706 / 2048, 146 / 1152),
-    "trade_scale_button": (1518 / 2048, 578 / 1152),
-    "trade_sell_scale_button": (940 / 2048, 684 / 1152),
-    "trade_right_up_shelf_button": (0.639, 0.703),
-    "trade_final_submit_button": (1296 / 2048, 1027 / 1152),
-    "vendor_purchase_plus": (662 / 2048, 593 / 1152),
-    "vendor_purchase_buy": (643 / 2048, 780 / 1152),
-    "vendor_purchase_max_quantity": (747 / 2048, 593 / 1152),
-    "vendor_purchase_close": (1927 / 2048, 48 / 1152),
-    "vendor_purchase_option": (1676 / 2048, 202 / 1152),
-    "vendor_purchase_item_sanjiu": (1676 / 2048, 215 / 1152),
-    "vendor_purchase_item_moding": (1676 / 2048, 518 / 1152),
-    "hawking_inventory_first_slot": (1701 / 2048, 218 / 1152),
-    "hawking_max_quantity": (1470 / 2048, 620 / 1152),
-    "hawking_stock_button": (1285 / 2048, 796 / 1152),
-    "hawking_submit": (1914 / 2048, 789 / 1152),
+    "trade_right_money_slot": (2070 / 2544, 160 / 1388),
+    "trade_scale_button": (1667 / 2544, 752 / 1388),
+    "trade_sell_scale_button": (1667 / 2544, 752 / 1388),
+    "trade_right_up_shelf_button": (1612 / 2544, 1028 / 1388),
+    "trade_final_submit_button": (1345 / 2544, 1296 / 1388),
+    "vendor_purchase_plus": (427 / 2544, 706 / 1388),
+    "vendor_purchase_buy": (372 / 2544, 1012 / 1388),
+    "vendor_purchase_max_quantity": (479 / 2544, 706 / 1388),
+    "vendor_purchase_close": (2478 / 2544, 31 / 1388),
+    "vendor_purchase_option": (2051 / 2544, 212 / 1388),
+    "vendor_purchase_item_sanjiu": (2051 / 2544, 212 / 1388),
+    "vendor_purchase_item_moding": (2051 / 2544, 485 / 1388),
+    "hawking_inventory_first_slot": (2072 / 2544, 216 / 1388),
+    "hawking_max_quantity": (1776 / 2544, 706 / 1388),
+    "hawking_stock_button": (1603 / 2544, 1011 / 1388),
+    "hawking_submit": (2320 / 2544, 1328 / 1388),
     "steal_button_1": (1701 / 2048, 389 / 1152),
     "steal_button_2": (1916 / 2048, 704 / 1360),
     "steal_button_3": (1916 / 2048, 893 / 1360),
     "steal_button_4": (1916 / 2048, 1085 / 1360),
-    "exit_stealth": (407 / 2048, 810 / 1152),
-    "gift_first_slot": (1423 / 2048, 445 / 1152),
-    "gift_plus": (0.82, 0.92),
-    "gift_submit": (1813 / 2048, 968 / 1152),
+    "exit_stealth": (2275 / 2544, 493 / 1388),
+    "gift_first_slot": (1725 / 2544, 400 / 1388),
+    "gift_plus": (2027 / 2544, 1190 / 1388),
+    "gift_submit": (2270 / 2544, 1190 / 1388),
     "small_talk_confirm_dialog": (1224 / 2048, 801 / 1152),
     "chat_input": (318 / 2048, 1005 / 1152),
-    # Send is fixed UI, but it only becomes actionable after valid text input.
-    # Keep the point calibrated now; do not assume the button is clickable
-    # until the text-entry chain is wired in.
-    "chat_send": (938 / 2537, 1289 / 1384),
     "chat_exit": (872 / 2048, 536 / 1152),
     # The user has pinned the in-game render resolution to 2560x1440, so the
     # coordinate route bar uses one fixed reference layout again.
@@ -1996,7 +1992,8 @@ def send_chat_message(
     INPUT_GUARD.refresh_baseline()
     INPUT_GUARD.guarded_sleep(80, "send_chat_message")
 
-    click_named_point(hwnd, "chat_send")
+    pydirectinput.press("enter")
+    INPUT_GUARD.refresh_baseline()
     INPUT_GUARD.guarded_sleep(180, "send_chat_message")
 
     if close_after_send:

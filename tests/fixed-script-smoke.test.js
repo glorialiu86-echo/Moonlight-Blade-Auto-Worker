@@ -13,6 +13,9 @@ import {
   verifyStartupAndEndingCopy
 } from "../scripts/lib/fixed-script-config-check.js";
 import {
+  createFixedEndingTradeBundleActions,
+  createFixedEndingTradeOpenTradeActions,
+  createFixedEndingTradeRelocateActions,
   createFixedSocialGiftEntryActions,
   createFixedSocialGiftResolveActions,
   createFixedSellLoopActions,
@@ -140,5 +143,31 @@ test("fixed-script smoke: stage 0 keeps the street wander opener", () => {
     "a",
     "s",
     "d"
+  ]);
+});
+
+test("fixed-script smoke: ending trade keeps the local retry and relocate split", () => {
+  const openTradeActions = createFixedEndingTradeOpenTradeActions({ idPrefix: "smoke-ending-open" });
+  const relocateActions = createFixedEndingTradeRelocateActions({ idPrefix: "smoke-ending-relocate" });
+  const bundleActions = createFixedEndingTradeBundleActions({ idPrefix: "smoke-ending-bundle" });
+
+  assert.deepEqual(openTradeActions.map((action) => action.type), [
+    "acquire_npc_target",
+    "open_npc_action_menu",
+    "click_menu_trade"
+  ]);
+
+  assert.deepEqual(relocateActions.map((action) => action.type), [
+    "travel_to_coordinate",
+    "press_key"
+  ]);
+
+  assert.deepEqual(bundleActions.map((action) => action.type), [
+    "trade_prepare_gift_bundle",
+    "trade_select_right_money_slot",
+    "trade_scale_quantity",
+    "trade_right_item_up_shelf",
+    "trade_submit",
+    "close_current_panel"
   ]);
 });

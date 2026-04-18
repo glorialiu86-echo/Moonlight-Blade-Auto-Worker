@@ -4530,9 +4530,19 @@ def run_click_menu_trade(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     INPUT_GUARD.guarded_sleep(350, title)
     next_stage_state = detect_npc_interaction_stage(hwnd)
     if next_stage_state["stage"] != "trade_screen":
-        raise RuntimeError(
-            "Trade entry did not reach trade_screen. "
-            f"Last stage: {next_stage_state['stage'] or 'none'}"
+        failed_input = {
+            "mode": "click_menu_trade",
+            **collect_npc_stage_input(hwnd, next_stage_state),
+            "click": trade_click,
+        }
+        raise ActionExecutionError(
+            "Trade entry did not reach trade_screen",
+            error_code="NPC_TRADE_NOT_OPENED",
+            failed_step=build_failed_step_payload(
+                action,
+                f"Trade entry did not reach trade_screen. Last stage: {next_stage_state['stage'] or 'none'}",
+                failed_input,
+            ),
         )
 
     return {

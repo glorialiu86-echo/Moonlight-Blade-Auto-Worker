@@ -25,6 +25,9 @@ import {
   createFixedSocialApproachActions,
   createFixedDarkCloseStageActions,
   createFixedEndingTradeActions,
+  createFixedEndingTradeBundleActions,
+  createFixedEndingTradeOpenTradeActions,
+  createFixedEndingTradeRelocateActions,
   createFixedDarkMiaoquRecoveryActions,
   createFixedDarkMiaoquStageActions,
   createFixedSocialGiftActions,
@@ -977,7 +980,29 @@ function buildRecoveryWorkerActions(baseContext, error, workerActions, failedInd
   }
 
   if (stageKey === "ending_trade" && ["NPC_VIEW_NOT_OPENED", "NPC_TARGET_SWITCH_FAILED"].includes(failureCode)) {
-    return createFixedEndingTradeActions();
+    return [
+      ...createFixedEndingTradeRelocateActions({ idPrefix: "fixed-ending-trade-recovery-relocate" }),
+      ...createFixedEndingTradeOpenTradeActions({
+        idPrefix: "fixed-ending-trade-recovery-open",
+        acquireTitle: "回到卦摊附近重新锁一个路人目标",
+        menuTitle: "重新拉起路人交互菜单",
+        tradeTitle: "重新打开交易页准备收尾卖货"
+      }),
+      ...createFixedEndingTradeBundleActions({ idPrefix: "fixed-ending-trade-recovery-bundle" })
+    ];
+  }
+
+  if (stageKey === "ending_trade" && failureCode === "NPC_TRADE_NOT_OPENED") {
+    return [
+      ...createFixedEndingTradeRelocateActions({ idPrefix: "fixed-ending-trade-recovery-relocate" }),
+      ...createFixedEndingTradeOpenTradeActions({
+        idPrefix: "fixed-ending-trade-recovery-open",
+        acquireTitle: "回到卦摊附近重新锁一个路人目标",
+        menuTitle: "重新拉起路人交互菜单",
+        tradeTitle: "重新打开交易页准备收尾卖货"
+      }),
+      ...createFixedEndingTradeBundleActions({ idPrefix: "fixed-ending-trade-recovery-bundle" })
+    ];
   }
 
   return workerActions.slice(failedIndex);
@@ -2471,22 +2496,53 @@ async function runFixedEndingTradeStageExecution({
   perceptionSummary,
   externalInputGuardEnabled = true
 }) {
-  const actions = createFixedEndingTradeActions();
   const executions = [];
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
+  const localOpenTradeActions = createFixedEndingTradeOpenTradeActions({
+    idPrefix: "fixed-ending-trade-local"
+  });
+  const relocatedOpenTradeActions = [
+    ...createFixedEndingTradeRelocateActions({ idPrefix: "fixed-ending-trade-relocate" }),
+    ...createFixedEndingTradeOpenTradeActions({
+      idPrefix: "fixed-ending-trade-relocated",
+      acquireTitle: "回到卦摊附近重新锁一个路人目标",
+      menuTitle: "重新拉起路人交互菜单",
+      tradeTitle: "重新打开交易页准备收尾卖货"
+    })
+  ];
+  const tradeBundleActions = createFixedEndingTradeBundleActions({
+    idPrefix: "fixed-ending-trade-bundle"
+  });
+
+  appendFixedScriptCommentary({
+    text: getFixedStageProgressText("ending_trade", roundNumber, "target"),
+    plan,
+    perceptionSummary
+  });
+  let openTradeExecution = null;
+  for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
+    try {
+      openTradeExecution = await runWindowsActions(localOpenTradeActions, options);
+      executions.push(openTradeExecution);
+      break;
+    } catch (error) {
+      // Keep the local retry silent; only after two misses do we reroute to the safer street spot.
+    }
+  }
+
+  if (!openTradeExecution) {
+    try {
+      openTradeExecution = await runWindowsActions(relocatedOpenTradeActions, options);
+      executions.push(openTradeExecution);
+    } catch (error) {
+      throw error;
+    }
+  }
 
   await runFixedActionChunk({
-    actions: actions.slice(0, 3),
-    options,
-    plan,
-    perceptionSummary,
-    commentaryText: getFixedStageProgressText("ending_trade", roundNumber, "target"),
-    executions
-  });
-  await runFixedActionChunk({
-    actions: actions.slice(3, 8),
+    actions: tradeBundleActions.slice(0, 5),
     options,
     plan,
     perceptionSummary,
@@ -2494,7 +2550,7 @@ async function runFixedEndingTradeStageExecution({
     executions
   });
   await runFixedActionChunk({
-    actions: actions.slice(8),
+    actions: tradeBundleActions.slice(5),
     options,
     plan,
     perceptionSummary,

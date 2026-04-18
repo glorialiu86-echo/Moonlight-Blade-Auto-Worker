@@ -25,7 +25,7 @@
 4. 黑化思考，先跑图到第二个卦摊 `698,753`，再执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
 5. 黑化思考，执行 `潜行 -> 闷棍 -> 扛走 -> 搜刮`，循环 `3` 次
 6. 黑化思考，执行 `潜行 -> 妙取 -> 脱离 -> 退出潜行`，循环 `5` 次
-7. 正常思考，执行 `随便找个路人 -> 交易 -> 连续上架 10 个道具 -> 提交交易 -> 回到街道`，循环 `1` 次
+7. 正常思考，执行 `原地两次尝试开交易 -> 失败就回 548,630 重找路人交易 -> 连续上架 10 个道具 -> 提交交易 -> 回到街道`，循环 `1` 次
 
 说明：
 
@@ -39,7 +39,10 @@
 - 第五段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_select_item_once/loot_put_in_once -> loot_submit_once`
 - 第五段里的 `闷棍` 现在按“到点、进潜行、直接按 3，由游戏自动吃附近目标”来设计；当前已确认按小时最多 `4` 次，但固定剧本仍按 `搜刮` 上限只跑 `3` 轮
 - 第六段是独立妙取链，固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
-- 第七段是收尾卖货链，固定执行 `acquire_npc_target -> open_npc_action_menu -> click_menu_trade -> trade_prepare_gift_bundle(10) -> trade_select_right_money_slot -> trade_scale_quantity -> trade_right_item_up_shelf -> trade_submit -> close_current_panel`
+- 第七段是收尾卖货链，固定执行：
+  - 先在原地最多 `2` 次尝试 `acquire_npc_target -> open_npc_action_menu -> click_menu_trade`
+  - 如果两次都没真正进入左右两栏货架交易页，就改走 `travel_to_coordinate(548,630) -> 下马 -> 重新找路人 -> 查看 -> 交易`
+  - 进入交易页后再执行 `trade_prepare_gift_bundle(10) -> trade_select_right_money_slot -> trade_scale_quantity -> trade_right_item_up_shelf -> trade_submit -> close_current_panel`
 - 第二段买货现在按轮次固定切货：第 `1` 轮买 `墨锭`，第 `2` 轮买 `散酒`
 - 第二段里的叫卖已经按固定 UI 收敛成：`4 打开叫卖 -> 库存第一格当前货物 -> 最大化 -> 上架 -> 出摊 -> 原地等右下角先变改货/收摊，再等回正常 HUD`
 - 不允许前端展示“当前阶段 / 当前轮次 / 倒计时 / 固定剧本编号”
@@ -59,6 +62,7 @@
 - 社交恢复默认按失败码收敛：
   - `NPC_CHAT_THRESHOLD_REVEALED` 时换人后重跑 `赠礼 -> 聊天`
   - `NPC_VIEW_NOT_OPENED` 时根据失败位置决定重跑整段社交链或只跑恢复链
+- 收尾卖货如果原地打不开真正交易页，会先在 stage 内部原地重试 `2` 次；仍失败时自动回 `548,630` 重新找路人开交易
 - 社交阶段进入聊天页后的后置自动回复，如在发送回复时失败，也会进入红三角恢复态；恢复时不重跑整段社交链，而是从当前聊天页继续续聊
 - 潜行恢复默认按失败码收敛：
   - `STEALTH_ENTRY_BLOCKED` 会在 action 内原地重试 `5` 次后停下

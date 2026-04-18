@@ -637,6 +637,51 @@ export function createFixedEndingTradeActions() {
   ];
 }
 
+export function createFixedEndingTradeOpenTradeActions(options = {}) {
+  const prefix = options.idPrefix || "fixed-ending-trade-open";
+  const acquireTitle = options.acquireTitle || "随便锁一个路人目标";
+  const menuTitle = options.menuTitle || "拉起路人交互菜单";
+  const tradeTitle = options.tradeTitle || "打开交易页准备收尾卖货";
+  return [
+    createAcquireNpcTargetAction(`${prefix}-1`, acquireTitle, {
+      timeoutMs: 5000,
+      movePulseMs: 180,
+      scanIntervalMs: 180
+    }),
+    createOpenNpcActionMenuAction(`${prefix}-2`, menuTitle),
+    createWorkerAction(`${prefix}-3`, tradeTitle, "click_menu_trade")
+  ];
+}
+
+export function createFixedEndingTradeRelocateActions(options = {}) {
+  const prefix = options.idPrefix || "fixed-ending-trade-relocate";
+  return [
+    createTravelToCoordinateAction({
+      id: `${prefix}-1`,
+      title: "重新去第一个卦摊附近找肯交易的路人",
+      xCoordinate: 548,
+      yCoordinate: 630
+    }),
+    createPressKeyAction(`${prefix}-2`, "到卦摊附近先下马", "1", {
+      postDelayMs: 1000
+    })
+  ];
+}
+
+export function createFixedEndingTradeBundleActions(options = {}) {
+  const prefix = options.idPrefix || "fixed-ending-trade-bundle";
+  return [
+    createWorkerAction(`${prefix}-1`, "连续上架十个道具", "trade_prepare_gift_bundle", {
+      repeatCount: 10
+    }),
+    createWorkerAction(`${prefix}-2`, "选中右侧支付物", "trade_select_right_money_slot"),
+    createWorkerAction(`${prefix}-3`, "调整支付数量", "trade_scale_quantity"),
+    createWorkerAction(`${prefix}-4`, "右侧支付物上架", "trade_right_item_up_shelf"),
+    createWorkerAction(`${prefix}-5`, "提交最后一笔交易", "trade_submit"),
+    createCloseCurrentPanelAction(`${prefix}-6`, "关闭面板回到街道")
+  ];
+}
+
 function createWorkerActions(plan) {
   return plan.actions.flatMap((action, index) => {
     const actionDefinition = getActionDefinition(action.type);

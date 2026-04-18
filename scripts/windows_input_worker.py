@@ -1351,7 +1351,10 @@ def summarize_color_suppression(image: np.ndarray) -> dict[str, float]:
 def detect_stealth_scene_visual(hwnd: int) -> dict[str, Any]:
     metrics = summarize_color_suppression(capture_window_region(hwnd, STEALTH_ROIS["scene_color_probe"]))
     return {
-        "visible": metrics["lowSaturationRatio"] >= 0.68 and metrics["meanSaturation"] <= 48.0 and metrics["colorfulRatio"] <= 0.22,
+        # The 2560x1440 Windows capture keeps more residual UI color than the
+        # older baseline, so the stealth grayscale gate should stay strict on
+        # average saturation/colorfulness but allow a lower grey-pixel ratio.
+        "visible": metrics["lowSaturationRatio"] >= 0.35 and metrics["meanSaturation"] <= 48.0 and metrics["colorfulRatio"] <= 0.16,
         **metrics,
     }
 

@@ -85,19 +85,19 @@ function createSleepAction(id, title, durationMs) {
 export function createFixedStreetWanderActions() {
   return [
     createPressKeyAction("fixed-street-wander-1", "原地先往前晃一小段", "w", {
-      durationMs: 1600,
+      durationMs: 10000,
       postDelayMs: 260
     }),
     createPressKeyAction("fixed-street-wander-2", "原地往左侧乱拐一小段", "a", {
-      durationMs: 1200,
+      durationMs: 10000,
       postDelayMs: 260
     }),
     createPressKeyAction("fixed-street-wander-3", "原地往后退着晃一小段", "s", {
-      durationMs: 1800,
+      durationMs: 10000,
       postDelayMs: 260
     }),
     createPressKeyAction("fixed-street-wander-4", "原地往右侧再晃一小段", "d", {
-      durationMs: 1400,
+      durationMs: 10000,
       postDelayMs: 320
     }),
     createSleepAction("fixed-street-wander-5", "停下来缓一口气", 700)

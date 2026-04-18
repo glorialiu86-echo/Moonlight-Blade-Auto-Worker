@@ -536,6 +536,13 @@ function appendFixedScriptCommentary({ text, plan, perceptionSummary }) {
   });
 }
 
+function buildFixedScriptOpeningThinkingChain(stageKey, thinkingChain) {
+  if (stageKey === "street_wander") {
+    return [];
+  }
+  return Array.isArray(thinkingChain) ? thinkingChain : [];
+}
+
 const FIXED_SCRIPT_STAGES = [
   {
     key: "street_wander",
@@ -1885,17 +1892,20 @@ async function runFixedActionChunk({
   plan,
   perceptionSummary,
   commentaryText,
-  executions
+  executions,
+  emitCommentary = true
 }) {
   if (!Array.isArray(actions) || actions.length === 0) {
     return null;
   }
 
-  appendFixedScriptCommentary({
-    text: commentaryText,
-    plan,
-    perceptionSummary
-  });
+  if (emitCommentary) {
+    appendFixedScriptCommentary({
+      text: commentaryText,
+      plan,
+      perceptionSummary
+    });
+  }
 
   const execution = await runWindowsActions(actions, options);
   executions.push(execution);
@@ -2209,20 +2219,29 @@ async function runFixedStreetWanderStageExecution({
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
+  const actions = createFixedStreetWanderActions();
+  const movementCommentary = [
+    ...(Array.isArray(plan.thinkingChain) ? plan.thinkingChain : []),
+    getFixedStageProgressText("street_wander", roundNumber, "wander")
+  ].filter(Boolean);
 
-  await runFixedActionChunk({
-    actions: createFixedStreetWanderActions(),
-    options,
-    plan,
-    perceptionSummary,
-    commentaryText: getFixedStageProgressText("street_wander", roundNumber, "wander"),
-    executions
-  });
-  appendFixedScriptCommentary({
-    text: getFixedStageProgressText("street_wander", roundNumber, "pause"),
-    plan,
-    perceptionSummary
-  });
+  for (let index = 0; index < actions.length; index += 1) {
+    const action = actions[index];
+    const commentaryText = index < movementCommentary.length
+      ? movementCommentary[index]
+      : index === actions.length - 1
+        ? getFixedStageProgressText("street_wander", roundNumber, "pause")
+        : "";
+
+    await runFixedActionChunk({
+      actions: [action],
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText,
+      executions
+    });
+  }
 
   return {
     ...mergeWorkerExecutions(executions),
@@ -2239,7 +2258,8 @@ async function runFixedSocialGiftSequence({
   options,
   entryIdPrefix,
   resolveIdPrefix,
-  decisionAttempt = 1
+  decisionAttempt = 1,
+  emitCommentary = true
 }) {
   const giftEntryExecution = await runFixedActionChunk({
     actions: createFixedSocialGiftEntryActions({ includeAcquire: false, idPrefix: entryIdPrefix }),
@@ -2247,14 +2267,17 @@ async function runFixedSocialGiftSequence({
     plan,
     perceptionSummary,
     commentaryText: getFixedStageProgressText(stage.key, roundNumber, "gift"),
-    executions
+    executions,
+    emitCommentary
   });
   const giftPolicy = getGiftPolicyFromExecution(giftEntryExecution) || "gift_two";
-  appendFixedScriptCommentary({
-    text: getSocialGiftDecisionCommentary(giftPolicy, roundNumber, decisionAttempt),
-    plan,
-    perceptionSummary
-  });
+  if (emitCommentary) {
+    appendFixedScriptCommentary({
+      text: getSocialGiftDecisionCommentary(giftPolicy, roundNumber, decisionAttempt),
+      plan,
+      perceptionSummary
+    });
+  }
   const resolveExecution = await runWindowsActions(
     createFixedSocialGiftResolveActions({ idPrefix: resolveIdPrefix }),
     options
@@ -2327,12 +2350,6 @@ async function runFixedSocialStageExecution({
 
     for (let attemptIndex = 0; attemptIndex < SOCIAL_RETARGET_BUDGET; attemptIndex += 1) {
       try {
-        appendFixedScriptCommentary({
-          text: getFixedStageProgressText(stage.key, roundNumber, "recover"),
-          plan,
-          perceptionSummary
-        });
-
         if (rerunTrade) {
           await runFixedActionChunk({
             actions: [
@@ -2346,7 +2363,8 @@ async function runFixedSocialStageExecution({
             plan,
             perceptionSummary,
             commentaryText: getFixedStageProgressText(stage.key, roundNumber, "trade"),
-            executions
+            executions,
+            emitCommentary: false
           });
         } else {
           executions.push(
@@ -2368,7 +2386,8 @@ async function runFixedSocialStageExecution({
           options,
           entryIdPrefix: `fixed-social-recovery-gift-entry-${attemptIndex + 1}`,
           resolveIdPrefix: `fixed-social-recovery-gift-resolve-${attemptIndex + 1}`,
-          decisionAttempt: attemptIndex + 2
+          decisionAttempt: attemptIndex + 2,
+          emitCommentary: false
         });
         await runFixedActionChunk({
           actions: createFixedSocialTalkActions({
@@ -2379,7 +2398,8 @@ async function runFixedSocialStageExecution({
           plan,
           perceptionSummary,
           commentaryText: getFixedStageProgressText(stage.key, roundNumber, "talk"),
-          executions
+          executions,
+          emitCommentary: false
         });
         return {
           ...mergeWorkerExecutions(executions),
@@ -2476,11 +2496,6 @@ async function runFixedDarkCloseStageExecution({
     let lastError = initialError;
     for (let attemptIndex = 0; attemptIndex < DARK_CLOSE_RESTART_BUDGET; attemptIndex += 1) {
       try {
-        appendFixedScriptCommentary({
-          text: "刚才那一下动静有点大，我先换个更顺手的角度，再把这趟活补回来。",
-          plan,
-          perceptionSummary
-        });
         executions.push(await runWindowsActions(createStealthEscapeRecoveryActions(), options));
         return {
           ...mergeWorkerExecutions(executions),
@@ -2551,11 +2566,6 @@ async function runFixedDarkMiaoquStageExecution({
     let lastError = initialError;
     for (let attemptIndex = 0; attemptIndex < DARK_CLOSE_RESTART_BUDGET; attemptIndex += 1) {
       try {
-        appendFixedScriptCommentary({
-          text: "刚才那一下不够干净，我换个身位再摸，不跟原地那点运气硬赌。",
-          plan,
-          perceptionSummary
-        });
         executions.push(await runWindowsActions(createFixedDarkMiaoquRecoveryActions(), options));
         return {
           ...mergeWorkerExecutions(executions),
@@ -2699,7 +2709,7 @@ async function runFixedScriptTurn({
   appendMessage({
     role: "assistant",
     text: plan.personaInterpretation,
-    thinkingChain: plan.thinkingChain,
+    thinkingChain: buildFixedScriptOpeningThinkingChain(stage.key, plan.thinkingChain),
     perceptionSummary,
     sceneLabel: plan.environment,
     riskLevel: plan.riskLevel,

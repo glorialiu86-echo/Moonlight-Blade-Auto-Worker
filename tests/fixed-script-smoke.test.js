@@ -161,6 +161,13 @@ test("fixed-script smoke: stage 0 keeps the street wander opener", () => {
     "s",
     "d"
   ]);
+
+  assert.deepEqual(actions.slice(0, 4).map((action) => action.durationMs), [
+    10000,
+    10000,
+    10000,
+    10000
+  ]);
 });
 
 test("fixed-script smoke: ending trade keeps the local retry and relocate split", () => {

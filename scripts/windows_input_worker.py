@@ -4415,6 +4415,7 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
     expected_policy = str(action.get("giftPolicy") or "").strip()
     gift_policy = expected_policy or str(threshold_info["giftPolicy"])
     post_delay_ms = max(200, int(action.get("postDelayMs") or 300))
+    repeat_submit_cd_ms = max(0, int(action.get("repeatSubmitCdMs") or 2000))
 
     if gift_policy == "chat_direct":
         close_click = click_named_point(hwnd, "close_panel")
@@ -4438,9 +4439,15 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
     if gift_policy == "gift_two":
         gift_rounds: list[dict[str, Any]] = []
         current_stage_state = stage_state
+        initial_select_click = click_named_point(hwnd, "gift_first_slot")
+        INPUT_GUARD.guarded_sleep(150, title)
+        current_stage_state = detect_npc_interaction_stage(hwnd)
+        if current_stage_state["stage"] != "gift_screen":
+            raise RuntimeError(
+                "Gift slot selection left gift_screen unexpectedly while resolving threshold. "
+                f"Last stage: {current_stage_state['stage'] or 'none'}"
+            )
         for round_index in range(2):
-            select_click = click_named_point(hwnd, "gift_first_slot")
-            INPUT_GUARD.guarded_sleep(150, title)
             before_panel_text = str(current_stage_state["texts"].get("gift_panel") or "")
             favor_before = parse_favor_value(before_panel_text)
             submit_click = click_named_point(hwnd, "gift_submit")
@@ -4454,12 +4461,14 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
             gift_rounds.append(
                 {
                     "roundIndex": round_index + 1,
-                    "selectClick": select_click,
+                    "selectClick": initial_select_click if round_index == 0 else None,
                     "submitClick": submit_click,
                     "favorBefore": favor_before,
                     "favorAfter": parse_favor_value(current_stage_state["texts"].get("gift_panel") or ""),
                 }
             )
+            if round_index == 0 and repeat_submit_cd_ms > 0:
+                INPUT_GUARD.guarded_sleep(repeat_submit_cd_ms, title)
 
         close_click = click_named_point(hwnd, "close_panel")
         INPUT_GUARD.guarded_sleep(post_delay_ms, title)
@@ -4468,13 +4477,14 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
             "id": action_id,
             "title": title,
             "status": "performed",
-            "detail": "Sent two fixed gift rounds and closed the gift screen",
+            "detail": "Selected the first gift once, submitted twice, and closed the gift screen",
             "input": {
                 "mode": "resolve_gift_chat_threshold",
                 **collect_npc_stage_input(hwnd, next_stage_state),
                 **threshold_info,
                 "giftPolicy": gift_policy,
                 "closeClick": close_click,
+                "repeatSubmitCdMs": repeat_submit_cd_ms,
                 "giftRounds": gift_rounds,
             },
         }

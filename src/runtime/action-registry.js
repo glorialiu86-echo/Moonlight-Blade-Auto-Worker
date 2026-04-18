@@ -4,7 +4,7 @@ export const ACTION_REGISTRY = {
     label: "叫卖赚钱",
     executorType: "primitive_sequence",
     availability: "ready",
-    note: "我会按整条固定链路执行：开地图、找货商、进货、去大街、上货出摊。"
+    note: "我会按整条固定链路执行：开地图、贴近阿依娜到出对话[F]、进货、去大街、上货出摊。"
   },
   stealth: {
     key: "stealth",
@@ -53,7 +53,7 @@ export const ACTION_REGISTRY = {
     label: "偷窃",
     executorType: "npc_steal_flow",
     availability: "partial",
-    note: "我会拆成按 4 拉起妙取，再点右侧固定金色妙取按钮；潜行和靠近目标不归这一段管。"
+    note: "我会拆成按 4 拉起妙取，再点右侧固定金色妙取按钮；潜行后附近有人时，目标由游戏自己吃。"
   },
   strike: {
     key: "strike",

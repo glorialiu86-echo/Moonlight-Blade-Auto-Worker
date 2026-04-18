@@ -366,11 +366,15 @@ export function createFixedSellLoopActions() {
       yCoordinate: 554
     }),
     createPressKeyAction("fixed-sale-2", "下马准备进货", "1", { postDelayMs: 1000 }),
-    createPressKeyAction("fixed-sale-3", "矫正视角准备进货", "v", { postDelayMs: 1000 }),
-    createWorkerAction("fixed-sale-4", "打开阿依娜进货页", "open_named_vendor_purchase", {
+    createWorkerAction("fixed-sale-3", "转到阿依娜正前方并贴近到出现对话[F]", "align_named_vendor_interact_prompt", {
       targetName: "阿依娜",
-      approachSteps: 2,
-      approachMovePulseMs: 180,
+      retryLimit: 5,
+      forwardPulseMs: 180,
+      dragDurationMs: 220,
+      settleMs: 280
+    }),
+    createWorkerAction("fixed-sale-4", "按 F 打开阿依娜进货页", "open_named_vendor_purchase", {
+      targetName: "阿依娜",
       interactAttempts: 3,
       postDelayMs: 1000
     }),
@@ -431,12 +435,9 @@ export function createFixedDarkCloseStageActions() {
       settleMs: 260,
       waitBetweenMs: 600
     }),
-    createWorkerAction("fixed-dark-close-4", "潜行接近并闷棍", "stealth_front_arc_strike", {
-      searchTimeoutMs: 7000,
-      turnPulseMs: 180,
-      holdForwardMs: 2200,
-      strikeIntervalMs: 180,
-      frontRoi: [0.36, 0.18, 0.64, 0.42],
+    createWorkerAction("fixed-dark-close-4", "潜行后直接按 3 闷棍附近目标", "stealth_front_arc_strike", {
+      knockoutTimeoutMs: 2600,
+      retryPressMs: 180,
       postDelayMs: 600
     }),
     createWorkerAction("fixed-dark-close-5", "扛走被闷倒的目标", "stealth_carry_target", {
@@ -480,31 +481,17 @@ export function createFixedDarkMiaoquStageActions() {
       confirmPointName: "teleport_confirm"
     }),
     createPressKeyAction("fixed-dark-miaoqu-2", "下马准备妙取", "1", { postDelayMs: 800 }),
-    createWorkerAction("fixed-dark-miaoqu-3", "先把前方目标从遮挡里找出来", "recover_front_target_visibility", {
-      retryLimit: 3,
-      wheelNotches: 6,
-      wheelSettleMs: 70,
-      postWheelSettleMs: 140,
-      turnPulseMs: 180,
-      postTurnSettleMs: 120,
-      turnPattern: ["left", "right", "left"]
-    }),
-    createWorkerAction("fixed-dark-miaoqu-4", "进入潜行并等待时机", "enter_stealth_with_retry", {
+    createWorkerAction("fixed-dark-miaoqu-3", "进入潜行并等待时机", "enter_stealth_with_retry", {
       retryLimit: 5,
       settleMs: 260,
       waitBetweenMs: 600
     }),
-    createWorkerAction("fixed-dark-miaoqu-5", "拉起当前目标的查看按钮", "acquire_npc_target", {
-      timeoutMs: 5000,
-      movePulseMs: 160,
-      scanIntervalMs: 180
-    }),
-    createWorkerAction("fixed-dark-miaoqu-6", "按 4 拉起妙取面板", "stealth_trigger_miaoqu", {
+    createWorkerAction("fixed-dark-miaoqu-4", "按 4 拉起妙取面板并自动吃到附近目标", "stealth_trigger_miaoqu", {
       triggerKey: "4",
       triggerTimeoutMs: 5000,
       triggerSettleMs: 60
     }),
-    createWorkerAction("fixed-dark-miaoqu-7", "盲点固定妙取按钮并在 1.2 秒后撤离", "click_fixed_steal_button_and_escape", {
+    createWorkerAction("fixed-dark-miaoqu-5", "盲点固定妙取按钮并在 1.2 秒后撤离", "click_fixed_steal_button_and_escape", {
       buttonIndex: 1,
       escapeDelayMs: 1200,
       shortBackstepMs: 120,
@@ -512,7 +499,7 @@ export function createFixedDarkMiaoquStageActions() {
       longBackstepMs: 3000,
       moveSettleMs: 80
     }),
-    createWorkerAction("fixed-dark-miaoqu-8", "退出潜行回到普通场景", "exit_stealth", {
+    createWorkerAction("fixed-dark-miaoqu-6", "退出潜行回到普通场景", "exit_stealth", {
       settleMs: 450
     })
   ];
@@ -910,18 +897,19 @@ export function createPrimitiveActions(sequenceName) {
         },
         {
           id: "primitive-3",
-          title: "矫正视角准备进货",
-          type: "press_key",
-          key: "v",
-          postDelayMs: 1000
+          title: "转到阿依娜正前方并贴近到出现对话[F]",
+          type: "align_named_vendor_interact_prompt",
+          targetName: "阿依娜",
+          retryLimit: 5,
+          forwardPulseMs: 180,
+          dragDurationMs: 220,
+          settleMs: 280
         },
         {
           id: "primitive-4",
-          title: "打开阿依娜进货页",
+          title: "按 F 打开阿依娜进货页",
           type: "open_named_vendor_purchase",
           targetName: "阿依娜",
-          approachSteps: 2,
-          approachMovePulseMs: 180,
           interactAttempts: 3,
           postDelayMs: 1000
         },

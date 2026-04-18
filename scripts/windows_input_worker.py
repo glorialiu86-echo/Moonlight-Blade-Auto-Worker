@@ -238,12 +238,12 @@ ACTION_POINTS = {
     "trade_sell_scale_button": (940 / 2048, 684 / 1152),
     "trade_right_up_shelf_button": (0.639, 0.703),
     "trade_final_submit_button": (1296 / 2048, 1027 / 1152),
-    "vendor_purchase_plus": (625 / 1848, 550 / 1020),
-    "vendor_purchase_buy": (634 / 1848, 716 / 1020),
-    "vendor_purchase_max_quantity": (740 / 2048, 597 / 1151),
-    "vendor_purchase_close": (1995 / 2048, 79 / 1151),
-    "vendor_purchase_option": (2160 / 2643, 221 / 1398),
-    "vendor_purchase_item_moding": (1680 / 2048, 500 / 1151),
+    "vendor_purchase_plus": (662 / 2048, 593 / 1152),
+    "vendor_purchase_buy": (643 / 2048, 780 / 1152),
+    "vendor_purchase_max_quantity": (747 / 2048, 593 / 1152),
+    "vendor_purchase_close": (1927 / 2048, 48 / 1152),
+    "vendor_purchase_option": (1676 / 2048, 202 / 1152),
+    "vendor_purchase_item_moding": (1676 / 2048, 518 / 1152),
     "hawking_inventory_first_slot": (1691 / 2048, 257 / 1151),
     "hawking_max_quantity": (1464 / 2048, 661 / 1151),
     "hawking_stock_button": (1298 / 2048, 843 / 1151),
@@ -1172,6 +1172,16 @@ def detect_vendor_purchase_screen(hwnd: int) -> dict[str, Any]:
     return {
         "visible": contains_any_keyword(panel_text, VENDOR_PURCHASE_KEYWORDS),
         "text": panel_text,
+    }
+
+
+def detect_vendor_interact_prompt(hwnd: int) -> dict[str, Any]:
+    action_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["bottom_right_actions"]))
+    normalized_text = normalize_npc_name(action_text)
+    return {
+        "visible": any(keyword in normalized_text for keyword in ["对话", "交谈"]),
+        "text": action_text,
+        "normalizedText": normalized_text,
     }
 
 
@@ -3212,53 +3222,63 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
     title = str(action.get("title") or "open_named_vendor_purchase")
     target_name = str(action.get("targetName") or "").strip()
     option_text = str(action.get("optionText") or "进些货物").strip()
-    approach_steps = max(1, min(3, int(action.get("approachSteps") or 2)))
-    approach_move_pulse_ms = max(60, int(action.get("approachMovePulseMs") or 180))
     interact_attempts = max(1, int(action.get("interactAttempts") or 3))
 
     if not target_name:
         raise RuntimeError("open_named_vendor_purchase action requires targetName")
 
     focus_window(hwnd)
-    approach_moves: list[dict[str, Any]] = []
     interact_attempt_log: list[dict[str, Any]] = []
     option_click = None
+    option_match = None
     purchase_state = detect_vendor_purchase_screen(hwnd)
 
-    for step_index in range(approach_steps):
-        forward_state = pulse_forward(hwnd, approach_move_pulse_ms)
-        approach_moves.append(forward_state)
-        INPUT_GUARD.guarded_sleep(1000, title)
-
-        for interact_index in range(interact_attempts):
-            focus_window(hwnd)
-            pydirectinput.press("f")
-            INPUT_GUARD.refresh_baseline()
-            INPUT_GUARD.guarded_sleep(1000, title)
-
-            quick_menu_state = detect_bottom_right_menu_stage(hwnd)
-            purchase_state = detect_vendor_purchase_screen(hwnd)
-            option_click = None
-            if not purchase_state["visible"] and quick_menu_state["stage"] in {"npc_action_menu", "small_talk_menu"}:
-                option_click = click_named_point(hwnd, "vendor_purchase_option")
-                INPUT_GUARD.guarded_sleep(1000, title)
-                purchase_state = detect_vendor_purchase_screen(hwnd)
-            interact_attempt_log.append(
-                {
-                    "approachStep": step_index + 1,
-                    "interactAttempt": interact_index + 1,
-                    "menuStage": quick_menu_state["stage"],
-                    "menuText": quick_menu_state["text"],
-                    "optionClick": option_click,
-                    "purchaseVisible": bool(purchase_state["visible"]),
-                    "purchaseText": purchase_state["text"],
-                }
-            )
-            if purchase_state["visible"]:
-                break
-
+    for interact_index in range(interact_attempts):
         if purchase_state["visible"]:
             break
+
+        focus_window(hwnd)
+        prompt_state = detect_vendor_interact_prompt(hwnd)
+        pydirectinput.press("f")
+        INPUT_GUARD.refresh_baseline()
+        INPUT_GUARD.guarded_sleep(800, title)
+
+        dialog_state = detect_dialog(hwnd)
+        quick_menu_state = detect_bottom_right_menu_stage(hwnd)
+        purchase_state = detect_vendor_purchase_screen(hwnd)
+        option_click = None
+        option_match = None
+        if not purchase_state["visible"]:
+            option_match = find_text_button_in_roi(hwnd, NPC_STAGE_ROIS["confirm_dialog"], option_text)
+            if option_match is not None:
+                option_click = click_screen_point(
+                    hwnd,
+                    int(option_match["screenX"]),
+                    int(option_match["screenY"]),
+                    "left",
+                )
+                INPUT_GUARD.guarded_sleep(800, title)
+                purchase_state = detect_vendor_purchase_screen(hwnd)
+            elif dialog_state["visible"] or quick_menu_state["stage"] in {"npc_action_menu", "small_talk_menu"}:
+                option_click = click_named_point(hwnd, "vendor_purchase_option")
+                INPUT_GUARD.guarded_sleep(800, title)
+                purchase_state = detect_vendor_purchase_screen(hwnd)
+
+        interact_attempt_log.append(
+            {
+                "interactAttempt": interact_index + 1,
+                "promptVisible": bool(prompt_state["visible"]),
+                "promptText": prompt_state["text"],
+                "dialogVisible": bool(dialog_state["visible"]),
+                "dialogText": dialog_state["text"],
+                "menuStage": quick_menu_state["stage"],
+                "menuText": quick_menu_state["text"],
+                "optionMatch": option_match,
+                "optionClick": option_click,
+                "purchaseVisible": bool(purchase_state["visible"]),
+                "purchaseText": purchase_state["text"],
+            }
+        )
 
     if not purchase_state["visible"]:
         raise RuntimeError("Vendor purchase option did not open purchase screen.")
@@ -3272,13 +3292,112 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
             "mode": "open_named_vendor_purchase",
             "targetName": target_name,
             "optionText": option_text,
-            "approachSteps": approach_steps,
-            "approachMovePulseMs": approach_move_pulse_ms,
-            "approachMoves": approach_moves,
             "interactAttempts": interact_attempt_log,
+            "optionMatch": option_match,
             "optionClick": option_click,
             "stage": "vendor_purchase_screen",
             "purchaseText": purchase_state["text"],
+        },
+    }
+
+
+def run_align_named_vendor_interact_prompt(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "align_named_vendor_interact_prompt")
+    target_name = str(action.get("targetName") or "").strip()
+    retry_limit = max(1, min(6, int(action.get("retryLimit") or 5)))
+    forward_pulse_ms = max(80, int(action.get("forwardPulseMs") or 180))
+    drag_duration_ms = max(80, int(action.get("dragDurationMs") or 220))
+    settle_ms = max(80, int(action.get("settleMs") or 280))
+    drag_pattern = [
+        ((0.58, 0.54), (0.46, 0.54)),
+        ((0.44, 0.54), (0.58, 0.54)),
+        ((0.55, 0.54), (0.49, 0.54)),
+    ]
+
+    focus_window(hwnd)
+    prompt_history: list[dict[str, Any]] = []
+    drag_history: list[dict[str, Any]] = []
+    forward_history: list[dict[str, Any]] = []
+    prompt_state = detect_vendor_interact_prompt(hwnd)
+
+    for attempt_index in range(retry_limit):
+        prompt_history.append(
+            {
+                "attempt": attempt_index + 1,
+                "phase": "before_drag",
+                "visible": bool(prompt_state["visible"]),
+                "text": prompt_state["text"],
+            }
+        )
+        if prompt_state["visible"]:
+            break
+
+        start_ratio, end_ratio = drag_pattern[attempt_index % len(drag_pattern)]
+        drag_state = drag_camera(hwnd, start_ratio, end_ratio, drag_duration_ms)
+        drag_history.append({"attempt": attempt_index + 1, **drag_state})
+        INPUT_GUARD.guarded_sleep(settle_ms, title)
+        prompt_state = detect_vendor_interact_prompt(hwnd)
+        prompt_history.append(
+            {
+                "attempt": attempt_index + 1,
+                "phase": "after_drag",
+                "visible": bool(prompt_state["visible"]),
+                "text": prompt_state["text"],
+            }
+        )
+        if prompt_state["visible"]:
+            break
+
+        forward_state = pulse_forward(hwnd, forward_pulse_ms)
+        forward_history.append({"attempt": attempt_index + 1, **forward_state})
+        INPUT_GUARD.guarded_sleep(settle_ms, title)
+        prompt_state = detect_vendor_interact_prompt(hwnd)
+        prompt_history.append(
+            {
+                "attempt": attempt_index + 1,
+                "phase": "after_forward",
+                "visible": bool(prompt_state["visible"]),
+                "text": prompt_state["text"],
+            }
+        )
+        if prompt_state["visible"]:
+            break
+
+    if not prompt_state["visible"]:
+        raise ActionExecutionError(
+            "Vendor interaction prompt did not appear after camera and movement adjustments",
+            failed_step=build_failed_step_payload(
+                action,
+                "Failed to align the vendor view to a visible 对话[F] prompt",
+                {
+                    "mode": "align_named_vendor_interact_prompt",
+                    "targetName": target_name,
+                    "retryLimit": retry_limit,
+                    "forwardPulseMs": forward_pulse_ms,
+                    "dragDurationMs": drag_duration_ms,
+                    "settleMs": settle_ms,
+                    "promptHistory": prompt_history,
+                },
+            ),
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Aligned the view for {target_name} until 对话[F] appeared",
+        "input": {
+            "mode": "align_named_vendor_interact_prompt",
+            "targetName": target_name,
+            "retryLimit": retry_limit,
+            "forwardPulseMs": forward_pulse_ms,
+            "dragDurationMs": drag_duration_ms,
+            "settleMs": settle_ms,
+            "dragHistory": drag_history,
+            "forwardHistory": forward_history,
+            "promptHistory": prompt_history,
+            "promptText": prompt_state["text"],
         },
     }
 
@@ -3295,11 +3414,19 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
 
     item_key = normalize_npc_name(item_name)
     if item_key == normalize_npc_name("墨锭"):
-        item_button = {"pointName": "vendor_purchase_item_moding"}
+        item_button = find_vendor_item_button(hwnd, item_name) or {"pointName": "vendor_purchase_item_moding"}
     else:
         raise RuntimeError(f"Unsupported fixed vendor item: {item_name}")
 
-    item_click = click_named_point(hwnd, item_button["pointName"])
+    if item_button.get("pointName"):
+        item_click = click_named_point(hwnd, str(item_button["pointName"]))
+    else:
+        item_click = click_screen_point(
+            hwnd,
+            int(item_button["screenX"]),
+            int(item_button["screenY"]),
+            "left",
+        )
     INPUT_GUARD.guarded_sleep(1000, title)
 
     max_quantity_click = click_named_point(hwnd, "vendor_purchase_max_quantity")
@@ -4667,80 +4794,37 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
 def run_stealth_front_arc_strike(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "stealth_front_arc_strike")
-    search_timeout_ms = int(action.get("searchTimeoutMs") or 7000)
-    turn_pulse_ms = int(action.get("turnPulseMs") or 180)
-    hold_forward_ms = int(action.get("holdForwardMs") or 2200)
-    strike_interval_ms = int(action.get("strikeIntervalMs") or 180)
-    front_roi = action.get("frontRoi") or STEALTH_ROIS["front_name_band"]
-    roi = (
-        float(front_roi[0]),
-        float(front_roi[1]),
-        float(front_roi[2]),
-        float(front_roi[3]),
-    )
+    knockout_timeout_ms = int(action.get("knockoutTimeoutMs") or 2600)
+    retry_press_ms = int(action.get("retryPressMs") or 180)
 
     focus_window(hwnd)
-    deadline = time.time() + search_timeout_ms / 1000.0
-    search_pattern = ["left", "left", "right", "right"]
-    search_attempts: list[dict[str, Any]] = []
-    turn_attempts: list[dict[str, Any]] = []
-    target = find_stealth_front_target(hwnd, roi)
-
-    while time.time() <= deadline and target is None:
-        for key in search_pattern:
-            if time.time() > deadline:
-                break
-            INPUT_GUARD.check_or_raise(title)
-            turn_attempts.append(pulse_turn_key(hwnd, key, turn_pulse_ms, title))
-            INPUT_GUARD.guarded_sleep(80, title)
-            target = find_stealth_front_target(hwnd, roi)
-            search_attempts.append(
-                {
-                    "key": key,
-                    "target": target,
-                }
-            )
-            if target is not None:
-                break
-
-    if target is None:
-        raise RuntimeError("Stealth front-arc search timed out before finding a non-team target name")
-
-    pydirectinput.keyDown("w")
-    INPUT_GUARD.refresh_baseline()
     strike_count = 0
     started_at = time.time()
-
-    try:
-        while (time.time() - started_at) * 1000 < hold_forward_ms:
-            INPUT_GUARD.check_or_raise(title)
-            pydirectinput.press("3")
-            INPUT_GUARD.refresh_baseline()
-            strike_count += 1
-            INPUT_GUARD.guarded_sleep(strike_interval_ms, title)
-    finally:
-        pydirectinput.keyUp("w")
-        INPUT_GUARD.refresh_baseline()
-
     knockout_state = detect_knockout_context(hwnd)
+
+    while (time.time() - started_at) * 1000 < knockout_timeout_ms:
+        INPUT_GUARD.check_or_raise(title)
+        pydirectinput.press("3")
+        INPUT_GUARD.refresh_baseline()
+        strike_count += 1
+        INPUT_GUARD.guarded_sleep(max(60, retry_press_ms), title)
+        knockout_state = detect_knockout_context(hwnd)
+        if knockout_state["visible"]:
+            break
+
     if not knockout_state["visible"]:
         failed_input = {
             "mode": "stealth_front_arc_strike",
-            "target": target,
-            "searchTimeoutMs": search_timeout_ms,
-            "turnPulseMs": turn_pulse_ms,
-            "holdForwardMs": hold_forward_ms,
-            "strikeIntervalMs": strike_interval_ms,
+            "knockoutTimeoutMs": knockout_timeout_ms,
+            "retryPressMs": retry_press_ms,
             "strikeCount": strike_count,
-            "searchAttempts": search_attempts,
-            "turnAttempts": turn_attempts,
         }
         raise ActionExecutionError(
-            "Stealth strike did not reach the knockout context before the attack window ended",
+            "Stealth strike did not reach the knockout context after directly striking nearby targets",
             error_code="STEALTH_ALERTED",
             failed_step=build_failed_step_payload(
                 action,
-                "Strike sequence exposed the player before knockout",
+                "Direct stealth strike failed to auto-lock a nearby target into knockout",
                 failed_input,
             ),
         )
@@ -4749,24 +4833,13 @@ def run_stealth_front_arc_strike(hwnd: int, action: dict[str, Any]) -> dict[str,
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": f"Found {target['text']} in the front arc and advanced while striking",
+        "detail": "Entered knockout context by directly striking a nearby target",
         "input": {
             "mode": "stealth_front_arc_strike",
-            "target": target,
             "knockoutText": knockout_state["text"],
-            "searchTimeoutMs": search_timeout_ms,
-            "turnPulseMs": turn_pulse_ms,
-            "holdForwardMs": hold_forward_ms,
-            "strikeIntervalMs": strike_interval_ms,
+            "knockoutTimeoutMs": knockout_timeout_ms,
+            "retryPressMs": retry_press_ms,
             "strikeCount": strike_count,
-            "frontRoi": {
-                "x1": roi[0],
-                "y1": roi[1],
-                "x2": roi[2],
-                "y2": roi[3],
-            },
-            "searchAttempts": search_attempts,
-            "turnAttempts": turn_attempts,
         },
     }
 
@@ -5463,6 +5536,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "named_npc_trade_flow":
         return run_named_npc_trade_flow(hwnd, action)
+
+    if action_type == "align_named_vendor_interact_prompt":
+        return run_align_named_vendor_interact_prompt(hwnd, action)
 
     if action_type == "open_named_vendor_purchase":
         return run_open_named_vendor_purchase(hwnd, action)

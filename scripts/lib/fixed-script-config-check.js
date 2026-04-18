@@ -11,7 +11,7 @@ export const expectedVariantCounts = {
 };
 
 export const expectedRounds = {
-  sell_loop: 3,
+  sell_loop: 2,
   social_warm: 2,
   social_dark: 2,
   dark_close: 3,

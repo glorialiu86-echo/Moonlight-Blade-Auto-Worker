@@ -31,8 +31,8 @@
 - 第三段与第二段的动作链保持一致，变化的是思考文案与聊天语气
 - 第二段和第三段的社交链现在固定为同一目标 owner：首次拿人继续扫圈，聊天门槛暴露后才换人，`Tab` 只负责换到新的“可查看”目标
 - 第四段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_select_item_once/loot_put_in_once -> loot_submit_once`
-- 第四段里的 `闷棍` 当前按“只要选中人就直接放倒”来设计，但它本身疑似存在按小时计的使用次数限制；准确预算还没锁定，需等技术确认后再把次数限制写死进链路
-- 第五段是独立妙取链，固定执行 `travel_to_coordinate -> recover_front_target_visibility -> enter_stealth_with_retry -> acquire_npc_target(只要查看按钮) -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
+- 第四段里的 `闷棍` 现在按“到点、进潜行、直接按 3，由游戏自动吃附近目标”来设计；当前已确认按小时最多 `4` 次，但固定剧本仍按 `搜刮` 上限只跑 `3` 轮
+- 第五段是独立妙取链，固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
 - 第六段是收尾卖货链，固定执行 `acquire_npc_target -> open_npc_action_menu -> click_menu_trade -> trade_prepare_gift_bundle(10) -> trade_select_right_money_slot -> trade_scale_quantity -> trade_right_item_up_shelf -> trade_submit -> close_current_panel`
 - 不允许前端展示“当前阶段 / 当前轮次 / 倒计时 / 固定剧本编号”
 - 前端只允许看到人格化思考、执行结果、暂停和完成状态
@@ -52,7 +52,11 @@
   - `STEALTH_ENTRY_BLOCKED` 会在 action 内原地重试 `5` 次后停下
   - `STEALTH_ALERTED` / `STEALTH_TARGET_RECOVERED` 会先 `hold S >= 3000ms`，再在固定剧本内有限次重开
 - `妙取` 已从固定剧本第四段拆出，不再跟在闷棍后面硬接
+- `闷棍` 和 `妙取` 当前都不再要求先点人；只要已经在点位附近且成功进潜行，就直接按 `3` / `4` 让游戏自动吃附近目标
+- 当前已确认的次数预算：
+  - `闷棍`：最多 `4` 次
+  - `搜刮`：最多 `3` 次
+  - `妙取`：游戏本身不限次；固定剧本目前仍按拍摄需要跑 `5` 轮
 - 独立妙取链不做 OCR 选 `1.0 秒`；拉起面板后直接盲点固定金色按钮，并在 `1.2s` 后执行一次短按 `S` 加一次长按 `S`
 - 独立妙取链确认面板已拉起时，优先只看右侧固定区域里的金色 `妙取` 按钮栈；只有固定 UI 快检没命中时，才退回 `trade_panel` OCR 兜底
-- 独立妙取链在进入潜行前新增遮挡恢复 owner：若普通场景下既没有 `查看` 也看不到前方名字，就先滚轮放大，再小幅左右转；仍未脱离遮挡时只进入失败恢复态，让三角按钮变红，不额外吐失败台词
 - 全部主链结束后，固定剧本不再用通用“做完了”收尾，而是进入“任务完成、赚到钱、等籽岷回来验收”的完成文案

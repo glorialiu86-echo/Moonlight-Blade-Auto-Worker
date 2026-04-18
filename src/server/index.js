@@ -84,7 +84,7 @@ const FIXED_SCRIPT_STAGE_VOICES = {
         "货不进手，摊不支开，站那儿算哪门子生意人？",
         "街上能正经挣的，我先捞一票，慢点总比干瞪眼强。"
       ],
-      decide: "买货、支摊、试三轮，这三步走完，这条路顺不顺我心里就有数了。",
+      decide: "买货、支摊、先试两轮，这条路顺不顺我心里就有数了。",
       persona: "先按最正经的买卖路数一遍账。",
       progress: {
         stock: "先把货补上，空着手站街上，活像来晒太阳的。",
@@ -119,7 +119,7 @@ const FIXED_SCRIPT_STAGE_VOICES = {
       decide: "我先把这轮买卖跑完，这口正经钱要还是慢，我就得换思路了。",
       persona: "先把正经路做到底，再决定要不要翻篇。",
       progress: {
-        stock: "再补最后一波货，把这条摆摊路数彻底试明白，省得我回头还替它找借口。",
+        stock: "再补一波货，把这条摆摊路数继续试明白，省得我回头还替它找借口。",
         hawk: "货已经抱回来了，我把摊子一撑，看看这口正经钱到底还能不能再往前挪一点。"
       },
       resultFactory: ({ recovered }) => recovered
@@ -501,7 +501,7 @@ function appendFixedScriptCommentary({ text, plan, perceptionSummary }) {
 const FIXED_SCRIPT_STAGES = [
   {
     key: "sell_loop",
-    rounds: 3,
+    rounds: 2,
     instructionLabel: "先走正路买货叫卖，看看这条钱路能不能撑起来。",
     riskLevel: "low",
     actionTypes: ["sale"],
@@ -2236,7 +2236,7 @@ async function runFixedDarkMiaoquStageExecution({
 
   try {
     await runFixedActionChunk({
-      actions: actions.slice(0, 5),
+      actions: actions.slice(0, 3),
       options,
       plan,
       perceptionSummary,
@@ -2244,7 +2244,7 @@ async function runFixedDarkMiaoquStageExecution({
       executions
     });
     await runFixedActionChunk({
-      actions: actions.slice(5, 6),
+      actions: actions.slice(3, 4),
       options,
       plan,
       perceptionSummary,
@@ -2252,7 +2252,7 @@ async function runFixedDarkMiaoquStageExecution({
       executions
     });
     await runFixedActionChunk({
-      actions: actions.slice(6),
+      actions: actions.slice(4),
       options,
       plan,
       perceptionSummary,

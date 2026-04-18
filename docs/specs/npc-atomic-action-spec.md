@@ -353,15 +353,14 @@
 ### `stealth_front_arc_strike`
 
 - 前置状态：已进入潜行
-- 行为：搜索前方目标并持续闷棍
+- 行为：不再搜索前方目标，也不先点人；在点位附近直接连续按 `3`，让游戏自动吃附近目标
 - 成功状态：进入击倒上下文
 - 失败：未进入击倒上下文即结束攻击窗口，抛出 `STEALTH_ALERTED`
 - 关键输出：
-  - `target`
+  - `knockoutTimeoutMs`
+  - `retryPressMs`
   - `strikeCount`
   - `knockoutText`
-  - `searchAttempts`
-  - `turnAttempts`
 
 ### `close_current_panel`
 
@@ -440,12 +439,35 @@
 
 这只是保持当前系统可运行的过渡态，不代表最终语义正确。
 
+### `align_named_vendor_interact_prompt`
+
+- 前置状态：已跑到货商点位并下马
+- 行为：通过小幅转镜头加轻按 `W` 贴近，直到右下角出现 `对话[F]`
+- 成功状态：`对话[F]` 可见
+- 失败：多轮调整后仍未出现 `对话[F]`
+- 关键输出：
+  - `dragHistory`
+  - `forwardHistory`
+  - `promptHistory`
+
+### `open_named_vendor_purchase`
+
+- 前置状态：右下角已经出现 `对话[F]`
+- 行为：按 `F`，优先 OCR 命中 `我来进些货物`，命不中时再回退到固定点位，直到拉起 `进货` 页
+- 成功状态：进入 `vendor_purchase_screen`
+- 失败：`F` 与 `我来进些货物` 选择后仍未进入进货页
+
+### `buy_current_vendor_item`
+
+- 前置状态：已进入 `进货` 页
+- 行为：优先按文字命中 `墨锭`，再点最大化、购买、关闭
+- 成功状态：购买动作已提交且面板已关闭
+- 失败：当前页不是 `进货` 页，或固定商品不受支持
+
 ## 当前没改的部分
 
 - 地图 action
-- 货商购买 action
 - 叫卖 action
-- 潜行 action
 - NPC 聊天页内的 `输入 / 发送 / 退出` 细拆
 
 这些都不在本轮改动范围内。

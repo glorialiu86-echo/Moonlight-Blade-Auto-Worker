@@ -12,6 +12,7 @@ import {
   verifyRuntimeDoc,
   verifyStartupAndEndingCopy
 } from "../scripts/lib/fixed-script-config-check.js";
+import { createFixedSellLoopActions } from "../src/runtime/windows-executor.js";
 
 test("fixed-script smoke: stage voice pool counts and rounds stay aligned", async () => {
   const summary = await checkFixedScriptConfig();
@@ -48,4 +49,26 @@ test("fixed-script smoke: retired startup and ending lines stay absent", async (
   Object.values(requiredStartupLines).forEach((line) => {
     assert.equal(serverSource.includes(line) || runtimeFlowDoc.includes(line), true);
   });
+});
+
+test("fixed-script smoke: sell loop keeps the new vendor approach chain", () => {
+  const actions = createFixedSellLoopActions();
+  const vendorSetupTitles = actions.slice(0, 5).map((action) => action.title);
+  const vendorSetupTypes = actions.slice(0, 5).map((action) => action.type);
+
+  assert.deepEqual(vendorSetupTitles, [
+    "去货商坐标",
+    "下马准备进货",
+    "转到阿依娜正前方并贴近到出现对话[F]",
+    "按 F 打开阿依娜进货页",
+    "买满墨锭并关闭面板"
+  ]);
+
+  assert.deepEqual(vendorSetupTypes, [
+    "travel_to_coordinate",
+    "press_key",
+    "align_named_vendor_interact_prompt",
+    "open_named_vendor_purchase",
+    "buy_current_vendor_item"
+  ]);
 });

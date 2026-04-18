@@ -3063,8 +3063,25 @@ def detect_target_threshold(hwnd: int) -> dict[str, Any]:
 
 
 def has_selected_target(target_info: dict[str, Any]) -> bool:
-    text = str(target_info.get("text") or "").strip()
-    return len(text) >= 2 and text != "1"
+    raw_text = str(target_info.get("text") or "").strip()
+    normalized = normalize_npc_name(raw_text)
+    if not normalized:
+        return False
+    if bool(target_info.get("isSpecialNpc")):
+        return "<" in raw_text and ">" in raw_text and len(normalized) >= 3
+    return re.fullmatch(r"[\u4e00-\u9fff]{2,6}", normalized) is not None
+
+
+def has_reliable_selected_target(stage_state: dict[str, Any], target_info: dict[str, Any]) -> bool:
+    stage = str(stage_state.get("stage") or "none")
+    if stage in NPC_READY_STAGES:
+        return True
+    look_text = str(stage_state.get("texts", {}).get("look_button") or "")
+    if contains_any_keyword(look_text, ["查看"]):
+        return True
+    if stage != "npc_selected":
+        return False
+    return has_selected_target(target_info)
 
 
 def normalize_npc_name(text: str) -> str:
@@ -3844,6 +3861,10 @@ def npc_stage_has_selectable_target(stage_state: dict[str, Any], target_info: di
     return contains_any_keyword(stage_state["texts"].get("look_button", ""), ["查看"]) or has_selected_target(target_info)
 
 
+def npc_stage_has_selectable_target(stage_state: dict[str, Any], target_info: dict[str, Any]) -> bool:
+    return has_reliable_selected_target(stage_state, target_info)
+
+
 def collect_front_target_visibility(hwnd: int, front_roi: tuple[float, float, float, float]) -> dict[str, Any]:
     stage_state = detect_npc_interaction_stage(hwnd)
     target_info = detect_target_threshold(hwnd)
@@ -4023,14 +4044,14 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
     custom_click_points = action.get("clickPoints")
     click_points = [
-        (0.80, 0.44),
+        (0.56, 0.56),
+        (0.60, 0.54),
+        (0.64, 0.53),
+        (0.68, 0.52),
+        (0.72, 0.50),
+        (0.76, 0.48),
+        (0.80, 0.46),
         (0.84, 0.45),
-        (0.88, 0.46),
-        (0.78, 0.50),
-        (0.82, 0.51),
-        (0.86, 0.52),
-        (0.80, 0.56),
-        (0.84, 0.56),
     ]
     if isinstance(custom_click_points, list):
         normalized_click_points: list[tuple[float, float]] = []
@@ -4053,8 +4074,9 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     current_stage_state = detect_npc_interaction_stage(hwnd)
     current_target_info = detect_target_threshold(hwnd)
+    current_moving_view = find_moving_view_button(hwnd)
     current_stage = current_stage_state["stage"]
-    if current_stage in NPC_READY_STAGES or current_stage == "npc_selected" or has_selected_target(current_target_info):
+    if current_stage in NPC_READY_STAGES or current_moving_view or has_reliable_selected_target(current_stage_state, current_target_info):
         resolved_stage = current_stage if current_stage != "none" else "npc_selected"
         return {
             "id": action_id,
@@ -4079,7 +4101,7 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     if nearby_scan["matched"]:
         stage_history.extend([attempt["stage"] for attempt in nearby_scan_attempts])
         resolved_stage = nearby_scan["stage"]
-        if resolved_stage == "none" and has_selected_target({"text": nearby_scan["targetText"]}):
+        if resolved_stage == "none" and find_moving_view_button(hwnd):
             resolved_stage = "npc_selected"
         if resolved_stage in NPC_READY_STAGES or resolved_stage == "npc_selected":
             last_npc_click = nearby_scan_attempts[-1]["click"] if nearby_scan_attempts else None
@@ -4108,8 +4130,9 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         INPUT_GUARD.check_or_raise(title)
         stage_state = detect_npc_interaction_stage(hwnd)
         target_info = detect_target_threshold(hwnd)
+        moving_view = find_moving_view_button(hwnd)
         last_stage = stage_state["stage"]
-        resolved_stage = last_stage if last_stage != "none" else ("npc_selected" if has_selected_target(target_info) else "none")
+        resolved_stage = last_stage if last_stage != "none" else ("npc_selected" if moving_view or has_reliable_selected_target(stage_state, target_info) else "none")
         stage_history.append(resolved_stage)
 
         if resolved_stage in NPC_READY_STAGES or resolved_stage == "npc_selected":
@@ -4179,6 +4202,7 @@ def run_open_npc_action_menu(hwnd: int, action: dict[str, Any]) -> dict[str, Any
     title = str(action.get("title") or "open_npc_action_menu")
     stage_state = detect_npc_interaction_stage(hwnd)
     target_info = detect_target_threshold(hwnd)
+    moving_view = find_moving_view_button(hwnd)
     current_stage = stage_state["stage"]
 
     if current_stage in NPC_READY_STAGES:
@@ -4194,7 +4218,7 @@ def run_open_npc_action_menu(hwnd: int, action: dict[str, Any]) -> dict[str, Any
             },
         }
 
-    if current_stage != "npc_selected" and not has_selected_target(target_info):
+    if not moving_view and not has_reliable_selected_target(stage_state, target_info):
         failed_input = {
             "mode": "open_npc_action_menu",
             **collect_npc_stage_input(hwnd, stage_state, target_info["text"]),

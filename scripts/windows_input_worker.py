@@ -1797,7 +1797,15 @@ def detect_npc_interaction_stage(hwnd: int) -> dict[str, Any]:
     trade_panel_text = stage_texts["trade_panel"]
     world_hud_visible = contains_any_keyword(bottom_right_text, WORLD_HUD_KEYWORDS)
 
-    if contains_any_keyword(gift_panel_text, GIFT_KEYWORDS) and not world_hud_visible:
+    npc_action_keyword_count = count_keywords(bottom_right_text, ["退出", "详情", "交易", "赠礼", "交谈", "战斗", "邀约", "邀请"])
+
+    if npc_action_keyword_count >= 3:
+        stage = "npc_action_menu"
+    elif contains_any_keyword(bottom_right_text, ["闲聊"]):
+        stage = "small_talk_menu"
+    elif contains_any_keyword(bottom_right_text, ["交谈"]) and npc_action_keyword_count <= 2:
+        stage = "small_talk_menu"
+    elif contains_any_keyword(gift_panel_text, GIFT_KEYWORDS) and not world_hud_visible:
         stage = "gift_screen"
     elif count_keywords(trade_panel_text, STEAL_KEYWORDS) >= 2 and not world_hud_visible:
         stage = "steal_screen"
@@ -1807,10 +1815,6 @@ def detect_npc_interaction_stage(hwnd: int) -> dict[str, Any]:
         stage = "chat_ready"
     elif contains_any_keyword(confirm_text, CONFIRM_KEYWORDS):
         stage = "small_talk_confirm"
-    elif contains_any_keyword(bottom_right_text, ["闲聊", "交谈"]):
-        stage = "small_talk_menu"
-    elif contains_any_keyword(bottom_right_text, ["交谈", "赠礼", "邀请", "战斗", "交易"]):
-        stage = "npc_action_menu"
     elif contains_any_keyword(look_text, ["查看"]):
         stage = "npc_selected"
     else:
@@ -2620,6 +2624,8 @@ def choose_local_view_candidate(
             score += matched_text["distance"] / 18.0
 
         score -= min(icon["area"], 2600) / 20.0
+        if anchor_distance > 220.0 * 220.0:
+            score += ((anchor_distance ** 0.5) - 220.0) * 9.0
 
         candidate = {
             "text": matched_text["text"] if matched_text else "",
@@ -2640,7 +2646,7 @@ def choose_local_view_candidate(
             best_score = score
             best_match = candidate
 
-    if best_match:
+    if best_match and float(best_match.get("anchorDistance") or 0.0) <= 220.0:
         return best_match
 
     if text_candidates:
@@ -2665,8 +2671,8 @@ def find_view_button_near_click(
     hwnd: int,
     anchor_x: int,
     anchor_y: int,
-    search_width: int = 260,
-    search_height: int = 280,
+    search_width: int = 420,
+    search_height: int = 360,
 ) -> dict[str, Any] | None:
     bounds = get_window_bounds(hwnd)
     left = max(bounds["left"], anchor_x - search_width // 2)
@@ -2861,8 +2867,8 @@ def find_view_button_near_click(
     hwnd: int,
     anchor_x: int,
     anchor_y: int,
-    search_width: int = 260,
-    search_height: int = 280,
+    search_width: int = 420,
+    search_height: int = 360,
 ) -> dict[str, Any] | None:
     bounds = get_window_bounds(hwnd)
     left = max(bounds["left"], anchor_x - search_width // 2)

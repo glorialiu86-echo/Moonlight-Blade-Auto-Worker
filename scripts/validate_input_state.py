@@ -24,7 +24,7 @@ TARGET_TEMPLATE_PATH = DATA_DIR / "buyuren-name-template.png"
 ITERATIONS = 20
 TARGET_TEMPLATE_THRESHOLD = 0.30
 TARGET_BODY_RATIO_X = 0.0
-TARGET_BODY_RATIO_Y = 4.8
+TARGET_BODY_RATIO_Y = 3.6
 CHAT_CLOSE_BUTTON_CLIENT_RATIO_X = 1115 / 2537
 CHAT_CLOSE_BUTTON_CLIENT_RATIO_Y = 691 / 1384
 CHAT_SEND_BUTTON_CLIENT_RATIO_X = 938 / 2537
@@ -79,6 +79,7 @@ IGNORED_WORLD_TEXTS = {
     "西时",
     "我",
     "籽小刀",
+    "籽岷团队",
 }
 
 
@@ -439,6 +440,8 @@ def find_random_npc_target(hwnd: int, iteration: int, preferred_side: str | None
         if not re.fullmatch(r"[\u4e00-\u9fff]{2,4}", text):
             continue
         if text in IGNORED_WORLD_TEXTS:
+            continue
+        if "团队" in text:
             continue
         width = int(item["maxX"] - item["minX"])
         height = int(item["maxY"] - item["minY"])

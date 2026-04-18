@@ -582,8 +582,11 @@ export function createFixedDarkMiaoquStageActions() {
     }),
     createWorkerAction("fixed-dark-miaoqu-4", "按 4 拉起妙取面板并自动吃到附近目标", "stealth_trigger_miaoqu", {
       triggerKey: "4",
+      retryLimit: 3,
       triggerTimeoutMs: 5000,
-      triggerSettleMs: 60
+      triggerSettleMs: 60,
+      retryForwardMs: 140,
+      retryMoveSettleMs: 80
     }),
     createWorkerAction("fixed-dark-miaoqu-5", "盲点固定妙取按钮并在 1.2 秒后撤离", "click_fixed_steal_button_and_escape", {
       buttonIndex: 1,
@@ -920,8 +923,11 @@ function createStealthPrimitiveActions() {
       id: "primitive-5",
       title: "Trigger Miaoqu",
       type: "stealth_trigger_miaoqu",
+      retryLimit: 3,
       triggerTimeoutMs: 5000,
-      triggerSettleMs: 40
+      triggerSettleMs: 40,
+      retryForwardMs: 140,
+      retryMoveSettleMs: 80
     },
     {
       id: "primitive-6",

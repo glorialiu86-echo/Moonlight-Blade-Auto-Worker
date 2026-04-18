@@ -5664,56 +5664,121 @@ def run_loot_escape_forward(hwnd: int, action: dict[str, Any]) -> dict[str, Any]
 def run_stealth_trigger_miaoqu(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "stealth_trigger_miaoqu")
+    retry_limit = max(1, int(action.get("retryLimit") or 3))
     trigger_timeout_ms = int(action.get("triggerTimeoutMs") or 5000)
     trigger_settle_ms = int(action.get("triggerSettleMs") or 40)
+    retry_forward_ms = int(action.get("retryForwardMs") or 140)
+    retry_move_settle_ms = int(action.get("retryMoveSettleMs") or 80)
     ocr_fallback_interval_ms = int(action.get("ocrFallbackIntervalMs") or 280)
     trigger_key = str(action.get("triggerKey") or "3").strip().lower()
-    pydirectinput.press(trigger_key)
-    INPUT_GUARD.refresh_baseline()
-    INPUT_GUARD.guarded_sleep(trigger_settle_ms, title)
-
-    initial_visual_state = detect_steal_button_stack(hwnd)
+    attempts: list[dict[str, Any]] = []
     steal_state = {
-        "visible": initial_visual_state["visible"],
+        "visible": False,
         "text": "",
         "source": "fixed_gold_buttons",
-        "visual": initial_visual_state,
+        "visual": {"visible": False},
     }
-    deadline = time.time() + trigger_timeout_ms / 1000.0
-    last_ocr_probe_at = time.time()
-    while time.time() <= deadline and not steal_state["visible"]:
-        INPUT_GUARD.guarded_sleep(40, title)
-        visual_state = detect_steal_button_stack(hwnd)
-        if visual_state["visible"]:
-            steal_state = {
-                "visible": True,
-                "text": "",
-                "source": "fixed_gold_buttons",
-                "visual": visual_state,
+
+    for attempt_index in range(retry_limit):
+        INPUT_GUARD.check_or_raise(title)
+        pydirectinput.press(trigger_key)
+        INPUT_GUARD.refresh_baseline()
+        INPUT_GUARD.guarded_sleep(trigger_settle_ms, title)
+
+        initial_visual_state = detect_steal_button_stack(hwnd)
+        steal_state = {
+            "visible": initial_visual_state["visible"],
+            "text": "",
+            "source": "fixed_gold_buttons",
+            "visual": initial_visual_state,
+        }
+        attempt_payload = {
+            "attemptIndex": attempt_index + 1,
+            "triggerKey": trigger_key,
+            "panelReady": steal_state["visible"],
+            "panelReadySource": steal_state["source"],
+            "panelReadyVisual": steal_state["visual"],
+        }
+
+        deadline = time.time() + trigger_timeout_ms / 1000.0
+        last_ocr_probe_at = time.time()
+        while time.time() <= deadline and not steal_state["visible"]:
+            INPUT_GUARD.guarded_sleep(40, title)
+            visual_state = detect_steal_button_stack(hwnd)
+            if visual_state["visible"]:
+                steal_state = {
+                    "visible": True,
+                    "text": "",
+                    "source": "fixed_gold_buttons",
+                    "visual": visual_state,
+                }
+                break
+            if (time.time() - last_ocr_probe_at) * 1000 >= max(120, ocr_fallback_interval_ms):
+                steal_state = detect_steal_screen_ready(hwnd)
+                last_ocr_probe_at = time.time()
+            else:
+                steal_state = {
+                    "visible": False,
+                    "text": "",
+                    "source": "fixed_gold_buttons",
+                    "visual": visual_state,
+                }
+
+        attempt_payload["panelReady"] = steal_state["visible"]
+        attempt_payload["panelReadySource"] = steal_state["source"]
+        attempt_payload["panelReadyText"] = steal_state["text"]
+        attempt_payload["panelReadyVisual"] = steal_state["visual"]
+        attempts.append(attempt_payload)
+
+        if steal_state["visible"]:
+            return {
+                "id": action_id,
+                "title": title,
+                "status": "performed",
+                "detail": f"Opened miaoqu panel on attempt {attempt_index + 1}",
+                "input": {
+                    "mode": "stealth_trigger_miaoqu",
+                    "triggerKey": trigger_key,
+                    "retryLimit": retry_limit,
+                    "retryCount": attempt_index + 1,
+                    "triggerTimeoutMs": trigger_timeout_ms,
+                    "triggerSettleMs": trigger_settle_ms,
+                    "retryForwardMs": retry_forward_ms,
+                    "retryMoveSettleMs": retry_move_settle_ms,
+                    "attempts": attempts,
+                    "text": steal_state["text"],
+                    "panelReadySource": steal_state["source"],
+                    "panelReadyVisual": steal_state["visual"],
+                },
             }
-            break
-        if (time.time() - last_ocr_probe_at) * 1000 >= max(120, ocr_fallback_interval_ms):
-            steal_state = detect_steal_screen_ready(hwnd)
-            last_ocr_probe_at = time.time()
-        else:
-            steal_state = {
-                "visible": False,
-                "text": "",
-                "source": "fixed_gold_buttons",
-                "visual": visual_state,
-            }
+
+        if attempt_index < retry_limit - 1:
+            pydirectinput.keyDown("w")
+            INPUT_GUARD.refresh_baseline()
+            INPUT_GUARD.guarded_sleep(max(40, retry_forward_ms), title)
+            pydirectinput.keyUp("w")
+            INPUT_GUARD.refresh_baseline()
+            INPUT_GUARD.guarded_sleep(max(0, retry_move_settle_ms), title)
+            attempt_payload["retryForwardMs"] = retry_forward_ms
+            attempt_payload["retryMoveSettleMs"] = retry_move_settle_ms
 
     if not steal_state["visible"]:
         raise ActionExecutionError(
-            "Steal panel did not appear after pressing miaoqu shortcut",
+            "Steal panel did not appear after miaoqu trigger retries",
             error_code="STEALTH_TARGET_RECOVERED",
             failed_step=build_failed_step_payload(
                 action,
-                "Target recovered before the steal panel opened",
+                "Miaoqu panel stayed closed after retrying with short forward steps",
                 {
                     "mode": "stealth_trigger_miaoqu",
                     "triggerKey": trigger_key,
+                    "retryLimit": retry_limit,
+                    "retryCount": len(attempts),
                     "triggerTimeoutMs": trigger_timeout_ms,
+                    "triggerSettleMs": trigger_settle_ms,
+                    "retryForwardMs": retry_forward_ms,
+                    "retryMoveSettleMs": retry_move_settle_ms,
+                    "attempts": attempts,
                     "text": steal_state["text"],
                     "panelReadySource": steal_state["source"],
                     "panelReadyVisual": steal_state["visual"],
@@ -5721,20 +5786,7 @@ def run_stealth_trigger_miaoqu(hwnd: int, action: dict[str, Any]) -> dict[str, A
             ),
         )
 
-    return {
-        "id": action_id,
-        "title": title,
-        "status": "performed",
-        "detail": f"Opened miaoqu panel after pressing {trigger_key} once",
-        "input": {
-            "mode": "stealth_trigger_miaoqu",
-            "text": steal_state["text"],
-            "triggerKey": trigger_key,
-            "triggerTimeoutMs": trigger_timeout_ms,
-            "panelReadySource": steal_state["source"],
-            "panelReadyVisual": steal_state["visual"],
-        },
-    }
+    raise RuntimeError("Unreachable miaoqu trigger state")
 
 
 def run_stealth_escape_backward(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:

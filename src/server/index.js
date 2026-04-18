@@ -2499,7 +2499,7 @@ async function runFixedDarkMiaoquStageExecution({
 
   try {
     await runFixedActionChunk({
-      actions: actions.slice(0, 3),
+      actions: actions.slice(0, 4),
       options,
       plan,
       perceptionSummary,
@@ -2507,7 +2507,7 @@ async function runFixedDarkMiaoquStageExecution({
       executions
     });
     await runFixedActionChunk({
-      actions: actions.slice(3, 4),
+      actions: actions.slice(4, 5),
       options,
       plan,
       perceptionSummary,
@@ -2515,7 +2515,7 @@ async function runFixedDarkMiaoquStageExecution({
       executions
     });
     await runFixedActionChunk({
-      actions: actions.slice(4),
+      actions: actions.slice(5),
       options,
       plan,
       perceptionSummary,

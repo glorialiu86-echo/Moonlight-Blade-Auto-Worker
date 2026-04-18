@@ -23,8 +23,8 @@
 2. 正常思考，执行 `买货 -> 叫卖`，循环 `2` 轮
 3. 正常思考，先跑图到第一个卦摊 `548,630`，再执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
 4. 黑化思考，先跑图到第二个卦摊 `698,753`，再执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
-5. 黑化思考，执行 `潜行 -> 闷棍 -> 扛走 -> 搜刮`，循环 `2` 次
-6. 黑化思考，执行 `潜行 -> 妙取 -> 脱离 -> 退出潜行`，循环 `5` 次
+5. 黑化思考，执行 `下马 -> 校正视角 -> 潜行 -> 闷棍 -> 扛走 -> 搜刮`，循环 `2` 次
+6. 黑化思考，执行 `下马 -> 校正视角 -> 潜行 -> 妙取 -> 脱离 -> 退出潜行`，循环 `5` 次
 7. 正常思考，执行 `原地两次尝试开交易 -> 失败就回 548,630 重找路人交易 -> 连续上架 10 个道具 -> 提交交易 -> 回到街道`，循环 `1` 次
 
 说明：
@@ -36,9 +36,10 @@
   - `99`：不送礼，直接关面板去聊天
   - `199`：固定送 `2` 次礼，再聊天
   - `299/599/...`：直接关面板换人，不再白送两轮
-- 第五段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_collect_fixed_items -> loot_submit_once`
+- 第五段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> press_key(1) -> press_key(V) -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_collect_fixed_items -> loot_submit_once`
 - 第五段里的 `闷棍` 现在按“到点、进潜行、直接按 3，由游戏自动吃附近目标”来设计；当前已确认按小时最多 `4` 次，但固定剧本当前只跑 `2` 轮
-- 第六段是独立妙取链，固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
+- 第五段和第六段里的 `enter_stealth_with_retry` 已改成“失败时短按 `S` 后退一步，再重试拉潜行”，不再原地空等
+- 第六段是独立妙取链，固定执行 `travel_to_coordinate -> press_key(1) -> press_key(V) -> enter_stealth_with_retry -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
 - 第五段和第六段里，`enter_stealth_with_retry`、`stealth_front_arc_strike`、`exit_stealth` 已切到图像快检：分别看整屏灰度压低、右下动作轮切换、整屏回彩与右下技能组恢复，不再 OCR 读 `退出潜行` 或动作字样
 - 第七段是收尾卖货链，固定执行：
   - 先在原地最多 `2` 次尝试 `acquire_npc_target -> open_npc_action_menu -> click_menu_trade`

@@ -520,10 +520,12 @@ export function createFixedDarkCloseStageActions() {
       confirmPointName: "teleport_confirm"
     }),
     createPressKeyAction("fixed-dark-close-2", "下马准备潜行", "1", { postDelayMs: 800 }),
-    createWorkerAction("fixed-dark-close-3", "进入潜行并等待时机", "enter_stealth_with_retry", {
+    createPressKeyAction("fixed-dark-close-2b", "校正视角准备潜行", "v", { postDelayMs: 800 }),
+    createWorkerAction("fixed-dark-close-3", "进入潜行并在失败时短退一步再重试", "enter_stealth_with_retry", {
       retryLimit: 5,
       settleMs: 260,
-      waitBetweenMs: 600
+      retryBackstepMs: 180,
+      retryMoveSettleMs: 140
     }),
     createWorkerAction("fixed-dark-close-4", "潜行后直接按 3 闷棍附近目标", "stealth_front_arc_strike", {
       knockoutTimeoutMs: 2600,
@@ -571,10 +573,12 @@ export function createFixedDarkMiaoquStageActions() {
       confirmPointName: "teleport_confirm"
     }),
     createPressKeyAction("fixed-dark-miaoqu-2", "下马准备妙取", "1", { postDelayMs: 800 }),
-    createWorkerAction("fixed-dark-miaoqu-3", "进入潜行并等待时机", "enter_stealth_with_retry", {
+    createPressKeyAction("fixed-dark-miaoqu-2b", "校正视角准备妙取", "v", { postDelayMs: 800 }),
+    createWorkerAction("fixed-dark-miaoqu-3", "进入潜行并在失败时短退一步再重试", "enter_stealth_with_retry", {
       retryLimit: 5,
       settleMs: 260,
-      waitBetweenMs: 600
+      retryBackstepMs: 180,
+      retryMoveSettleMs: 140
     }),
     createWorkerAction("fixed-dark-miaoqu-4", "按 4 拉起妙取面板并自动吃到附近目标", "stealth_trigger_miaoqu", {
       triggerKey: "4",
@@ -886,12 +890,20 @@ function createStealthPrimitiveActions() {
       postDelayMs: 800
     },
     {
+      id: "primitive-2b",
+      title: "Align Camera Before Stealth",
+      type: "press_key",
+      key: "v",
+      postDelayMs: 800
+    },
+    {
       id: "primitive-3",
       title: "Enter Stealth",
       type: "enter_stealth_with_retry",
       retryLimit: 5,
       settleMs: 260,
-      waitBetweenMs: 600
+      retryBackstepMs: 180,
+      retryMoveSettleMs: 140
     },
     {
       id: "primitive-4",

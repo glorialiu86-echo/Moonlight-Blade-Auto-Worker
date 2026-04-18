@@ -5061,7 +5061,8 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
     title = str(action.get("title") or "enter_stealth_with_retry")
     retry_limit = int(action.get("retryLimit") or 5)
     settle_ms = int(action.get("settleMs") or 260)
-    wait_between_ms = int(action.get("waitBetweenMs") or 600)
+    retry_backstep_ms = int(action.get("retryBackstepMs") or action.get("waitBetweenMs") or 180)
+    retry_move_settle_ms = int(action.get("retryMoveSettleMs") or 140)
     shortcut_key = SHORTCUT_KEYS.get("stealth", "2")
     attempts: list[dict[str, Any]] = []
 
@@ -5107,20 +5108,29 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
                 },
             }
         if attempt_index < retry_limit - 1:
-            INPUT_GUARD.guarded_sleep(wait_between_ms, title)
+            pydirectinput.keyDown("s")
+            INPUT_GUARD.refresh_baseline()
+            INPUT_GUARD.guarded_sleep(max(40, retry_backstep_ms), title)
+            pydirectinput.keyUp("s")
+            INPUT_GUARD.refresh_baseline()
+            INPUT_GUARD.guarded_sleep(max(0, retry_move_settle_ms), title)
+            attempt_payload["retryBackstepMs"] = retry_backstep_ms
+            attempt_payload["retryMoveSettleMs"] = retry_move_settle_ms
 
     failed_input = {
         "mode": "enter_stealth_with_retry",
         "retryCount": len(attempts),
         "attempts": attempts,
         "stealthVisual": exit_state,
+        "retryBackstepMs": retry_backstep_ms,
+        "retryMoveSettleMs": retry_move_settle_ms,
     }
     raise ActionExecutionError(
-        "Failed to enter stealth after waiting in place for the configured retry budget",
+        "Failed to enter stealth after backstep retry within the configured retry budget",
         error_code="STEALTH_ENTRY_BLOCKED",
         failed_step=build_failed_step_payload(
             action,
-            "Stealth entry stayed blocked without entering grey stealth state",
+            "Stealth entry stayed blocked without entering grey stealth state after backstep retries",
             failed_input,
         ),
     )

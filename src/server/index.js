@@ -665,16 +665,6 @@ function handleExternalInputInterrupted(error, contextLabel) {
     error: error.message,
     failedStep: error.workerPayload?.failedStep || error.failed_step || null
   });
-  appendMessage({
-    role: "assistant",
-    text: "检测到你在动鼠标或键盘，我先暂停自动控制。",
-    thinkingChain: [],
-    recoveryLine: "等你准备好了，再让我继续。",
-    perceptionSummary: "本轮因为人工介入被主动打断，自动控制已暂停。",
-    sceneLabel: "人工接管",
-    riskLevel: "low",
-    actions: []
-  });
   return true;
 }
 
@@ -3638,7 +3628,7 @@ async function handleChat(request, response) {
       role: "assistant",
       text: "收到加油啦！马上动脑筋～",
       thinkingChain: [],
-      recoveryLine: "你回来一碰鼠标或键盘，我就立刻停手。",
+      recoveryLine: "",
       perceptionSummary: "固定剧本已经布置完成，当前只是在等待启动。",
       sceneLabel: getState().latestPerception?.sceneLabel || "等待启动",
       riskLevel: "low",

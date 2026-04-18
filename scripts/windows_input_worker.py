@@ -189,6 +189,8 @@ STEALTH_ROIS = {
     "exit_button": (0.86, 0.44, 0.99, 0.58),
     "result_banner": (0.26, 0.22, 0.74, 0.56),
     "steal_button_stack": (0.82, 0.28, 0.99, 0.94),
+    "loot_submit_button": (0.47, 0.83, 0.66, 0.96),
+    "loot_right_panel": (0.66, 0.02, 0.99, 0.98),
 }
 
 MAP_STAGE_ROIS = {
@@ -269,10 +271,8 @@ ACTION_POINTS = {
     "map_go": (1674 / 2048, 1027 / 1152),
     "teleport_confirm": (0.569, 0.742),
     "drop_carried_target": (1372 / 2048, 667 / 1152),
-    "loot_item_1": (1428 / 2048, 381 / 1152),
-    "loot_item_2": (0.788, 0.356),
-    "loot_item_3": (0.860, 0.356),
-    "loot_put_in": (0.543, 0.634),
+    "loot_transfer_item": (1422 / 2048, 359 / 1152),
+    "loot_put_in": (1134 / 2048, 858 / 1152),
     "loot_submit": (1206 / 2048, 1076 / 1152),
 }
 
@@ -472,7 +472,6 @@ HAWKING_SCREEN_KEYWORDS = ["上货", "货架", "库存", "出摊"]
 
 
 KNOCKOUT_CONTEXT_KEYWORDS = ["扛走", "妙取", "搜刮"]
-LOOT_SCREEN_KEYWORDS = ["搜刮", "放入", "今日搜刮次数"]
 
 
 def emit(payload: dict[str, Any]) -> None:
@@ -1311,10 +1310,32 @@ def detect_knockout_context(hwnd: int) -> dict[str, Any]:
 
 
 def detect_loot_screen(hwnd: int) -> dict[str, Any]:
-    panel_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
+    submit_image = capture_window_region(hwnd, STEALTH_ROIS["loot_submit_button"])
+    submit_hsv = cv2.cvtColor(submit_image, cv2.COLOR_BGR2HSV)
+    submit_gold_mask = cv2.inRange(
+        submit_hsv,
+        np.array([10, 55, 110], dtype=np.uint8),
+        np.array([40, 255, 255], dtype=np.uint8),
+    )
+    submit_gold_ratio = float(np.mean(submit_gold_mask > 0))
+
+    right_panel = capture_window_region(hwnd, STEALTH_ROIS["loot_right_panel"])
+    right_panel_gray = np.mean(right_panel, axis=2)
+    right_panel_dark_ratio = float(np.mean(right_panel_gray < 82.0))
+
+    right_panel_hsv = cv2.cvtColor(right_panel, cv2.COLOR_BGR2HSV)
+    right_panel_color_mask = cv2.inRange(
+        right_panel_hsv,
+        np.array([0, 35, 55], dtype=np.uint8),
+        np.array([179, 255, 255], dtype=np.uint8),
+    )
+    right_panel_color_ratio = float(np.mean(right_panel_color_mask > 0))
+
     return {
-        "visible": count_keywords(panel_text, LOOT_SCREEN_KEYWORDS) >= 2,
-        "text": panel_text,
+        "visible": submit_gold_ratio >= 0.08 and right_panel_dark_ratio >= 0.34 and right_panel_color_ratio >= 0.05,
+        "submitGoldRatio": round(submit_gold_ratio, 4),
+        "rightPanelDarkRatio": round(right_panel_dark_ratio, 4),
+        "rightPanelColorRatio": round(right_panel_color_ratio, 4),
     }
 
 
@@ -5173,17 +5194,16 @@ def run_stealth_knock_loot_flow(hwnd: int, action: dict[str, Any]) -> dict[str, 
         raise RuntimeError("Loot panel did not appear after pressing 4")
 
     loot_clicks: list[dict[str, Any]] = []
-    for _ in range(8):
+    for click_index in range(6):
+        item_click = click_named_point(hwnd, "loot_transfer_item")
+        INPUT_GUARD.guarded_sleep(max(400, loot_settle_ms), title)
+        put_in_click = click_named_point(hwnd, "loot_put_in")
         loot_clicks.append({
-            "point": "loot_item_1",
-            "click": click_named_point(hwnd, "loot_item_1"),
+            "clickIndex": click_index + 1,
+            "itemClick": item_click,
+            "putInClick": put_in_click,
         })
-        INPUT_GUARD.guarded_sleep(loot_settle_ms, title)
-        loot_clicks.append({
-            "point": "loot_put_in",
-            "click": click_named_point(hwnd, "loot_put_in"),
-        })
-        INPUT_GUARD.guarded_sleep(loot_settle_ms, title)
+        INPUT_GUARD.guarded_sleep(max(200, loot_settle_ms), title)
 
     final_loot_click = click_named_point(hwnd, "loot_submit")
     INPUT_GUARD.guarded_sleep(max(220, loot_settle_ms), title)
@@ -5197,7 +5217,7 @@ def run_stealth_knock_loot_flow(hwnd: int, action: dict[str, Any]) -> dict[str, 
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": f"Knocked down {target['text']}, carried back, dropped, and looted three items fast",
+        "detail": f"Knocked down {target['text']}, carried back, dropped, and fast-transferred fixed loot items",
         "input": {
             "mode": "stealth_knock_loot_flow",
             "target": target,
@@ -5215,7 +5235,7 @@ def run_stealth_knock_loot_flow(hwnd: int, action: dict[str, Any]) -> dict[str, 
                 "y2": roi[3],
             },
             "knockoutText": knockout_state["text"],
-            "lootText": loot_state["text"],
+            **loot_state,
             "dropClick": drop_click,
             "lootClicks": loot_clicks,
             "finalLootClick": final_loot_click,
@@ -5423,6 +5443,7 @@ def run_stealth_open_loot(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     title = str(action.get("title") or "stealth_open_loot")
     loot_open_timeout_ms = int(action.get("lootOpenTimeoutMs") or 1200)
     loot_settle_ms = int(action.get("lootSettleMs") or 40)
+    before_frame = capture_verify_frame(hwnd)
     pydirectinput.press("4")
     INPUT_GUARD.refresh_baseline()
     INPUT_GUARD.guarded_sleep(loot_settle_ms, title)
@@ -5443,17 +5464,18 @@ def run_stealth_open_loot(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
                 {
                     "mode": "stealth_open_loot",
                     "lootOpenTimeoutMs": loot_open_timeout_ms,
-                    "lootText": loot_state["text"],
+                    **loot_state,
                 },
             ),
         )
 
+    frame_delta = measure_frame_delta(before_frame, capture_verify_frame(hwnd))
     return {
         "id": action_id,
         "title": title,
         "status": "performed",
         "detail": "Opened loot panel",
-        "input": {"mode": "stealth_open_loot", "lootText": loot_state["text"]},
+        "input": {"mode": "stealth_open_loot", **loot_state, "frameDelta": frame_delta},
     }
 
 
@@ -5470,44 +5492,47 @@ def ensure_loot_panel_visible(hwnd: int, title: str) -> dict[str, Any]:
                 "detail": "Loot panel disappeared during the steal flow",
                 "input": {
                     "mode": "loot_panel_visibility_check",
-                    "lootText": loot_state["text"],
+                    **loot_state,
                 },
             },
         )
     return loot_state
 
 
-def run_loot_select_item_once(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+def run_loot_collect_fixed_items(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
-    title = str(action.get("title") or "loot_select_item_once")
-    loot_settle_ms = int(action.get("lootSettleMs") or 20)
+    title = str(action.get("title") or "loot_collect_fixed_items")
+    click_count = max(1, int(action.get("clickCount") or 6))
+    item_settle_ms = int(action.get("itemSettleMs") or 400)
+    put_in_settle_ms = int(action.get("putInSettleMs") or 200)
+    clicks: list[dict[str, Any]] = []
+
     ensure_loot_panel_visible(hwnd, title)
-    click = click_named_point(hwnd, "loot_item_1")
-    INPUT_GUARD.guarded_sleep(loot_settle_ms, title)
+
+    for click_index in range(click_count):
+        item_click = click_named_point(hwnd, "loot_transfer_item")
+        INPUT_GUARD.guarded_sleep(item_settle_ms, title)
+        put_in_click = click_named_point(hwnd, "loot_put_in")
+        clicks.append({
+            "clickIndex": click_index + 1,
+            "itemClick": item_click,
+            "putInClick": put_in_click,
+        })
+        INPUT_GUARD.guarded_sleep(put_in_settle_ms, title)
+
     ensure_loot_panel_visible(hwnd, title)
     return {
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Selected the fixed loot item slot",
-        "input": {"mode": "loot_select_item_once", "click": click},
-    }
-
-
-def run_loot_put_in_once(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
-    action_id = str(action.get("id") or "")
-    title = str(action.get("title") or "loot_put_in_once")
-    loot_settle_ms = int(action.get("lootSettleMs") or 20)
-    ensure_loot_panel_visible(hwnd, title)
-    click = click_named_point(hwnd, "loot_put_in")
-    INPUT_GUARD.guarded_sleep(loot_settle_ms, title)
-    ensure_loot_panel_visible(hwnd, title)
-    return {
-        "id": action_id,
-        "title": title,
-        "status": "performed",
-        "detail": "Clicked put-in on loot panel",
-        "input": {"mode": "loot_put_in_once", "click": click},
+        "detail": f"Transferred {click_count} fixed loot items through the fixed put-in button",
+        "input": {
+            "mode": "loot_collect_fixed_items",
+            "clickCount": click_count,
+            "itemSettleMs": item_settle_ms,
+            "putInSettleMs": put_in_settle_ms,
+            "clicks": clicks,
+        },
     }
 
 
@@ -5729,11 +5754,8 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     if action_type == "stealth_open_loot":
         return run_stealth_open_loot(hwnd, action)
 
-    if action_type == "loot_select_item_once":
-        return run_loot_select_item_once(hwnd, action)
-
-    if action_type == "loot_put_in_once":
-        return run_loot_put_in_once(hwnd, action)
+    if action_type == "loot_collect_fixed_items":
+        return run_loot_collect_fixed_items(hwnd, action)
 
     if action_type == "loot_submit_once":
         return run_loot_submit_once(hwnd, action)

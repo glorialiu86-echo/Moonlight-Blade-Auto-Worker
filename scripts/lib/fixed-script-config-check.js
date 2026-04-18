@@ -30,8 +30,11 @@ export const requiredStartupLines = {
 export const retiredLines = [
   "好的！收到！等我想想怎么做…",
   "行，我现在顺着刚才那套安排往下做。",
-  "我完美完成籽岷的任务啦，现在可骄傲了，就等他回来验收啦。这一趟也赚了不少钱，先在街上乖乖收手。"
+  "我完美完成籽岷的任务啦，现在可骄傲了，就等他回来验收啦。这一趟也赚了不少钱，先在街上乖乖收手。",
+  "边套话边压低好感。"
 ];
+
+export const expectedNpcChatMaxRounds = 7;
 
 const expectedDocVariantCopy = {
   street_wander: "每轮都会从 `1` 组不同话术里取 `4` 句；下面这一组就是当前固定文案：",
@@ -129,6 +132,11 @@ export function verifyRuntimeDoc(source) {
     "Fixed-script runtime doc missing 2-minute protection copy"
   );
 
+  invariant(
+    source.includes("自动追加最多 `7` 轮 NPC 回复"),
+    "Fixed-script runtime doc missing updated NPC chat round count"
+  );
+
   Object.values(requiredStartupLines).forEach((line) => {
     invariant(
       source.includes(line),
@@ -162,6 +170,24 @@ export function verifyStartupAndEndingCopy(serverSource, runtimeFlowDoc) {
     invariant(!serverSource.includes(line), `Retired line still present in server index: ${line}`);
     invariant(!runtimeFlowDoc.includes(line), `Retired line still present in fixed-script runtime doc: ${line}`);
   });
+}
+
+export function verifyNpcChatConfig(serverSource, runtimeFlowDoc) {
+  invariant(
+    serverSource.includes(`const NPC_CHAT_MAX_ROUNDS = ${expectedNpcChatMaxRounds};`),
+    `Expected NPC chat max rounds to stay at ${expectedNpcChatMaxRounds}`
+  );
+
+  invariant(
+    serverSource.includes("当前聊天目标："),
+    "Expected NPC chat prompt to stay narrowed to chat-only goal"
+  );
+
+  invariant(
+    serverSource.includes("不再依赖 `read_current_chat` OCR")
+      || runtimeFlowDoc.includes("不走聊天 OCR 轮询"),
+    "Expected docs or source to keep the vision-first NPC chat note"
+  );
 }
 
 export async function loadFixedScriptArtifacts(projectRoot = process.cwd()) {
@@ -200,6 +226,7 @@ export async function checkFixedScriptConfig(projectRoot = process.cwd()) {
   verifyProtectionDelay(artifacts.serverSource);
   verifyRuntimeDoc(artifacts.runtimeFlowDoc);
   verifyStartupAndEndingCopy(artifacts.serverSource, artifacts.runtimeFlowDoc);
+  verifyNpcChatConfig(artifacts.serverSource, artifacts.runtimeFlowDoc);
 
   return {
     stageKeys,

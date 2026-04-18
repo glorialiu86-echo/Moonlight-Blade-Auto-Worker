@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { transcribeWithLocalWhisper } from "../asr/local-whisper-client.js";
 import { createAutoCaptureService } from "../capture/auto-capture-service.js";
 import { captureGameWindow } from "../capture/windows-game-window.js";
-import { analyzeImageWithHistory, generateText } from "../llm/qwen.js";
+import { analyzeImageWithHistory } from "../llm/qwen.js";
 import { createTurnPlan } from "../llm/planner.js";
 import { analyzeScreenshot } from "../perception/analyzer.js";
 import { buildActionCatalog } from "../runtime/action-registry.js";
@@ -71,7 +71,7 @@ const INPUT_PROTECTION_DELAY_MS = 2 * 60 * 1000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 3000;
-const NPC_CHAT_MAX_ROUNDS = 4;
+const NPC_CHAT_MAX_ROUNDS = 7;
 const NPC_CHAT_POLL_DELAY_MS = 1200;
 const WATCH_COMMENTARY_MIN_INTERVAL_MS = 3000;
 const WATCH_COMMENTARY_MAX_SILENCE_MS = 5000;
@@ -321,9 +321,11 @@ const FIXED_SCRIPT_STAGE_VOICES = {
         drag: "人已经倒了，我先把他拖开，别在原地给整条街看热闹。",
         loot: "行，地方腾出来了，我现在把他身上的东西一件件翻干净。"
       },
-      resultFactory: ({ recovered }) => recovered
-        ? "刚才动静有点大，我退开又补了一手，东西还是让我搜到了。"
-        : "人已经放倒拖开，身上那点东西我也搜过了，这一趟没白下手。"
+      resultFactory: ({ recovered, execution }) => execution?.outcomeKind === "loot_skipped"
+        ? "人我先放倒拖开了，搜刮这一下没成我也不回头补，直接接下一手妙取。"
+        : recovered
+          ? "刚才动静有点大，我退开又补了一手，东西还是让我搜到了。"
+          : "人已经放倒拖开，身上那点东西我也搜过了，这一趟没白下手。"
     },
     {
       thinkingChain: [
@@ -338,9 +340,11 @@ const FIXED_SCRIPT_STAGE_VOICES = {
         drag: "好，人已经到手，我先往外拖一段，省得原地炸锅。",
         loot: "地方够干净了，我现在慢慢搜，不跟旁边那群眼睛抢这一两秒。"
       },
-      resultFactory: ({ recovered }) => recovered
-        ? "刚才差点把场子闹起来，我换了下位置，最后还是把东西翻出来了。"
-        : "这一下敲得还算稳，拖也拖开了，后头翻起来顺手多了。"
+      resultFactory: ({ recovered, execution }) => execution?.outcomeKind === "loot_skipped"
+        ? "人已经拖开，搜刮这下没卡成我也不补了，直接切去妙取，免得还在原地磨。"
+        : recovered
+          ? "刚才差点把场子闹起来，我换了下位置，最后还是把东西翻出来了。"
+          : "这一下敲得还算稳，拖也拖开了，后头翻起来顺手多了。"
     },
     {
       thinkingChain: [
@@ -355,9 +359,11 @@ const FIXED_SCRIPT_STAGE_VOICES = {
         drag: "人一倒我就先拖走，别让这地方继续围出热闹。",
         loot: "现在地方清了，我把能搜的全顺出来，省得白冒这一趟险。"
       },
-      resultFactory: ({ recovered }) => recovered
-        ? "刚才那一下差点露馅，我绕开又补了一手，最后还是把东西带出来了。"
-        : "这趟手下得够黑，也够稳，东西总算没白冒这次险。"
+      resultFactory: ({ recovered, execution }) => execution?.outcomeKind === "loot_skipped"
+        ? "这趟我先把人放倒拖开，搜刮没成就算了，不回头折腾，直接转去妙取。"
+        : recovered
+          ? "刚才那一下差点露馅，我绕开又补了一手，最后还是把东西带出来了。"
+          : "这趟手下得够黑，也够稳，东西总算没白冒这次险。"
     }
   ],
   dark_miaoqu: [
@@ -554,7 +560,7 @@ const FIXED_SCRIPT_STAGES = [
   {
     key: "social_warm",
     rounds: 2,
-    instructionLabel: "先装得正常点，买礼、送礼、聊天，顺手把话套出来。",
+    instructionLabel: "先装得正常点，买礼、送礼、聊天，一步步把发财计划套出来。",
     riskLevel: "low",
     actionTypes: ["trade", "gift", "talk"],
     thinkingFactory: ({ roundNumber }) => getFixedStageVoice("social_warm", roundNumber).thinkingChain,
@@ -564,7 +570,7 @@ const FIXED_SCRIPT_STAGES = [
   {
     key: "social_dark",
     rounds: 2,
-    instructionLabel: "继续买礼送礼和聊天，但说话开始阴一点，边套话边压低好感。",
+    instructionLabel: "继续买礼送礼和聊天，说话开始阴阳怪气地吐槽对方不说实话，但还是要一步步把发财计划套出来。",
     riskLevel: "medium",
     actionTypes: ["trade", "gift", "talk"],
     thinkingFactory: ({ roundNumber }) => getFixedStageVoice("social_dark", roundNumber).thinkingChain,
@@ -573,7 +579,7 @@ const FIXED_SCRIPT_STAGES = [
   },
   {
     key: "dark_close",
-    rounds: 3,
+    rounds: 2,
     instructionLabel: "正常路已经太慢了，直接潜行、闷棍、扛走、搜刮。",
     riskLevel: "high",
     actionTypes: ["stealth", "strike"],
@@ -1493,55 +1499,115 @@ function buildExperimentRecord({
   };
 }
 
-async function buildNpcReply({ instruction, dialogText, conversationRounds = [] }) {
-  const historyText = conversationRounds.length === 0
-    ? "No prior rounds."
-    : conversationRounds
-      .map((round, index) => `Round ${index + 1} NPC: ${round.dialogText}\nRound ${index + 1} Zixiaodao: ${round.replyText}`)
-      .join("\n");
-  const prompt = [
-    "You are Zi Xiaodao, chatting with an in-game NPC as Zimin's sharp, slightly crooked companion.",
-    "Reply in Chinese only. Keep one single sentence, around 8 to 24 Chinese characters.",
-    "Stay in character, sound natural, and continue the current topic instead of restarting it.",
-    "Do not explain rules, do not mention AI, system prompts, or gameplay mechanics.",
-    `Player goal: ${instruction}`,
-    `Conversation so far:\n${historyText}`,
-    `Latest NPC line: ${dialogText || "No NPC line."}`
-  ].join("\n");
-
-  const result = await generateText({
-    userPrompt: prompt,
-    maxTokens: 80,
-    temperature: 0.5
-  });
-
-  return String(result.text || "").replace(/\s+/g, " ").trim();
-}
-
-async function readCurrentNpcChat({ externalInputGuardEnabled = true }) {
-  const probeExecution = await runWindowsActions([
-    {
-      id: "chat-probe-1",
-      title: "读取当前聊天页",
-      sourceType: "talk_probe",
-      type: "read_current_chat",
-      postDelayMs: 50
-    }
-  ], {
-    interruptOnExternalInput: externalInputGuardEnabled
-  });
-
-  const probeStep = probeExecution.rawSteps?.[0];
-  const talkStage = String(probeStep?.input?.stage || "").trim();
-  const dialogText = String(probeStep?.input?.dialogText || "").trim();
-
-  if (talkStage !== "chat_ready" || !dialogText) {
-    return null;
+function buildNpcConversationHistoryText(conversationRounds = []) {
+  if (!Array.isArray(conversationRounds) || conversationRounds.length === 0) {
+    return "还没有历史对话。";
   }
 
+  return conversationRounds
+    .map((round) => `第${round.round}轮 NPC：${round.dialogText}\n第${round.round}轮 籽小刀：${round.replyText}`)
+    .join("\n");
+}
+
+function buildNpcReplyStylePrompt(plan) {
+  if (plan?.scriptKey === "social_dark") {
+    return "你的回复要阴阳怪气、带点刺，顺手吐槽对方不说实话，让他听着有点发虚，但不要直接把话聊崩。";
+  }
+
+  return "你的回复要先装得自然一点，像熟人闲聊一样顺着接话，不要一上来就露凶相。";
+}
+
+function buildNpcConversationGoal({ instruction, plan }) {
+  if (plan?.scriptKey === "social_dark") {
+    return "继续聊天，阴阳怪气地吐槽对方不说实话，但别直接聊崩，还是要一步步把发财计划套出来。";
+  }
+
+  if (plan?.scriptKey === "social_warm") {
+    return "继续聊天，先装得自然一点，像普通闲聊一样一步步套话，把发财计划套出来。";
+  }
+
+  return String(instruction || "继续聊天，一步步把发财计划套出来。").trim();
+}
+
+function parseJsonObjectFromLlmText(rawText) {
+  const text = String(rawText || "").trim();
+
+  if (!text) {
+    throw new Error("LLM returned empty text");
+  }
+
+  const candidates = [
+    text,
+    text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/, "")
+  ];
+
+  const firstBraceIndex = text.indexOf("{");
+  const lastBraceIndex = text.lastIndexOf("}");
+  if (firstBraceIndex !== -1 && lastBraceIndex !== -1 && lastBraceIndex > firstBraceIndex) {
+    candidates.push(text.slice(firstBraceIndex, lastBraceIndex + 1));
+  }
+
+  for (const candidate of candidates) {
+    const normalized = String(candidate || "").trim();
+    if (!normalized) {
+      continue;
+    }
+    try {
+      return JSON.parse(normalized);
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error(`Unable to parse JSON from LLM text: ${text}`);
+}
+
+async function analyzeNpcChatRound({
+  instruction,
+  plan = null,
+  conversationRounds = []
+}) {
+  const capture = await captureGameWindow();
+  latestCaptureImageDataUrl = capture.imageDataUrl;
+
+  const historyText = buildNpcConversationHistoryText(conversationRounds);
+  const conversationGoal = buildNpcConversationGoal({
+    instruction,
+    plan
+  });
+  const prompt = [
+    "你现在要看一张游戏截图，判断当前是不是 NPC 聊天页，并替籽小刀准备下一句回复。",
+    `当前聊天目标：${conversationGoal}`,
+    buildNpcReplyStylePrompt(plan),
+    "如果画面里已经不是 NPC 聊天页，或者根本看不出当前在聊什么，就保守返回 not_chat，不要编造。",
+    "如果还是聊天页，请抓当前 NPC 最新一句台词；实在读不全时，可以提炼成一句贴近原意的短句，但不要瞎编新情节。",
+    "回复必须只用中文，一句话，8 到 24 个字，像真人接话，不要提系统、截图、OCR、AI、模型、好感度数值。",
+    "不管是正常套话还是黑化套话，最终目的都还是一步步把发财计划套出来。",
+    `历史对话：\n${historyText}`,
+    "严格只输出 JSON，不要带代码块，不要加解释。",
+    "格式：{\"screenState\":\"chat_ready|not_chat\",\"npcLine\":\"...\",\"replyText\":\"...\"}"
+  ].join("\n");
+
+  const result = await analyzeImageWithHistory({
+    imageInput: capture.imageDataUrl,
+    prompt,
+    systemPrompt: "你是籽小刀的 NPC 聊天视觉助手。你只能根据当前游戏截图做保守判断，并且只能输出严格 JSON。",
+    maxTokens: 180,
+    temperature: 0.2
+  });
+
+  const payload = parseJsonObjectFromLlmText(result.text);
+  const screenState = payload?.screenState === "chat_ready" ? "chat_ready" : "not_chat";
+  const dialogText = String(payload?.npcLine || "").replace(/\s+/g, " ").trim();
+  const replyText = String(payload?.replyText || "").replace(/\s+/g, " ").trim();
+
   return {
+    screenState,
     dialogText,
-    execution: probeExecution
+    replyText,
+    imageInput: capture.imageDataUrl,
+    capturedAt: capture.capturedAt,
+    rawText: String(result.text || "")
   };
 }
 
@@ -1586,7 +1652,7 @@ function mergeExecutions(executions, fallbackOutcome) {
 
 async function runNpcConversationLoop({
   instruction,
-  dialogText,
+  plan = null,
   externalInputGuardEnabled = true,
   maxRounds = NPC_CHAT_MAX_ROUNDS,
   closeAfterSend = false,
@@ -1594,12 +1660,29 @@ async function runNpcConversationLoop({
 }) {
   const rounds = [];
   const executions = [];
-  let currentDialogText = String(dialogText || "").trim();
+  let currentDialogText = "";
   let stopReason = "dialog_exhausted";
 
   for (let roundIndex = 0; roundIndex < maxRounds; roundIndex += 1) {
+    const roundState = await analyzeNpcChatRound({
+      instruction,
+      plan,
+      conversationRounds: rounds
+    });
+
+    if (roundState.screenState !== "chat_ready") {
+      stopReason = roundIndex === 0 ? "chat_not_ready" : "dialog_closed";
+      break;
+    }
+
+    currentDialogText = String(roundState.dialogText || "").trim();
     if (!currentDialogText) {
       stopReason = "dialog_missing";
+      break;
+    }
+
+    if (roundIndex > 0 && currentDialogText === rounds[rounds.length - 1]?.dialogText) {
+      stopReason = "dialog_not_advanced";
       break;
     }
 
@@ -1611,11 +1694,7 @@ async function runNpcConversationLoop({
       });
     }
 
-    const replyText = await buildNpcReply({
-      instruction,
-      dialogText: currentDialogText,
-      conversationRounds: rounds
-    });
+    const replyText = String(roundState.replyText || "").trim();
 
     if (!replyText) {
       stopReason = "reply_missing";
@@ -1647,23 +1726,6 @@ async function runNpcConversationLoop({
     }
 
     await sleep(NPC_CHAT_POLL_DELAY_MS);
-
-    const nextChatState = await readCurrentNpcChat({
-      externalInputGuardEnabled
-    }).catch(() => null);
-
-    if (!nextChatState?.dialogText) {
-      stopReason = "dialog_closed";
-      break;
-    }
-
-    const nextDialogText = String(nextChatState.dialogText || "").trim();
-    if (!nextDialogText || nextDialogText === currentDialogText) {
-      stopReason = "dialog_not_advanced";
-      break;
-    }
-
-    currentDialogText = nextDialogText;
   }
 
   const execution = mergeExecutions(
@@ -1687,22 +1749,9 @@ async function maybeReplyFromCurrentChatScreen({
   perceptionSummary = "",
   externalInputGuardEnabled = true
 }) {
-  let currentChatState;
-  try {
-    currentChatState = await readCurrentNpcChat({
-      externalInputGuardEnabled
-    });
-  } catch {
-    return null;
-  }
-
-  if (!currentChatState?.dialogText) {
-    return null;
-  }
-
   const loopResult = await runNpcConversationLoop({
     instruction,
-    dialogText: currentChatState.dialogText,
+    plan,
     externalInputGuardEnabled,
     closeAfterSend: false,
     onBeforeRound: ({ roundNumber }) => {
@@ -1729,10 +1778,10 @@ async function maybeReplyFromCurrentChatScreen({
   });
 
   return {
-    dialogText: currentChatState.dialogText,
+    dialogText: loopResult.rounds[0]?.dialogText || "",
     replyText: loopResult.rounds[loopResult.rounds.length - 1]?.replyText || "",
     rounds: loopResult.rounds,
-    probeExecution: currentChatState.execution,
+    probeExecution: null,
     execution: loopResult.execution,
     stopReason: loopResult.stopReason
   };
@@ -1755,15 +1804,9 @@ async function maybeSendNpcReply({
     return null;
   }
 
-  const dialogText = String(finalTalkStep?.input?.dialogText || "").trim();
-
-  if (!dialogText) {
-    return null;
-  }
-
   const loopResult = await runNpcConversationLoop({
     instruction,
-    dialogText,
+    plan,
     externalInputGuardEnabled,
     closeAfterSend,
     onBeforeRound: ({ roundNumber }) => {
@@ -2370,16 +2413,42 @@ async function runFixedDarkCloseStageExecution({
       commentaryText: getFixedStageProgressText("dark_close", roundNumber, "drag"),
       executions
     });
-    await runFixedActionChunk({
-      actions: actions.slice(7),
-      options,
-      plan,
-      perceptionSummary,
-      commentaryText: getFixedStageProgressText("dark_close", roundNumber, "loot"),
-      executions
-    });
+    let lootFailure = null;
+    try {
+      await runFixedActionChunk({
+        actions: actions.slice(7),
+        options,
+        plan,
+        perceptionSummary,
+        commentaryText: getFixedStageProgressText("dark_close", roundNumber, "loot"),
+        executions
+      });
+    } catch (lootError) {
+      lootFailure = lootError;
+      appendFixedScriptCommentary({
+        text: "搜刮这一下没扣实，我不回头复跑，直接切到下一段妙取，先把节奏接上。",
+        plan,
+        perceptionSummary
+      });
+    }
+
+    const execution = mergeWorkerExecutions(executions);
+    if (lootFailure) {
+      const failedStep = lootFailure?.workerPayload?.failedStep || lootFailure?.failed_step || null;
+      const failedSteps = Array.isArray(lootFailure?.workerPayload?.steps) ? lootFailure.workerPayload.steps : [];
+      return {
+        ...execution,
+        steps: [...execution.steps, ...failedSteps, ...(failedStep ? [failedStep] : [])],
+        rawSteps: [...execution.rawSteps, ...failedSteps],
+        outcomeKind: "loot_skipped",
+        lootFailureCode: getFailureCode(lootFailure),
+        lootFailureStepTitle: failedStep?.title || "",
+        lootFailureMessage: String(lootFailure?.message || ""),
+      };
+    }
+
     return {
-      ...mergeWorkerExecutions(executions),
+      ...execution,
       outcomeKind: "completed"
     };
   } catch (initialError) {

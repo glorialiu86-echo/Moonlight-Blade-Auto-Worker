@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   checkFixedScriptConfig,
+  expectedNpcChatMaxRounds,
   expectedRounds,
   expectedVariantCounts,
   loadFixedScriptArtifacts,
@@ -44,6 +45,19 @@ test("fixed-script smoke: runtime flow doc stays synced with startup lines and p
   assert.doesNotThrow(() => verifyProtectionDelay(serverSource));
   assert.doesNotThrow(() => verifyRuntimeDoc(runtimeFlowDoc));
   assert.doesNotThrow(() => verifyStartupAndEndingCopy(serverSource, runtimeFlowDoc));
+});
+
+test("fixed-script smoke: npc chat loop stays on the 7-round vision flow", async () => {
+  const { serverSource, runtimeFlowDoc } = await loadFixedScriptArtifacts();
+
+  assert.equal(
+    serverSource.includes(`const NPC_CHAT_MAX_ROUNDS = ${expectedNpcChatMaxRounds};`),
+    true
+  );
+  assert.equal(serverSource.includes("当前聊天目标："), true);
+  assert.equal(serverSource.includes("边套话边压低好感"), false);
+  assert.equal(runtimeFlowDoc.includes("自动追加最多 `7` 轮 NPC 回复"), true);
+  assert.equal(runtimeFlowDoc.includes("不走聊天 OCR 轮询"), true);
 });
 
 test("fixed-script smoke: retired startup and ending lines stay absent", async () => {

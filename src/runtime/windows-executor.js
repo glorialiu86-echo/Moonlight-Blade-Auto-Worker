@@ -501,22 +501,13 @@ export function createFixedSellLoopActions(options = {}) {
 }
 
 function createFixedDarkCloseLootActions(options = {}) {
-  const lootRounds = Math.max(1, Number(options.lootRounds || 3));
-  const lootActions = [];
-
-  for (let roundIndex = 0; roundIndex < lootRounds; roundIndex += 1) {
-    const sequenceIndex = roundIndex + 1;
-    lootActions.push(
-      createWorkerAction(`fixed-dark-close-loot-select-${sequenceIndex}`, `搜刮第 ${sequenceIndex} 件物品`, "loot_select_item_once", {
-        lootSettleMs: 80
-      }),
-      createWorkerAction(`fixed-dark-close-loot-put-${sequenceIndex}`, `放入第 ${sequenceIndex} 件物品`, "loot_put_in_once", {
-        lootSettleMs: 120
-      })
-    );
-  }
-
-  return lootActions;
+  return [
+    createWorkerAction("fixed-dark-close-loot-collect", "固定点搜刮物品 6 次", "loot_collect_fixed_items", {
+      clickCount: Math.max(1, Number(options.clickCount || 6)),
+      itemSettleMs: Math.max(120, Number(options.itemSettleMs || 400)),
+      putInSettleMs: Math.max(80, Number(options.putInSettleMs || 200))
+    })
+  ];
 }
 
 export function createFixedDarkCloseStageActions() {

@@ -23,7 +23,7 @@
 2. 正常思考，执行 `买货 -> 叫卖`，循环 `2` 轮
 3. 正常思考，先跑图到第一个卦摊 `548,630`，再执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
 4. 黑化思考，先跑图到第二个卦摊 `698,753`，再执行 `交易/买礼物 -> 赠礼 -> 交谈 -> 套话`，循环 `2` 轮
-5. 黑化思考，执行 `潜行 -> 闷棍 -> 扛走 -> 搜刮`，循环 `3` 次
+5. 黑化思考，执行 `潜行 -> 闷棍 -> 扛走 -> 搜刮`，循环 `2` 次
 6. 黑化思考，执行 `潜行 -> 妙取 -> 脱离 -> 退出潜行`，循环 `5` 次
 7. 正常思考，执行 `原地两次尝试开交易 -> 失败就回 548,630 重找路人交易 -> 连续上架 10 个道具 -> 提交交易 -> 回到街道`，循环 `1` 次
 
@@ -36,8 +36,8 @@
   - `99`：不送礼，直接关面板去聊天
   - `199`：固定送 `2` 次礼，再聊天
   - `299/599/...`：直接关面板换人，不再白送两轮
-- 第五段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_select_item_once/loot_put_in_once -> loot_submit_once`
-- 第五段里的 `闷棍` 现在按“到点、进潜行、直接按 3，由游戏自动吃附近目标”来设计；当前已确认按小时最多 `4` 次，但固定剧本仍按 `搜刮` 上限只跑 `3` 轮
+- 第五段不再依赖旧的 `stealth -> strike -> steal` 通用映射，而是固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_front_arc_strike -> stealth_carry_target -> stealth_backstep_target -> stealth_drop_target -> stealth_open_loot -> loot_collect_fixed_items -> loot_submit_once`
+- 第五段里的 `闷棍` 现在按“到点、进潜行、直接按 3，由游戏自动吃附近目标”来设计；当前已确认按小时最多 `4` 次，但固定剧本当前只跑 `2` 轮
 - 第六段是独立妙取链，固定执行 `travel_to_coordinate -> enter_stealth_with_retry -> stealth_trigger_miaoqu(4) -> click_fixed_steal_button_and_escape -> exit_stealth`
 - 第七段是收尾卖货链，固定执行：
   - 先在原地最多 `2` 次尝试 `acquire_npc_target -> open_npc_action_menu -> click_menu_trade`
@@ -64,6 +64,7 @@
   - `NPC_VIEW_NOT_OPENED` 时根据失败位置决定重跑整段社交链或只跑恢复链
 - 收尾卖货如果原地打不开真正交易页，会先在 stage 内部原地重试 `2` 次；仍失败时自动回 `548,630` 重新找路人开交易
 - 社交阶段进入聊天页后的后置自动回复，如在发送回复时失败，也会进入红三角恢复态；恢复时不重跑整段社交链，而是从当前聊天页继续续聊
+- 社交阶段进入聊天页后的自动续聊，已改成“每轮按需截图一次 + 线上视觉直接判断 NPC 当前话头并生成回复”，不再走 `read_current_chat` OCR 主链
 - 潜行恢复默认按失败码收敛：
   - `STEALTH_ENTRY_BLOCKED` 会在 action 内原地重试 `5` 次后停下
   - `STEALTH_ALERTED` / `STEALTH_TARGET_RECOVERED` 会先 `hold S >= 3000ms`，再在固定剧本内有限次重开
@@ -73,6 +74,8 @@
   - `闷棍`：最多 `4` 次
   - `搜刮`：最多 `3` 次
   - `妙取`：游戏本身不限次；固定剧本目前仍按拍摄需要跑 `5` 轮
+- 闷棍搜刮链已切到纯固定 UI：按 `4` 后只做页面视觉快检确认搜刮页打开，不再 OCR；随后按“固定物品位 -> 等 `400ms` -> 固定 `放入` -> 等 `200ms`”连续做 `6` 次，最后固定点一次 `搜刮`
+- 闷棍搜刮链如果在开板、连点或提交阶段失败，固定剧本不再复跑这一轮；会保留失败记录并直接进入 `dark_miaoqu`
 - 独立妙取链不做 OCR 选 `1.0 秒`；拉起面板后直接盲点固定金色按钮，并在 `1.2s` 后执行一次短按 `S` 加一次长按 `S`
 - 独立妙取链确认面板已拉起时，优先只看右侧固定区域里的金色 `妙取` 按钮栈；只有固定 UI 快检没命中时，才退回 `trade_panel` OCR 兜底
 - 全部主链结束后，固定剧本不再用通用“做完了”收尾，而是进入“任务完成、赚到钱、等籽岷回来验收”的完成文案

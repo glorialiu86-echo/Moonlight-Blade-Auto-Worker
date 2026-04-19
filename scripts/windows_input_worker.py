@@ -1799,11 +1799,11 @@ def detect_npc_interaction_stage(hwnd: int) -> dict[str, Any]:
 
     npc_action_keyword_count = count_keywords(bottom_right_text, ["退出", "详情", "交易", "赠礼", "交谈", "战斗", "邀约", "邀请"])
 
-    if npc_action_keyword_count >= 3:
+    if npc_action_keyword_count >= 3 and not world_hud_visible:
         stage = "npc_action_menu"
-    elif contains_any_keyword(bottom_right_text, ["闲聊"]):
+    elif contains_any_keyword(bottom_right_text, ["闲聊"]) and not world_hud_visible:
         stage = "small_talk_menu"
-    elif contains_any_keyword(bottom_right_text, ["交谈"]) and npc_action_keyword_count <= 2:
+    elif contains_any_keyword(bottom_right_text, ["交谈"]) and npc_action_keyword_count <= 2 and not world_hud_visible:
         stage = "small_talk_menu"
     elif contains_any_keyword(gift_panel_text, GIFT_KEYWORDS) and not world_hud_visible:
         stage = "gift_screen"
@@ -1829,9 +1829,9 @@ def detect_npc_interaction_stage(hwnd: int) -> dict[str, Any]:
 def detect_bottom_right_menu_stage(hwnd: int) -> dict[str, Any]:
     bottom_right_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["bottom_right_actions"]))
 
-    if contains_any_keyword(bottom_right_text, ["闂茶亰", "浜よ皥"]):
+    if contains_any_keyword(bottom_right_text, ["闲聊", "交谈"]):
         stage = "small_talk_menu"
-    elif contains_any_keyword(bottom_right_text, ["浜よ皥", "璧犵ぜ", "浜ゆ槗"]):
+    elif contains_any_keyword(bottom_right_text, ["交谈", "赠礼", "交易"]):
         stage = "npc_action_menu"
     else:
         stage = "none"
@@ -2053,9 +2053,19 @@ def find_moving_view_button(hwnd: int) -> dict[str, Any] | None:
             "score": item["score"],
             "screenX": screen_x,
             "screenY": screen_y,
+            "xRatio": round((screen_x - bounds["left"]) / max(1, bounds["width"]), 4),
+            "yRatio": round((screen_y - bounds["top"]) / max(1, bounds["height"]), 4),
         }
 
     return None
+
+
+def is_front_moving_view_candidate(moving_view: dict[str, Any] | None) -> bool:
+    if not moving_view:
+        return False
+    x_ratio = float(moving_view.get("xRatio") or 0.0)
+    y_ratio = float(moving_view.get("yRatio") or 0.0)
+    return 0.50 <= x_ratio <= 0.84 and 0.24 <= y_ratio <= 0.70
 
 
 def build_social_target_signature(
@@ -2094,6 +2104,8 @@ def social_target_signature_changed(
         delta_y = abs(int(after_view["screenY"]) - int(before_view["screenY"]))
         if max(delta_x, delta_y) >= position_shift_threshold_px:
             return True, "view_anchor_changed"
+    if not before_view and after_view:
+        return True, "view_anchor_appeared"
 
     return False, "unchanged"
 
@@ -2240,14 +2252,10 @@ def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, A
     attempts_per_cycle = int(action.get("attemptsPerCycle") or 5)
     max_cycles = int(action.get("maxCycles") or 2)
     settle_ms = int(action.get("settleMs") or 220)
-    drag_start_ratio = action.get("dragStartRatio") or [0.54, 0.48]
-    drag_end_ratio = action.get("dragEndRatio") or [0.64, 0.48]
-    drag_duration_ms = int(action.get("dragDurationMs") or 180)
     position_shift_threshold_px = int(action.get("positionShiftThresholdPx") or 28)
 
     focus_window(hwnd)
     attempts: list[dict[str, Any]] = []
-    perturbation = None
 
     for cycle_index in range(max(1, max_cycles)):
         for attempt_index in range(max(1, attempts_per_cycle)):
@@ -2263,12 +2271,20 @@ def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, A
             moving_view = find_moving_view_button(hwnd)
             after_signature = build_social_target_signature(target_info, moving_view)
             selectable_target = npc_stage_has_selectable_target(stage_state, target_info)
+            front_view = is_front_moving_view_candidate(moving_view)
+            before_target_name = str(before_signature.get("normalizedTargetText") or "").strip()
+            after_target_name = str(after_signature.get("normalizedTargetText") or "").strip()
+            name_changed = bool(
+                before_target_name
+                and after_target_name
+                and not names_match(before_target_name, after_target_name)
+            )
             target_changed, success_reason = social_target_signature_changed(
                 before_signature,
                 after_signature,
                 position_shift_threshold_px,
             )
-            success = selectable_target and target_changed
+            success = bool(moving_view and front_view and name_changed)
             attempt_payload = {
                 "cycleIndex": cycle_index + 1,
                 "attemptIndex": attempt_index + 1,
@@ -2276,6 +2292,8 @@ def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, A
                 "targetText": target_info["text"],
                 "lookText": stage_state["texts"].get("look_button", ""),
                 "selectableTarget": selectable_target,
+                "frontView": front_view,
+                "nameChanged": name_changed,
                 "targetChanged": target_changed,
                 "successReason": success_reason,
                 "beforeSignature": before_signature,
@@ -2294,20 +2312,9 @@ def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, A
                         **collect_npc_stage_input(hwnd, stage_state, target_info["text"]),
                         "attempts": attempts,
                         "retryCount": len(attempts),
-                        "perturbation": perturbation,
+                        "perturbation": None,
                     },
                 }
-
-        if cycle_index >= max_cycles - 1:
-            break
-
-        perturbation = drag_camera(
-            hwnd,
-            (float(drag_start_ratio[0]), float(drag_start_ratio[1])),
-            (float(drag_end_ratio[0]), float(drag_end_ratio[1])),
-            drag_duration_ms,
-        )
-        INPUT_GUARD.guarded_sleep(180, title)
 
     stage_state = detect_npc_interaction_stage(hwnd)
     target_info = detect_target_threshold(hwnd)
@@ -2316,7 +2323,7 @@ def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, A
         **collect_npc_stage_input(hwnd, stage_state, target_info["text"]),
         "attempts": attempts,
         "retryCount": len(attempts),
-        "perturbation": perturbation,
+        "perturbation": None,
     }
     raise ActionExecutionError(
         "Failed to switch to a selectable social target after the configured Tab budget",
@@ -2891,6 +2898,67 @@ def find_view_button_near_click(
             "height": bottom - top,
         }
     return best_match
+
+
+def find_view_button_near_target(hwnd: int, target_text: str) -> dict[str, Any] | None:
+    roi = NPC_STAGE_ROIS["moving_view_search"]
+    bounds = get_window_bounds(hwnd)
+    left = int(bounds["left"] + bounds["width"] * roi[0])
+    top = int(bounds["top"] + bounds["height"] * roi[1])
+    image = capture_window_region(hwnd, roi)
+    items = ocr_items(image)
+    keywords = [part for part in re.split(r"\s+", normalize_npc_name(target_text)) if len(part) >= 2]
+    if not keywords:
+        return None
+
+    target_candidates = []
+    for item in items:
+        normalized = normalize_npc_name(item["text"])
+        if not normalized:
+            continue
+        if any(keyword in normalized or normalized in keyword for keyword in keywords):
+            target_candidates.append(item)
+
+    if not target_candidates:
+        return None
+
+    best_target = max(target_candidates, key=lambda item: float(item["score"]))
+    anchor_x = round(left + best_target["centerX"])
+    anchor_y = round(top + best_target["maxY"] + max(36, (best_target["maxY"] - best_target["minY"]) * 2.6))
+    candidate = choose_local_view_candidate(image, left, top, anchor_x, anchor_y)
+    if not candidate:
+        return None
+    candidate["xRatio"] = round((int(candidate["screenX"]) - bounds["left"]) / max(1, bounds["width"]), 4)
+    candidate["yRatio"] = round((int(candidate["screenY"]) - bounds["top"]) / max(1, bounds["height"]), 4)
+    candidate["targetAnchor"] = {
+        "screenX": anchor_x,
+        "screenY": anchor_y,
+        "text": best_target["text"],
+        "score": round(float(best_target["score"]), 3),
+    }
+    return candidate
+
+
+def find_moving_view_button(hwnd: int) -> dict[str, Any] | None:
+    roi = NPC_STAGE_ROIS["moving_view_search"]
+    bounds = get_window_bounds(hwnd)
+    left = int(bounds["left"] + bounds["width"] * roi[0])
+    top = int(bounds["top"] + bounds["height"] * roi[1])
+    image = capture_window_region(hwnd, roi)
+    anchor_x = round(left + image.shape[1] * 0.56)
+    anchor_y = round(top + image.shape[0] * 0.60)
+    candidate = choose_local_view_candidate(image, left, top, anchor_x, anchor_y)
+    if not candidate:
+        return None
+    candidate["xRatio"] = round((int(candidate["screenX"]) - bounds["left"]) / max(1, bounds["width"]), 4)
+    candidate["yRatio"] = round((int(candidate["screenY"]) - bounds["top"]) / max(1, bounds["height"]), 4)
+    candidate["searchRect"] = {
+        "left": left,
+        "top": top,
+        "width": image.shape[1],
+        "height": image.shape[0],
+    }
+    return candidate
 
 
 def pulse_forward(hwnd: int, move_pulse_ms: int) -> dict[str, Any]:

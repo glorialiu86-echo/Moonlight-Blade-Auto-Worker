@@ -31,7 +31,7 @@ def capture_step(hwnd: int, output_dir: Path, suite_name: str, iteration: int, s
     client_y = None if click_point is None else click_point.get("clientY")
     return vis.save_debug_image(
         image,
-        f"{suite_name}-round-{iteration:02d}-{step_name}.png",
+        f"{suite_name}-round-{iteration:02d}-{step_name}.jpg",
         client_x,
         client_y,
         output_dir,

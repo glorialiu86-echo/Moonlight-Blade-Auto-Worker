@@ -47,6 +47,7 @@ WAIT_AFTER_TARGET_CLICK_MS = 150
 WAIT_AFTER_UI_CLICK_MS = 300
 FIXED_FAILURE_DIR = TMP_DIR / "fixed_npc_failures"
 RANDOM_FAILURE_DIR = TMP_DIR / "random_npc_failures"
+JPEG_SAVE_QUALITY = 88
 SELECTED_PANEL_ROI = (0.20, 0.10, 0.42, 0.26)
 SELECTED_NAME_ROI = (0.26, 0.12, 0.36, 0.20)
 SELECTED_HP_ROI = (0.26, 0.19, 0.39, 0.23)
@@ -109,10 +110,17 @@ def save_debug_image(
     save_dir = output_dir or TMP_DIR
     save_dir.mkdir(parents=True, exist_ok=True)
     output_path = save_dir / name
+    if output_path.suffix.lower() != ".jpg":
+        output_path = output_path.with_suffix(".jpg")
     output_image = image
     if client_x is not None and client_y is not None:
         output_image = draw_click_marker(image, client_x, client_y)
-    Image.fromarray(output_image[:, :, ::-1].astype(np.uint8), mode="RGB").save(output_path)
+    Image.fromarray(output_image[:, :, ::-1].astype(np.uint8), mode="RGB").save(
+        output_path,
+        format="JPEG",
+        quality=JPEG_SAVE_QUALITY,
+        optimize=True,
+    )
     return str(output_path)
 
 
@@ -507,7 +515,7 @@ def record_round_failure(
         client_y = click_point.get("clientY")
     return save_debug_image(
         image,
-        f"{suite_name}-round-{iteration:02d}-{step_name}.png",
+        f"{suite_name}-round-{iteration:02d}-{step_name}.jpg",
         client_x,
         client_y,
         failure_dir,
@@ -530,7 +538,7 @@ def execute_round(
     selected_state = detect_selection_state(selected_image, target_click)
     selected_shot = save_debug_image(
         selected_image,
-        f"{suite_name}-round-{iteration:02d}-selected.png",
+        f"{suite_name}-round-{iteration:02d}-selected.jpg",
         target_click["clientX"],
         target_click["clientY"],
     )
@@ -583,7 +591,7 @@ def finish_round_after_selection(
     detail_state = detect_exit_button_state(detail_image)
     detail_shot = save_debug_image(
         detail_image,
-        f"{suite_name}-round-{iteration:02d}-detail-open.png",
+        f"{suite_name}-round-{iteration:02d}-detail-open.jpg",
         view_click["clientX"],
         view_click["clientY"],
     )
@@ -615,7 +623,7 @@ def finish_round_after_selection(
     after_exit_state = detect_exit_button_state(after_exit_image)
     after_exit_shot = save_debug_image(
         after_exit_image,
-        f"{suite_name}-round-{iteration:02d}-after-exit.png",
+        f"{suite_name}-round-{iteration:02d}-after-exit.jpg",
         exit_click["clientX"],
         exit_click["clientY"],
     )
@@ -672,7 +680,7 @@ def finish_round_after_selection(
     after_cross_state = detect_selection_state(after_cross_image, target_click)
     after_cross_shot = save_debug_image(
         after_cross_image,
-        f"{suite_name}-round-{iteration:02d}-after-cross.png",
+        f"{suite_name}-round-{iteration:02d}-after-cross.jpg",
         cross_click["clientX"],
         cross_click["clientY"],
     )
@@ -739,7 +747,7 @@ def execute_random_round(
     selected_state = detect_selection_state(selected_image, target_click)
     selected_shot = save_debug_image(
         selected_image,
-        f"random-round-{iteration:02d}-selected.png",
+        f"random-round-{iteration:02d}-selected.jpg",
         target_click["clientX"],
         target_click["clientY"],
     )

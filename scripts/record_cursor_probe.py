@@ -18,6 +18,7 @@ import windows_input_worker as input_worker
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TMP_DIR = PROJECT_ROOT / "tmp"
 GAME_WINDOW_TITLE = "\u5929\u6daf\u660e\u6708\u5200\u624b\u6e38"
+JPEG_SAVE_QUALITY = 88
 
 
 def draw_click_marker(image: np.ndarray, client_x: int, client_y: int) -> np.ndarray:
@@ -32,8 +33,15 @@ def draw_click_marker(image: np.ndarray, client_x: int, client_y: int) -> np.nda
 
 def save_image(image: np.ndarray, path: Path) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix.lower() != ".jpg":
+        path = path.with_suffix(".jpg")
     rgb = image[:, :, ::-1]
-    Image.fromarray(rgb.astype(np.uint8), mode="RGB").save(path)
+    Image.fromarray(rgb.astype(np.uint8), mode="RGB").save(
+        path,
+        format="JPEG",
+        quality=JPEG_SAVE_QUALITY,
+        optimize=True,
+    )
     return str(path)
 
 
@@ -52,7 +60,7 @@ def main() -> int:
 
     image = input_worker.capture_window_region(hwnd, (0.0, 0.0, 1.0, 1.0))
     marked = draw_click_marker(image, client_x, client_y)
-    screenshot = save_image(marked, TMP_DIR / "cursor-probe.png")
+    screenshot = save_image(marked, TMP_DIR / "cursor-probe.jpg")
 
     print(
         json.dumps(

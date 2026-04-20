@@ -87,7 +87,7 @@ def detect_trade_popup(hwnd: int) -> dict:
 
 
 def record_before_after(hwnd: int, output_dir: Path, step_name: str, click_point: dict | None = None) -> dict:
-    before = capture_step(hwnd, output_dir, f"{step_name}-before.png", click_point)
+    before = capture_step(hwnd, output_dir, f"{step_name}-before.jpg", click_point)
     return {
         "beforeScreenshot": before,
         "beforeStage": stage_snapshot(hwnd),
@@ -95,7 +95,7 @@ def record_before_after(hwnd: int, output_dir: Path, step_name: str, click_point
 
 
 def record_after(hwnd: int, output_dir: Path, step_name: str, click_point: dict | None = None) -> dict:
-    after = capture_step(hwnd, output_dir, f"{step_name}-after.png", click_point)
+    after = capture_step(hwnd, output_dir, f"{step_name}-after.jpg", click_point)
     return {
         "afterScreenshot": after,
         "afterStage": stage_snapshot(hwnd),

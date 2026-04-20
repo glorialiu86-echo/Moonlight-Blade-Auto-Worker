@@ -30,6 +30,7 @@ DEFAULT_VERIFY_SETTLE_MS = 180
 OCR_ENGINE = None
 TMP_DIR = Path(__file__).resolve().parents[1] / "tmp"
 CLICK_TRACE_DIR = TMP_DIR / "click-trace"
+JPEG_SAVE_QUALITY = 88
 GAME_FIXED_CLIENT_WIDTH = 2560
 GAME_FIXED_CLIENT_HEIGHT = 1440
 WORLD_HUD_KEYWORDS = ["感知", "潜行", "微风拂柳", "[Shift]", "[Space]", "叫卖"]
@@ -765,7 +766,9 @@ def save_debug_image(
         draw.line((x, y - 14, x, y + 14), fill=(255, 80, 80), width=2)
 
     file_path = TMP_DIR / name
-    debug_image.save(file_path)
+    if file_path.suffix.lower() != ".jpg":
+        file_path = file_path.with_suffix(".jpg")
+    debug_image.save(file_path, format="JPEG", quality=JPEG_SAVE_QUALITY, optimize=True)
     return str(file_path)
 
 
@@ -793,7 +796,7 @@ def save_pre_click_trace(
     relative_y = max(0, min(int(bounds["height"]) - 1, int(screen_y) - int(bounds["top"])))
     CLICK_TRACE_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    trace_name = f"{timestamp}-{int(time.time() * 1000) % 1000:03d}-{slugify_debug_label(label)}.png"
+    trace_name = f"{timestamp}-{int(time.time() * 1000) % 1000:03d}-{slugify_debug_label(label)}.jpg"
     trace_path = save_debug_image(
         image,
         str(Path("click-trace") / trace_name),
@@ -3114,7 +3117,7 @@ def find_view_button_near_click(
     click_point = None
     if best_match:
         click_point = (best_match["screenX"] - left, best_match["screenY"] - top)
-    debug_path = save_debug_image(image, f"view-search-{timestamp}-{anchor_x}-{anchor_y}.png", click_point)
+    debug_path = save_debug_image(image, f"view-search-{timestamp}-{anchor_x}-{anchor_y}.jpg", click_point)
     if best_match:
         best_match["debugImage"] = debug_path
         best_match["searchRect"] = {

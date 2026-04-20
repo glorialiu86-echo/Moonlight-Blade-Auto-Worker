@@ -72,7 +72,7 @@ const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 3000;
 const NPC_CHAT_MAX_ROUNDS = 7;
-const NPC_CHAT_POLL_DELAY_MS = 1200;
+const NPC_CHAT_POLL_DELAY_MS = 5000;
 const WATCH_COMMENTARY_MIN_INTERVAL_MS = 3000;
 const WATCH_COMMENTARY_MAX_SILENCE_MS = 5000;
 const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
@@ -1794,13 +1794,16 @@ async function maybeReplyFromCurrentChatScreen({
   instruction,
   plan = null,
   perceptionSummary = "",
-  externalInputGuardEnabled = true
+  externalInputGuardEnabled = true,
+  maxRounds = NPC_CHAT_MAX_ROUNDS,
+  closeAfterSend = false
 }) {
   const loopResult = await runNpcConversationLoop({
     instruction,
     plan,
     externalInputGuardEnabled,
-    closeAfterSend: false,
+    maxRounds,
+    closeAfterSend,
     onBeforeRound: ({ roundNumber }) => {
       if (!plan?.scriptKey) {
         return null;
@@ -2312,6 +2315,57 @@ async function runFixedSocialGiftSequence({
   };
 }
 
+async function runFixedSocialGiftUntilChatable({
+  stage,
+  roundNumber,
+  plan,
+  perceptionSummary,
+  executions,
+  options,
+  entryIdPrefix,
+  resolveIdPrefix,
+  retargetIdPrefix,
+  startDecisionAttempt = 1,
+  emitCommentary = true
+}) {
+  let decisionAttempt = startDecisionAttempt;
+
+  for (let attemptIndex = 0; attemptIndex <= SOCIAL_RETARGET_BUDGET; attemptIndex += 1) {
+    const giftResult = await runFixedSocialGiftSequence({
+      stage,
+      roundNumber,
+      plan,
+      perceptionSummary,
+      executions,
+      options,
+      entryIdPrefix: `${entryIdPrefix}${attemptIndex > 0 ? `-${attemptIndex + 1}` : ""}`,
+      resolveIdPrefix: `${resolveIdPrefix}${attemptIndex > 0 ? `-${attemptIndex + 1}` : ""}`,
+      decisionAttempt,
+      emitCommentary
+    });
+
+    if (giftResult.giftPolicy !== "retarget") {
+      return giftResult;
+    }
+
+    if (attemptIndex >= SOCIAL_RETARGET_BUDGET) {
+      throw new Error("Gift threshold kept routing to retarget until the social retarget budget was exhausted");
+    }
+
+    executions.push(
+      await runWindowsActions(
+        createRetargetSocialTargetActions({
+          id: `${retargetIdPrefix}-${attemptIndex + 1}`
+        }),
+        options
+      )
+    );
+    decisionAttempt += 1;
+  }
+
+  throw new Error("Unreachable gift retarget loop exit");
+}
+
 async function runFixedSocialStageExecution({
   stage,
   roundNumber,
@@ -2339,7 +2393,7 @@ async function runFixedSocialStageExecution({
       commentaryText: getFixedStageProgressText(stage.key, roundNumber, "trade"),
       executions
     });
-    await runFixedSocialGiftSequence({
+    await runFixedSocialGiftUntilChatable({
       stage,
       roundNumber,
       plan,
@@ -2348,7 +2402,8 @@ async function runFixedSocialStageExecution({
       options,
       entryIdPrefix: "fixed-social-gift-entry",
       resolveIdPrefix: "fixed-social-gift-resolve",
-      decisionAttempt: 1
+      retargetIdPrefix: "fixed-social-gift-retarget",
+      startDecisionAttempt: 1
     });
     await runFixedActionChunk({
       actions: talkActions,
@@ -2400,7 +2455,7 @@ async function runFixedSocialStageExecution({
           );
         }
 
-        await runFixedSocialGiftSequence({
+        await runFixedSocialGiftUntilChatable({
           stage,
           roundNumber,
           plan,
@@ -2409,7 +2464,8 @@ async function runFixedSocialStageExecution({
           options,
           entryIdPrefix: `fixed-social-recovery-gift-entry-${attemptIndex + 1}`,
           resolveIdPrefix: `fixed-social-recovery-gift-resolve-${attemptIndex + 1}`,
-          decisionAttempt: attemptIndex + 2,
+          retargetIdPrefix: `fixed-social-recovery-gift-retarget-${attemptIndex + 1}`,
+          startDecisionAttempt: attemptIndex + 2,
           emitCommentary: false
         });
         await runFixedActionChunk({
@@ -3695,6 +3751,74 @@ async function handleChat(request, response) {
   return sendJson(response, 200, statePayload());
 }
 
+async function handleNpcChatReply(request, response) {
+  const body = await readRequestBody(request);
+  const instruction = String(body.instruction || "").trim();
+  const maxRounds = Math.max(1, Number(body.maxRounds) || NPC_CHAT_MAX_ROUNDS);
+  const closeAfterSend = body.closeAfterSend !== false;
+  const requestedExternalInputGuardEnabled = typeof body.externalInputGuardEnabled === "boolean"
+    ? body.externalInputGuardEnabled
+    : null;
+
+  if (!instruction) {
+    return sendJson(response, 400, { ok: false, error: "Instruction is required" });
+  }
+
+  if (!latestCaptureImageDataUrl) {
+    return sendJson(response, 409, {
+      ok: false,
+      error: "No capture image is available for current NPC chat reply",
+      state: getState()
+    });
+  }
+
+  await waitForTurnSlot();
+
+  const externalInputGuardEnabled = requestedExternalInputGuardEnabled !== null
+    ? requestedExternalInputGuardEnabled
+    : getState().externalInputGuardEnabled !== false;
+
+  try {
+    const replyResult = await maybeReplyFromCurrentChatScreen({
+      instruction,
+      perceptionSummary: perceptionSummaryBySource(getState().latestPerception, "agent"),
+      externalInputGuardEnabled,
+      maxRounds,
+      closeAfterSend
+    });
+
+    if (!replyResult) {
+      return sendJson(response, 409, {
+        ok: false,
+        error: "Current screen is not a ready NPC chat screen",
+        state: getState()
+      });
+    }
+
+    return sendJson(response, 200, {
+      ok: true,
+      rounds: replyResult.rounds,
+      maxRounds,
+      closeAfterSend,
+      stopReason: replyResult.stopReason,
+      replyText: replyResult.replyText,
+      state: getState()
+    });
+  } catch (error) {
+    if (handleExternalInputInterrupted(error, "当前聊天页续聊")) {
+      return sendJson(response, 409, {
+        ok: false,
+        error: error.message,
+        errorCode: error.code,
+        state: getState()
+      });
+    }
+    throw error;
+  } finally {
+    turnInFlight = false;
+  }
+}
+
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host}`);
 
@@ -3733,6 +3857,10 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/chat") {
       return handleChat(request, response);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/chat/npc-reply") {
+      return handleNpcChatReply(request, response);
     }
 
     if (request.method === "GET") {

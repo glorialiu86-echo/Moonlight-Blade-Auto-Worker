@@ -40,14 +40,15 @@ function createNpcFlowActions(baseAction, steps) {
 function createAcquireNpcTargetAction(id, title, options = {}) {
   return createWorkerAction(id, title, "acquire_npc_target", {
     timeoutMs: options.timeoutMs || 5000,
-    movePulseMs: options.movePulseMs || 160,
+    movePulseMs: options.movePulseMs ?? 160,
     scanIntervalMs: options.scanIntervalMs || 180
   });
 }
 
 function createOpenNpcActionMenuAction(id, title, options = {}) {
   return createWorkerAction(id, title, "open_npc_action_menu", {
-    viewAttemptLimit: options.viewAttemptLimit || 3
+    viewAttemptLimit: options.viewAttemptLimit || 3,
+    disableReacquire: Boolean(options.disableReacquire)
   });
 }
 
@@ -133,7 +134,7 @@ function createNpcChatEntryActions(baseAction, options = {}) {
       type: "acquire_npc_target",
       payload: {
         timeoutMs: options.timeoutMs || 5000,
-        movePulseMs: options.movePulseMs || 160,
+        movePulseMs: options.movePulseMs ?? 160,
         scanIntervalMs: options.scanIntervalMs || 180
       }
     },
@@ -181,7 +182,7 @@ function createNpcGiftActions(baseAction, options = {}) {
       type: "acquire_npc_target",
       payload: {
         timeoutMs: options.timeoutMs || 4500,
-        movePulseMs: options.movePulseMs || 160,
+        movePulseMs: options.movePulseMs ?? 160,
         scanIntervalMs: options.scanIntervalMs || 180
       }
     },
@@ -211,7 +212,7 @@ function createNpcTradeActions(baseAction, options = {}) {
       type: "acquire_npc_target",
       payload: {
         timeoutMs: options.timeoutMs || 5000,
-        movePulseMs: options.movePulseMs || 180,
+        movePulseMs: options.movePulseMs ?? 180,
         scanIntervalMs: options.scanIntervalMs || 180
       }
     },
@@ -345,7 +346,7 @@ export function createFixedSocialTradeActions(options = {}) {
   if (options.includeAcquire !== false) {
     steps.push(createAcquireNpcTargetAction(`${prefix}-1`, "锁定路人目标", {
       timeoutMs: 5000,
-      movePulseMs: 180,
+      movePulseMs: 0,
       scanIntervalMs: 180
     }));
   }
@@ -368,7 +369,7 @@ export function createFixedSocialGiftActions(options = {}) {
   if (options.includeAcquire) {
     steps.push(createAcquireNpcTargetAction(`${prefix}-1`, "锁定路人目标", {
       timeoutMs: 4500,
-      movePulseMs: 160,
+      movePulseMs: 0,
       scanIntervalMs: 180
     }));
   }
@@ -385,7 +386,7 @@ export function createFixedSocialGiftEntryActions(options = {}) {
   if (options.includeAcquire) {
     steps.push(createAcquireNpcTargetAction(`${prefix}-1`, "锁定路人目标", {
       timeoutMs: 4500,
-      movePulseMs: 160,
+      movePulseMs: 0,
       scanIntervalMs: 180
     }));
   }
@@ -408,7 +409,7 @@ export function createFixedSocialTalkActions(options = {}) {
   if (options.includeAcquire) {
     steps.push(createAcquireNpcTargetAction(`${prefix}-1`, "锁定路人目标", {
       timeoutMs: 7000,
-      movePulseMs: 160,
+      movePulseMs: 0,
       scanIntervalMs: 180
     }));
   }

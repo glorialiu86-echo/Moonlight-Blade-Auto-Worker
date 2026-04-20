@@ -30,9 +30,9 @@ DEFAULT_VERIFY_SETTLE_MS = 180
 OCR_ENGINE = None
 TMP_DIR = Path(__file__).resolve().parents[1] / "tmp"
 CLICK_TRACE_DIR = TMP_DIR / "click-trace"
-JPEG_SAVE_QUALITY = 88
 GAME_FIXED_CLIENT_WIDTH = 2560
 GAME_FIXED_CLIENT_HEIGHT = 1440
+JPEG_SAVE_QUALITY = 88
 WORLD_HUD_KEYWORDS = ["感知", "潜行", "微风拂柳", "[Shift]", "[Space]", "叫卖"]
 EXTERNAL_INPUT_MOUSE_DELTA_PX = 2
 EXTERNAL_INPUT_CHECK_INTERVAL_MS = 40
@@ -137,6 +137,11 @@ class ExternalInputGuard:
 
 
 INPUT_GUARD = ExternalInputGuard()
+# Reverted on April 20, 2026 after live regression:
+# the stricter threshold caused visible magnifier targets to be misclassified
+# as missing. Keep this looser so the previously stable "see magnifier -> use it"
+# path remains the single owner again.
+MIN_VIEW_BUTTON_SCORE = 55.0
 
 
 def set_process_dpi_aware() -> None:
@@ -223,7 +228,10 @@ NPC_CAPTURE_SCAN_POINTS = [
 ACTION_POINTS = {
     "view": (1362 / 2544, 931 / 1388),
     "talk": (1830 / 2544, 1217 / 1388),
-    "small_talk": (1640 / 2544, 1147 / 1388),
+    # User-pinned fixed UI point: small-talk entry center was re-marked from
+    # the provided red-circle screenshot on April 20, 2026. Do not adjust
+    # casually unless re-validated against a fresh capture on this machine.
+    "small_talk": (1697 / 2544, 1089 / 1388),
     "confirm_small_talk": (1456 / 2544, 1046 / 1388),
     "trade": (1988 / 2544, 1085 / 1388),
     # Stable fixed UI point: this gift button center was re-marked on the
@@ -262,11 +270,15 @@ ACTION_POINTS = {
     "steal_button_3": (1916 / 2048, 893 / 1360),
     "steal_button_4": (1916 / 2048, 1085 / 1360),
     "exit_stealth": (2275 / 2544, 493 / 1388),
-    "gift_first_slot": (1725 / 2544, 400 / 1388),
+    # User re-marked from the red-circle gift screenshot on April 20, 2026:
+    # click the visual center of the first gift item, slightly lower than the
+    # old point, so the detail pane can be opened/closed reliably before send.
+    "gift_first_slot": (1719 / 2544, 632 / 1388),
     "gift_plus": (2027 / 2544, 1190 / 1388),
-    "gift_submit": (2270 / 2544, 1190 / 1388),
+    "gift_submit": (2210 / 2544, 1172 / 1388),
     "small_talk_confirm_dialog": (1456 / 2544, 1046 / 1388),
-    "chat_input": (330 / 2544, 1313 / 1388),
+    "small_talk_cancel_dialog": (1090 / 2544, 1046 / 1388),
+    "chat_input": (278 / 2048, 1040 / 1152),
     "chat_exit": (1089 / 2544, 688 / 1388),
     # The user has pinned the in-game render resolution to 2560x1440, so the
     # coordinate route bar uses one fixed reference layout again.
@@ -1729,6 +1741,7 @@ def start_map_route_to_coordinate(
     x_input = input_map_coordinate_field(hwnd, "map_coord_x_input", "horizontal", x_coordinate, "horizontal", title)
     go_click = click_map_route_control(hwnd, "go", "map_go")
     INPUT_GUARD.guarded_sleep(max(1000, wait_after_go_ms), title)
+    teleport_confirm = maybe_confirm_teleport_dialog(hwnd, title, "teleport_confirm")
     return {
         "toggleKey": toggle_key,
         "mapTexts": map_state["texts"],
@@ -1737,6 +1750,7 @@ def start_map_route_to_coordinate(
         "verticalInput": y_input,
         "horizontalInput": x_input,
         "goClick": go_click,
+        "teleportConfirm": teleport_confirm,
         "waitAfterGoMs": wait_after_go_ms,
     }
 
@@ -1778,6 +1792,40 @@ def detect_dialog(hwnd: int) -> dict[str, Any]:
     return {
         "visible": any(keyword in full_text for keyword in keywords),
         "text": full_text,
+    }
+
+
+def detect_teleport_confirm_dialog(hwnd: int) -> dict[str, Any]:
+    full_image = capture_window_region(hwnd, (0.0, 0.0, 1.0, 1.0))
+    title_patch = crop_client_roi(full_image, (0.00, 0.20, 0.18, 0.34))
+    message_patch = crop_client_roi(full_image, (0.34, 0.42, 0.68, 0.58))
+    confirm_patch = crop_client_roi(full_image, (0.49, 0.68, 0.66, 0.83))
+
+    title_text = ocr_text(title_patch)
+    message_text = ocr_text(message_patch)
+    full_text = f"{title_text} {message_text}".strip()
+    confirm_metrics = patch_brightness_metrics(confirm_patch)
+
+    return {
+        "visible": (
+            contains_any_keyword(full_text, ["传送确认", "是否前往", "前往位于"])
+            and confirm_metrics["brightRatio"] >= 0.22
+        ),
+        "text": full_text,
+        "confirmBrightRatio": round(confirm_metrics["brightRatio"], 4),
+    }
+
+
+def maybe_confirm_teleport_dialog(hwnd: int, title: str, confirm_point_name: str) -> dict[str, Any] | None:
+    dialog_state = detect_teleport_confirm_dialog(hwnd)
+    if not dialog_state["visible"]:
+        return None
+
+    confirm_click = click_named_point(hwnd, confirm_point_name)
+    INPUT_GUARD.guarded_sleep(220, title)
+    return {
+        "dialog": dialog_state,
+        "click": confirm_click,
     }
 
 
@@ -1899,13 +1947,50 @@ def detect_gift_screen_visual(hwnd: int) -> bool:
     slot = ACTION_POINTS["gift_first_slot"]
     submit_patch = crop_client_roi(image, (submit[0] - 0.03, submit[1] - 0.025, submit[0] + 0.03, submit[1] + 0.025))
     slot_patch = crop_client_roi(image, (slot[0] - 0.03, slot[1] - 0.04, slot[0] + 0.03, slot[1] + 0.04))
+    right_panel_patch = crop_client_roi(image, NPC_STAGE_ROIS["gift_panel"])
     submit_metrics = patch_brightness_metrics(submit_patch)
     slot_metrics = patch_brightness_metrics(slot_patch)
+    right_panel_metrics = patch_brightness_metrics(right_panel_patch)
     return (
-        submit_metrics["brightRatio"] >= 0.35
-        and slot_metrics["brightRatio"] >= 0.65
-        and slot_metrics["darkRatio"] <= 0.20
+        submit_metrics["brightRatio"] >= 0.25
+        and slot_metrics["brightRatio"] >= 0.45
+        and right_panel_metrics["brightRatio"] >= 0.32
     )
+
+
+def wait_for_npc_stage(
+    hwnd: int,
+    expected_stage: str,
+    timeout_ms: int = 800,
+    poll_interval_ms: int = 120,
+) -> dict[str, Any]:
+    deadline = time.time() + max(0, timeout_ms) / 1000.0
+    last_stage_state = detect_npc_interaction_stage(hwnd)
+    while True:
+        if last_stage_state["stage"] == expected_stage:
+            return last_stage_state
+        if time.time() >= deadline:
+            return last_stage_state
+        INPUT_GUARD.guarded_sleep(max(0, poll_interval_ms), f"wait_for_{expected_stage}")
+        last_stage_state = detect_npc_interaction_stage(hwnd)
+
+
+def wait_for_any_npc_stage(
+    hwnd: int,
+    expected_stages: set[str] | list[str] | tuple[str, ...],
+    timeout_ms: int = 800,
+    poll_interval_ms: int = 120,
+) -> dict[str, Any]:
+    target_stages = {str(stage or "").strip() for stage in expected_stages if str(stage or "").strip()}
+    deadline = time.time() + max(0, timeout_ms) / 1000.0
+    last_stage_state = detect_npc_interaction_stage(hwnd)
+    while True:
+        if last_stage_state["stage"] in target_stages:
+            return last_stage_state
+        if time.time() >= deadline:
+            return last_stage_state
+        INPUT_GUARD.guarded_sleep(max(0, poll_interval_ms), "wait_for_any_npc_stage")
+        last_stage_state = detect_npc_interaction_stage(hwnd)
 
 
 def detect_chat_ready_visual(hwnd: int) -> bool:
@@ -1999,6 +2084,22 @@ def detect_npc_interaction_stage(hwnd: int) -> dict[str, Any]:
         return {
             "stage": "chat_ready",
             "texts": {},
+        }
+    chat_panel_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["chat_panel"]))
+    if contains_any_keyword(chat_panel_text, CHAT_KEYWORDS):
+        return {
+            "stage": "chat_ready",
+            "texts": {
+                "chat_panel": chat_panel_text,
+            },
+        }
+    confirm_dialog_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["confirm_dialog"]))
+    if contains_any_keyword(confirm_dialog_text, CONFIRM_KEYWORDS):
+        return {
+            "stage": "small_talk_confirm",
+            "texts": {
+                "confirm_dialog": confirm_dialog_text,
+            },
         }
     if has_selected_target_visual(hwnd):
         return {
@@ -2178,7 +2279,7 @@ def send_chat_message(
     INPUT_GUARD.guarded_sleep(180, "send_chat_message")
 
     if close_after_send:
-        exit_panel(hwnd)
+        click_named_point(hwnd, "chat_exit")
         INPUT_GUARD.guarded_sleep(max(0, close_settle_ms), "send_chat_message")
 
     return {
@@ -2240,6 +2341,19 @@ def is_front_moving_view_candidate(moving_view: dict[str, Any] | None) -> bool:
     x_ratio = float(moving_view.get("xRatio") or 0.0)
     y_ratio = float(moving_view.get("yRatio") or 0.0)
     return 0.30 <= x_ratio <= 0.78 and 0.18 <= y_ratio <= 0.72
+
+
+def is_red_box_moving_view_candidate(moving_view: dict[str, Any] | None) -> bool:
+    if not moving_view:
+        return False
+    x_ratio = float(moving_view.get("xRatio") or 0.0)
+    y_ratio = float(moving_view.get("yRatio") or 0.0)
+    # User-pinned retarget rule on April 20, 2026:
+    # after Tab, success only needs two things:
+    # 1) the selected name changed
+    # 2) the magnifier is back inside the large red interaction box
+    # Do not require a more forward / centered sub-zone here.
+    return 0.18 <= x_ratio <= 0.82 and 0.14 <= y_ratio <= 0.78
 
 
 def build_social_target_signature(
@@ -2435,16 +2549,22 @@ def reset_transient_npc_selection(hwnd: int, title: str) -> dict[str, Any]:
 def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "retarget_social_target")
-    attempts_per_cycle = int(action.get("attemptsPerCycle") or 5)
-    max_cycles = int(action.get("maxCycles") or 2)
-    settle_ms = int(action.get("settleMs") or 220)
-    stable_recheck_ms = int(action.get("stableRecheckMs") or 180)
-    position_shift_threshold_px = int(action.get("positionShiftThresholdPx") or 28)
+    attempts_per_cycle = int(action.get("attemptsPerCycle") if action.get("attemptsPerCycle") is not None else 5)
+    max_cycles = int(action.get("maxCycles") if action.get("maxCycles") is not None else 2)
+    timeout_ms = int(action.get("timeoutMs") if action.get("timeoutMs") is not None else 90000)
+    settle_ms = int(action.get("settleMs") if action.get("settleMs") is not None else 220)
+    stable_recheck_ms = int(action.get("stableRecheckMs") if action.get("stableRecheckMs") is not None else 180)
+    position_shift_threshold_px = int(
+        action.get("positionShiftThresholdPx") if action.get("positionShiftThresholdPx") is not None else 28
+    )
 
     focus_window(hwnd)
     attempts: list[dict[str, Any]] = []
+    start_time = time.time()
 
-    for cycle_index in range(max(1, max_cycles)):
+    cycle_index = 0
+    while True:
+        cycle_index += 1
         for attempt_index in range(max(1, attempts_per_cycle)):
             INPUT_GUARD.check_or_raise(title)
             before_target_info = detect_target_threshold(hwnd)
@@ -2458,7 +2578,7 @@ def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, A
             moving_view = find_moving_view_button(hwnd)
             after_signature = build_social_target_signature(target_info, moving_view)
             selectable_target = npc_stage_has_selectable_target(hwnd, stage_state, target_info)
-            front_view = is_front_moving_view_candidate(moving_view)
+            front_view = is_red_box_moving_view_candidate(moving_view)
             before_target_name = str(before_signature.get("normalizedTargetText") or "").strip()
             after_target_name = str(after_signature.get("normalizedTargetText") or "").strip()
             name_changed = bool(
@@ -2472,46 +2592,22 @@ def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, A
                 position_shift_threshold_px,
             )
             stable_check = None
+            # User-pinned retarget rule on April 21, 2026:
+            # Tab success depends on two things only:
+            # 1) the selected name changed
+            # 2) the magnifier stays inside the red interaction box
             success = False
-            # Stable owner note: this short recheck was added after live
-            # gift -> close -> retarget debugging on April 20, 2026.
-            # It prevents Tab from stopping on a transient target whose
-            # magnifier appears briefly but still cannot be opened.
-            # Treat this as a stabilized guardrail and do not loosen it
-            # without re-running the real loop with screenshots.
-            if moving_view and front_view and name_changed:
+            if name_changed and front_view:
                 INPUT_GUARD.guarded_sleep(stable_recheck_ms, title)
                 stable_stage_state = detect_npc_interaction_stage(hwnd)
                 stable_target_info = detect_target_threshold(hwnd)
                 stable_moving_view = find_moving_view_button(hwnd)
-                stable_signature = build_social_target_signature(stable_target_info, stable_moving_view)
-                stable_target_name = str(stable_signature.get("normalizedTargetText") or "").strip()
-                stable_front_view = is_front_moving_view_candidate(stable_moving_view)
-                stable_name_matches = bool(
-                    stable_target_name
-                    and after_target_name
-                    and names_match(stable_target_name, after_target_name)
-                    and not names_match(stable_target_name, before_target_name)
-                )
-                stable_target_changed, stable_success_reason = social_target_signature_changed(
-                    before_signature,
-                    stable_signature,
-                    position_shift_threshold_px,
-                )
-                success = bool(
-                    stable_moving_view
-                    and stable_front_view
-                    and stable_name_matches
-                    and stable_target_changed
-                )
+                stable_front_view = is_red_box_moving_view_candidate(stable_moving_view)
+                success = bool(stable_front_view)
                 stable_check = {
                     "stage": stable_stage_state["stage"],
                     "targetText": stable_target_info["text"],
                     "frontView": stable_front_view,
-                    "nameMatches": stable_name_matches,
-                    "targetChanged": stable_target_changed,
-                    "successReason": stable_success_reason,
-                    "signature": stable_signature,
                 }
             attempt_payload = {
                 "cycleIndex": cycle_index + 1,
@@ -2545,6 +2641,30 @@ def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, A
                     },
                 }
 
+            if timeout_ms > 0 and (time.time() - start_time) * 1000 >= timeout_ms:
+                stage_state = detect_npc_interaction_stage(hwnd)
+                target_info = detect_target_threshold(hwnd)
+                failed_input = {
+                    "mode": "retarget_social_target",
+                    **collect_npc_stage_input(hwnd, stage_state, target_info["text"]),
+                    "attempts": attempts,
+                    "retryCount": len(attempts),
+                    "timeoutMs": timeout_ms,
+                    "perturbation": None,
+                }
+                raise ActionExecutionError(
+                    "Failed to switch to a selectable social target before timeout",
+                    error_code="NPC_TARGET_SWITCH_FAILED",
+                    failed_step=build_failed_step_payload(
+                        action,
+                        "Tab switch never produced a changed selectable target before timeout",
+                        failed_input,
+                    ),
+                )
+
+        if max_cycles > 0 and cycle_index >= max(1, max_cycles):
+            break
+
     stage_state = detect_npc_interaction_stage(hwnd)
     target_info = detect_target_threshold(hwnd)
     failed_input = {
@@ -2552,6 +2672,7 @@ def run_retarget_social_target(hwnd: int, action: dict[str, Any]) -> dict[str, A
         **collect_npc_stage_input(hwnd, stage_state, target_info["text"]),
         "attempts": attempts,
         "retryCount": len(attempts),
+        "timeoutMs": timeout_ms,
         "perturbation": None,
     }
     raise ActionExecutionError(
@@ -3113,6 +3234,8 @@ def find_view_button_near_click(
     bottom = min(bounds["top"] + bounds["height"], top + search_height)
     image = capture_screen_rect(left, top, right - left, bottom - top)
     best_match = choose_local_view_candidate(image, left, top, anchor_x, anchor_y)
+    if best_match and float(best_match.get("score") or 0.0) < MIN_VIEW_BUTTON_SCORE:
+        best_match = None
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     click_point = None
     if best_match:
@@ -3199,6 +3322,8 @@ def find_view_button_near_target(hwnd: int, target_text: str) -> dict[str, Any] 
     candidate = choose_local_view_candidate(image, left, top, anchor_x, anchor_y)
     if not candidate:
         return None
+    if float(candidate.get("score") or 0.0) < MIN_VIEW_BUTTON_SCORE:
+        return None
     candidate["xRatio"] = round((int(candidate["screenX"]) - bounds["left"]) / max(1, bounds["width"]), 4)
     candidate["yRatio"] = round((int(candidate["screenY"]) - bounds["top"]) / max(1, bounds["height"]), 4)
     candidate["targetAnchor"] = {
@@ -3220,6 +3345,8 @@ def find_moving_view_button(hwnd: int) -> dict[str, Any] | None:
     anchor_y = round(top + image.shape[0] * 0.60)
     candidate = choose_local_view_candidate(image, left, top, anchor_x, anchor_y)
     if not candidate:
+        return None
+    if float(candidate.get("score") or 0.0) < MIN_VIEW_BUTTON_SCORE:
         return None
     candidate["xRatio"] = round((int(candidate["screenX"]) - bounds["left"]) / max(1, bounds["width"]), 4)
     candidate["yRatio"] = round((int(candidate["screenY"]) - bounds["top"]) / max(1, bounds["height"]), 4)
@@ -3249,7 +3376,8 @@ def pulse_forward(hwnd: int, move_pulse_ms: int) -> dict[str, Any]:
 def run_move_forward_pulse(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "move_forward_pulse")
-    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
+    raw_move_pulse_ms = action.get("movePulseMs")
+    move_pulse_ms = DEFAULT_MOVE_PULSE_MS if raw_move_pulse_ms is None else int(raw_move_pulse_ms)
     baseline = capture_idle_baseline(hwnd)
     state = pulse_forward(hwnd, move_pulse_ms)
     verification = verify_dynamic_change(
@@ -3368,6 +3496,42 @@ def parse_favor_limit(text: str) -> int | None:
     if not match:
         return None
     return int(match.group(2))
+
+
+def extract_favor_pair(text: str) -> tuple[int, int] | None:
+    normalized = re.sub(r"\s+", "", str(text or ""))
+    matches = re.findall(r"(\d+)\s*/\s*(\d+)", normalized)
+    if not matches:
+        return None
+
+    for left, right in matches:
+        left_value = int(left)
+        right_value = int(right)
+        if right_value in {99, 199, 299, 599} and left_value <= right_value:
+            return left_value, right_value
+
+    left, right = matches[0]
+    left_value = int(left)
+    right_value = int(right)
+    if left_value <= right_value:
+        return left_value, right_value
+    return None
+
+
+def parse_favor_value(text: str) -> int | None:
+    favor_pair = extract_favor_pair(text)
+    if not favor_pair:
+        return None
+    return int(favor_pair[0])
+
+
+def parse_favor_limit(text: str) -> int | None:
+    # Only the value after "/" is the cap used for routing:
+    # 12/99 -> 99, 23/299 -> 299.
+    favor_pair = extract_favor_pair(text)
+    if not favor_pair:
+        return None
+    return int(favor_pair[1])
 
 
 def inspect_gift_chat_threshold(stage_state: dict[str, Any]) -> dict[str, Any]:
@@ -3512,9 +3676,27 @@ def has_clickable_selected_target(
         return True
     if not moving_view:
         return False
+    # Stabilized social-chain rule:
+    # after closing gift/chat panels the world state may briefly lose the
+    # left-top selected-name readback, but if the magnifier is still inside
+    # the verified front interaction area, it is already safe to continue.
+    if is_front_moving_view_candidate(moving_view):
+        return True
     if has_reliable_selected_target(hwnd, stage_state, target_info):
         return True
-    return is_front_moving_view_candidate(moving_view) and has_selected_target(target_info)
+    return has_selected_target(target_info)
+
+
+def has_strict_clickable_selected_target(
+    stage_state: dict[str, Any],
+    moving_view: dict[str, Any] | None,
+) -> bool:
+    stage = str(stage_state.get("stage") or "none")
+    if stage in NPC_READY_STAGES:
+        return True
+    if not moving_view:
+        return False
+    return is_front_moving_view_candidate(moving_view)
 
 
 def normalize_npc_name(text: str) -> str:
@@ -4473,7 +4655,8 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "acquire_npc_target")
     timeout_ms = int(action.get("timeoutMs") or DEFAULT_INTERACT_TIMEOUT_MS)
-    move_pulse_ms = int(action.get("movePulseMs") or DEFAULT_MOVE_PULSE_MS)
+    raw_move_pulse_ms = action.get("movePulseMs")
+    move_pulse_ms = DEFAULT_MOVE_PULSE_MS if raw_move_pulse_ms is None else int(raw_move_pulse_ms)
     scan_interval_ms = int(action.get("scanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS)
     custom_click_points = action.get("clickPoints")
     click_points = [
@@ -4505,7 +4688,7 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     current_target_info = detect_target_threshold(hwnd)
     current_moving_view = find_moving_view_button(hwnd)
     current_stage = current_stage_state["stage"]
-    if has_clickable_selected_target(hwnd, current_stage_state, current_target_info, current_moving_view):
+    if has_strict_clickable_selected_target(current_stage_state, current_moving_view):
         resolved_stage = current_stage if current_stage != "none" else "npc_selected"
         return {
             "id": action_id,
@@ -4538,10 +4721,8 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
             "text": nearby_scan.get("targetText") or "",
             "isSpecialNpc": "<" in str(nearby_scan.get("targetText") or "") and ">" in str(nearby_scan.get("targetText") or ""),
         }
-        if resolved_stage == "none" and has_clickable_selected_target(
-            hwnd,
+        if resolved_stage == "none" and has_strict_clickable_selected_target(
             nearby_stage_state,
-            nearby_target_info,
             nearby_scan.get("movingView"),
         ):
             resolved_stage = "npc_selected"
@@ -4575,11 +4756,13 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         moving_view = find_moving_view_button(hwnd)
         last_stage = stage_state["stage"]
         resolved_stage = last_stage if last_stage != "none" else (
-            "npc_selected" if has_clickable_selected_target(hwnd, stage_state, target_info, moving_view) else "none"
+            "npc_selected" if has_strict_clickable_selected_target(stage_state, moving_view) else "none"
         )
         stage_history.append(resolved_stage)
 
-        if resolved_stage in NPC_READY_STAGES or resolved_stage == "npc_selected":
+        if resolved_stage in NPC_READY_STAGES or (
+            resolved_stage == "npc_selected" and has_strict_clickable_selected_target(stage_state, moving_view)
+        ):
             return {
                 "id": action_id,
                 "title": title,
@@ -4628,7 +4811,7 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         click_attempts += 1
         INPUT_GUARD.guarded_sleep(100, title)
 
-        if click_attempts % len(click_points) == 0:
+        if move_pulse_ms > 0 and click_attempts % len(click_points) == 0:
             move_attempts += 1
             pulse_forward(hwnd, move_pulse_ms)
             INPUT_GUARD.guarded_sleep(80, title)
@@ -4662,6 +4845,88 @@ def run_open_npc_action_menu(hwnd: int, action: dict[str, Any]) -> dict[str, Any
                 "viewAttempts": [],
             },
         }
+
+    if not has_clickable_selected_target(hwnd, stage_state, target_info, moving_view):
+        if bool(action.get("disableReacquire")) or has_selected_target_visual(hwnd):
+            INPUT_GUARD.guarded_sleep(400, title)
+            stage_state = detect_npc_interaction_stage(hwnd)
+            target_info = detect_target_threshold(hwnd)
+            moving_view = find_moving_view_button(hwnd)
+            current_stage = stage_state["stage"]
+            if current_stage in NPC_READY_STAGES:
+                return {
+                    "id": action_id,
+                    "title": title,
+                    "status": "performed",
+                    "detail": f"NPC menu context became available after a short settle at stage {current_stage}",
+                    "input": {
+                        "mode": "open_npc_action_menu",
+                        **collect_npc_stage_input(hwnd, stage_state, target_info["text"]),
+                        "viewAttempts": [],
+                        "resetAttempts": reset_attempts,
+                    },
+                }
+            if not has_clickable_selected_target(hwnd, stage_state, target_info, moving_view):
+                failed_input = {
+                    "mode": "open_npc_action_menu",
+                    **collect_npc_stage_input(hwnd, stage_state, target_info["text"]),
+                    "viewAttempts": [],
+                    "resetAttempts": reset_attempts,
+                }
+                raise ActionExecutionError(
+                    "Selected NPC exists but magnifier is not inside the clickable red-box area",
+                    error_code="NPC_VIEW_NOT_VISIBLE",
+                    failed_step=build_failed_step_payload(
+                        action,
+                        "Fixed social chain keeps the stable view path and will not fall back to scan clicks here",
+                        failed_input,
+                    ),
+                )
+
+    if not has_clickable_selected_target(hwnd, stage_state, target_info, moving_view):
+        reacquire_result = run_acquire_npc_target(
+            hwnd,
+            {
+                "id": f"{action_id}-reacquire" if action_id else "open_npc_action_menu-reacquire",
+                "title": f"{title}_reacquire",
+                "timeoutMs": int(action.get("reacquireTimeoutMs") or 2500),
+                "movePulseMs": DEFAULT_MOVE_PULSE_MS if action.get("reacquireMovePulseMs") is None else int(action.get("reacquireMovePulseMs")),
+                "scanIntervalMs": int(action.get("reacquireScanIntervalMs") or DEFAULT_SCAN_INTERVAL_MS),
+            },
+        )
+        stage_state = {
+            "stage": str(reacquire_result.get("input", {}).get("stage") or "none"),
+            "texts": dict(reacquire_result.get("input", {}).get("stageTexts") or {}),
+        }
+        target_info = {
+            "text": str(reacquire_result.get("input", {}).get("targetText") or ""),
+            "isSpecialNpc": "<" in str(reacquire_result.get("input", {}).get("targetText") or "")
+            and ">" in str(reacquire_result.get("input", {}).get("targetText") or ""),
+        }
+        moving_view = find_moving_view_button(hwnd)
+        current_stage = stage_state["stage"]
+        reset_attempts.append(
+            {
+                "triggered": True,
+                "reason": "reacquire_before_open",
+                "stageAfterReset": current_stage,
+                "targetText": target_info["text"],
+            }
+        )
+
+        if current_stage in NPC_READY_STAGES:
+            return {
+                "id": action_id,
+                "title": title,
+                "status": "performed",
+                "detail": f"NPC menu context became available during reacquire at stage {current_stage}",
+                "input": {
+                    "mode": "open_npc_action_menu",
+                    **collect_npc_stage_input(hwnd, stage_state, target_info["text"]),
+                    "viewAttempts": [],
+                    "resetAttempts": reset_attempts,
+                },
+            }
 
     if has_reliable_selected_target(hwnd, stage_state, target_info) and not moving_view:
         failed_input = {
@@ -4740,8 +5005,13 @@ def run_click_menu_talk(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "click_menu_talk")
     talk_click = click_named_point(hwnd, "talk")
-    INPUT_GUARD.guarded_sleep(180, title)
-    next_stage_state = detect_npc_interaction_stage(hwnd)
+    INPUT_GUARD.guarded_sleep(220, title)
+    next_stage_state = wait_for_any_npc_stage(
+        hwnd,
+        {"small_talk_menu", "small_talk_confirm", "chat_ready", "npc_action_menu"},
+        timeout_ms=max(400, int(action.get("settleTimeoutMs") or 900)),
+        poll_interval_ms=max(80, int(action.get("pollIntervalMs") or 120)),
+    )
     next_stage = next_stage_state["stage"]
 
     return {
@@ -4761,8 +5031,13 @@ def run_click_menu_small_talk(hwnd: int, action: dict[str, Any]) -> dict[str, An
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "click_menu_small_talk")
     small_talk_click = click_named_point(hwnd, "small_talk")
-    INPUT_GUARD.guarded_sleep(180, title)
-    next_stage_state = detect_npc_interaction_stage(hwnd)
+    INPUT_GUARD.guarded_sleep(2000, title)
+    next_stage_state = wait_for_any_npc_stage(
+        hwnd,
+        {"small_talk_confirm", "chat_ready", "small_talk_menu", "npc_action_menu"},
+        timeout_ms=max(400, int(action.get("settleTimeoutMs") or 900)),
+        poll_interval_ms=max(80, int(action.get("pollIntervalMs") or 120)),
+    )
     next_stage = next_stage_state["stage"]
 
     return {
@@ -4781,20 +5056,68 @@ def run_click_menu_small_talk(hwnd: int, action: dict[str, Any]) -> dict[str, An
 def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "confirm_small_talk_entry")
-    confirm_click = click_named_point(hwnd, "small_talk_confirm_dialog")
-    INPUT_GUARD.guarded_sleep(350, title)
-    next_stage_state = detect_npc_interaction_stage(hwnd)
+    stage_before = wait_for_any_npc_stage(
+        hwnd,
+        {"small_talk_confirm", "chat_ready", "small_talk_menu", "npc_action_menu"},
+        timeout_ms=max(1200, int(action.get("entryTimeoutMs") or 3200)),
+        poll_interval_ms=max(120, int(action.get("entryPollIntervalMs") or 180)),
+    )
+    confirm_dialog_click = None
+    if stage_before["stage"] == "small_talk_confirm":
+        confirm_dialog_click = click_named_point(hwnd, "small_talk_confirm_dialog")
+        INPUT_GUARD.guarded_sleep(2000, title)
+
+    after_confirm_state = wait_for_any_npc_stage(
+        hwnd,
+        {"chat_ready", "small_talk_confirm", "small_talk_menu", "npc_action_menu"},
+        timeout_ms=max(1200, int(action.get("postConfirmTimeoutMs") or 3600)),
+        poll_interval_ms=max(120, int(action.get("postConfirmPollIntervalMs") or 180)),
+    )
+
+    confirm_click = None
+    if after_confirm_state["stage"] == "chat_ready":
+        confirm_click = click_named_point(hwnd, "chat_input")
+        INPUT_GUARD.guarded_sleep(320, title)
+    else:
+        raise ActionExecutionError(
+            "Small-talk confirm did not advance into the real chat page before input click",
+            error_code="NPC_CHAT_CONFIRM_NOT_REACHED",
+            failed_step=build_failed_step_payload(
+                action,
+                "Chat input is blocked until the confirm dialog is clicked and chat_ready is visible",
+                {
+                    "mode": "confirm_small_talk_entry",
+                    "stageBefore": stage_before["stage"],
+                    "stageAfterConfirm": after_confirm_state["stage"],
+                    **collect_npc_stage_input(hwnd, after_confirm_state),
+                    **({"confirmDialogClick": confirm_dialog_click} if confirm_dialog_click else {}),
+                },
+            ),
+        )
+
+    next_stage_state = wait_for_any_npc_stage(
+        hwnd,
+        {"chat_ready", "small_talk_confirm", "small_talk_menu", "npc_action_menu"},
+        timeout_ms=max(500, int(action.get("settleTimeoutMs") or 1200)),
+        poll_interval_ms=max(80, int(action.get("pollIntervalMs") or 120)),
+    )
     next_stage = next_stage_state["stage"]
 
     return {
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": f"Clicked small talk confirm and observed {next_stage or 'none'}",
+        "detail": (
+            f"Confirmed small talk from {stage_before['stage'] or 'none'} "
+            f"and observed {next_stage or 'none'}"
+        ),
         "input": {
             "mode": "confirm_small_talk_entry",
+            "stageBefore": stage_before["stage"],
+            "stageAfterConfirm": after_confirm_state["stage"],
             **collect_npc_stage_input(hwnd, next_stage_state),
-            "click": confirm_click,
+            **({"confirmDialogClick": confirm_dialog_click} if confirm_dialog_click else {}),
+            **({"click": confirm_click} if confirm_click else {}),
         },
     }
 
@@ -4837,7 +5160,12 @@ def run_click_menu_gift(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 def run_inspect_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "inspect_gift_chat_threshold")
-    stage_state = detect_npc_interaction_stage(hwnd)
+    stage_state = wait_for_npc_stage(
+        hwnd,
+        "gift_screen",
+        timeout_ms=max(300, int(action.get("settleTimeoutMs") or 900)),
+        poll_interval_ms=max(80, int(action.get("pollIntervalMs") or 120)),
+    )
     if stage_state["stage"] != "gift_screen":
         raise RuntimeError(
             "inspect_gift_chat_threshold requires gift_screen. "
@@ -4909,8 +5237,11 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
     threshold_info = inspect_gift_chat_threshold(stage_state)
     expected_policy = str(action.get("giftPolicy") or "").strip()
     gift_policy = expected_policy or str(threshold_info["giftPolicy"])
-    post_delay_ms = max(200, int(action.get("postDelayMs") or 300))
+    post_delay_ms = max(200, int(action.get("postDelayMs") or 5000))
     repeat_submit_cd_ms = max(0, int(action.get("repeatSubmitCdMs") or 2000))
+    select_detail_delay_ms = max(200, int(action.get("selectDetailDelayMs") or 2000))
+    first_submit_delay_ms = max(200, int(action.get("firstSubmitDelayMs") or 5000))
+    second_submit_delay_ms = max(200, int(action.get("secondSubmitDelayMs") or 5000))
 
     if gift_policy == "chat_direct":
         close_click = click_named_point(hwnd, "close_panel")
@@ -4935,21 +5266,25 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
         gift_rounds: list[dict[str, Any]] = []
         current_stage_state = stage_state
         initial_select_click = click_named_point(hwnd, "gift_first_slot")
-        INPUT_GUARD.guarded_sleep(150, title)
+        INPUT_GUARD.guarded_sleep(select_detail_delay_ms, title)
+        reselect_click = click_named_point(hwnd, "gift_first_slot")
+        INPUT_GUARD.guarded_sleep(select_detail_delay_ms, title)
         current_stage_state = detect_npc_interaction_stage(hwnd)
         for round_index in range(2):
             before_panel_text = str(current_stage_state["texts"].get("gift_panel") or "")
             favor_before = parse_favor_value(before_panel_text)
             submit_click = click_named_point(hwnd, "gift_submit")
-            INPUT_GUARD.guarded_sleep(450, title)
+            INPUT_GUARD.guarded_sleep(first_submit_delay_ms if round_index == 0 else second_submit_delay_ms, title)
             current_stage_state = detect_npc_interaction_stage(hwnd)
             gift_rounds.append(
                 {
                     "roundIndex": round_index + 1,
                     "selectClick": initial_select_click if round_index == 0 else None,
+                    "reselectClick": reselect_click if round_index == 0 else None,
                     "submitClick": submit_click,
                     "favorBefore": favor_before,
                     "favorAfter": parse_favor_value(current_stage_state["texts"].get("gift_panel") or ""),
+                    "postSubmitDelayMs": first_submit_delay_ms if round_index == 0 else second_submit_delay_ms,
                 }
             )
             if round_index == 0 and repeat_submit_cd_ms > 0:
@@ -4962,7 +5297,7 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
             "id": action_id,
             "title": title,
             "status": "performed",
-            "detail": "Selected the first gift once, submitted twice, and closed the gift screen",
+            "detail": "Selected the first gift twice, submitted twice, and closed the gift screen",
             "input": {
                 "mode": "resolve_gift_chat_threshold",
                 **collect_npc_stage_input(hwnd, next_stage_state),
@@ -4970,6 +5305,9 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
                 "giftPolicy": gift_policy,
                 "closeClick": close_click,
                 "repeatSubmitCdMs": repeat_submit_cd_ms,
+                "selectDetailDelayMs": select_detail_delay_ms,
+                "firstSubmitDelayMs": first_submit_delay_ms,
+                "secondSubmitDelayMs": second_submit_delay_ms,
                 "giftRounds": gift_rounds,
             },
         }
@@ -5307,50 +5645,6 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
     }
 
 
-def run_close_current_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
-    action_id = str(action.get("id") or "")
-    title = str(action.get("title") or "close_current_panel")
-    before_stage_state = detect_npc_interaction_stage(hwnd)
-    before_stage = before_stage_state["stage"]
-    closable_stages = {"chat_ready", "gift_screen", "trade_screen", "npc_action_menu", "small_talk_menu", "small_talk_confirm"}
-
-    if before_stage not in closable_stages:
-        return {
-            "id": action_id,
-            "title": title,
-            "status": "performed",
-            "detail": f"No closable panel at stage {before_stage or 'none'}",
-            "input": {
-                "mode": "close_current_panel",
-                **collect_npc_stage_input(hwnd, before_stage_state),
-                "beforeStage": before_stage,
-                "closeTriggered": False,
-            },
-        }
-
-    exit_panel(hwnd)
-    after_stage_state = detect_npc_interaction_stage(hwnd)
-    after_stage = after_stage_state["stage"]
-    if after_stage == before_stage and after_stage in closable_stages:
-        raise RuntimeError(
-            "close_current_panel did not leave the current panel. "
-            f"Stage remained: {after_stage or 'none'}"
-        )
-
-    return {
-        "id": action_id,
-        "title": title,
-        "status": "performed",
-        "detail": f"Closed panel from {before_stage} to {after_stage or 'none'}",
-        "input": {
-            "mode": "close_current_panel",
-            **collect_npc_stage_input(hwnd, after_stage_state),
-            "beforeStage": before_stage,
-            "closeTriggered": True,
-        },
-    }
-
-
 # Stable runtime override: hawking submit should observe state, not hard-block the script.
 def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
@@ -5384,7 +5678,6 @@ def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# Stable runtime override: fixed-button panel close must not block the main flow.
 def run_close_current_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "close_current_panel")
@@ -5406,9 +5699,22 @@ def run_close_current_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]
             },
         }
 
-    exit_panel(hwnd)
+    if before_stage == "small_talk_confirm":
+        close_click = click_named_point(hwnd, "small_talk_cancel_dialog")
+        INPUT_GUARD.guarded_sleep(300, title)
+    elif before_stage == "chat_ready":
+        close_click = click_named_point(hwnd, "chat_exit")
+        INPUT_GUARD.guarded_sleep(300, title)
+    else:
+        close_click = exit_panel(hwnd)
     after_stage_state = detect_npc_interaction_stage(hwnd)
     after_stage = after_stage_state["stage"]
+    if after_stage == before_stage and after_stage in closable_stages:
+        raise RuntimeError(
+            "close_current_panel did not leave the current panel. "
+            f"Stage remained: {after_stage or 'none'}"
+        )
+
     return {
         "id": action_id,
         "title": title,
@@ -5419,6 +5725,7 @@ def run_close_current_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]
             **collect_npc_stage_input(hwnd, after_stage_state),
             "beforeStage": before_stage,
             "closeTriggered": True,
+            "click": close_click,
         },
     }
 

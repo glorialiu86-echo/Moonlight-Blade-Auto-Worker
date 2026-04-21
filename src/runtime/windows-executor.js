@@ -327,29 +327,6 @@ export function createFixedSocialApproachActions(stageKey = "social_warm") {
   ];
 }
 
-export function createFixedSocialTradeActions(options = {}) {
-  const prefix = options.idPrefix || "social-trade";
-  const steps = [];
-  if (options.includeAcquire !== false) {
-    steps.push(createAcquireNpcTargetAction(`${prefix}-1`, "锁定路人目标", {
-      timeoutMs: 5000,
-      movePulseMs: 0,
-      scanIntervalMs: 180
-    }));
-  }
-  steps.push(createOpenNpcActionMenuAction(`${prefix}-2`, "拉起路人交互菜单"));
-  steps.push(createWorkerAction(`${prefix}-3`, "打开交易页", "click_menu_trade"));
-  steps.push(createWorkerAction(`${prefix}-4`, "切到左侧货栏", "trade_select_left_item_tab"));
-  steps.push(createWorkerAction(`${prefix}-5`, "选中左侧货物", "trade_select_left_item"));
-  steps.push(createWorkerAction(`${prefix}-6`, "左侧货物上架", "trade_left_item_up_shelf"));
-  steps.push(createWorkerAction(`${prefix}-7`, "选中右侧支付物", "trade_select_right_money_slot"));
-  steps.push(createWorkerAction(`${prefix}-8`, "调整支付数量", "trade_scale_quantity"));
-  steps.push(createWorkerAction(`${prefix}-9`, "右侧支付物上架", "trade_right_item_up_shelf"));
-  steps.push(createWorkerAction(`${prefix}-10`, "提交当前交易", "trade_submit"));
-  steps.push(createCloseCurrentPanelAction(`${prefix}-11`));
-  return steps;
-}
-
 export function createFixedSocialGiftActions(options = {}) {
   const prefix = options.idPrefix || "social-gift";
   const steps = [];

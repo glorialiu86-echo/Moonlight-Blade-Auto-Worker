@@ -157,9 +157,7 @@ function renderAssistantMessage(message) {
   const interpretationBlock = node.querySelector('[data-block="interpretation"]');
   const thinkingBlock = node.querySelector('[data-block="thinking"]');
   const actionBlock = node.querySelector('[data-block="actions"]');
-  const recoveryBlock = node.querySelector('[data-block="recovery"]');
   const interpretationText = node.querySelector(".message-interpretation");
-  const recoveryText = node.querySelector(".message-recovery");
   const thinkingList = node.querySelector(".thinking-list");
   const actionList = node.querySelector(".action-list");
 
@@ -189,9 +187,6 @@ function renderAssistantMessage(message) {
   } else {
     actionBlock.hidden = true;
   }
-
-  recoveryBlock.hidden = true;
-  recoveryText.textContent = "";
 
   return node;
 }

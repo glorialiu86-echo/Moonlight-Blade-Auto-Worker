@@ -36,11 +36,11 @@ function verifySocialIntent(serverSource) {
     "social_dark instructionLabel is not aligned with the current money-chain goal"
   );
   invariant(
-    serverSource.includes('const NPC_CHAT_MAX_ROUNDS = 10;'),
+    serverSource.includes("const NPC_CHAT_MAX_ROUNDS = 10;"),
     "NPC_CHAT_MAX_ROUNDS must stay at 10"
   );
   invariant(
-    serverSource.includes('你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？'),
+    serverSource.includes("你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？"),
     "Fixed first-line social_warm opening is missing"
   );
 }
@@ -64,7 +64,7 @@ function verifyGiftPolicy(serverSource, workerSource) {
   );
 }
 
-function verifyFailureVisibility(serverSource, debugSource) {
+function verifyFailureVisibility(serverSource, debugSource, debugHtmlSource) {
   invariant(
     serverSource.includes("async function appendFailureRescueMessage"),
     "appendFailureRescueMessage must exist"
@@ -74,8 +74,27 @@ function verifyFailureVisibility(serverSource, debugSource) {
     "Rescue messages must not expose recoveryLine"
   );
   invariant(
-    debugSource.includes("recoveryBlock.hidden = true;"),
-    "debug frontend must keep recoveryLine hidden"
+    !debugSource.includes("recoveryText") && !debugSource.includes("recoveryBlock"),
+    "debug frontend must not keep a second recovery owner in debug.js"
+  );
+  invariant(
+    !debugHtmlSource.includes('data-block="recovery"') && !debugHtmlSource.includes("message-recovery"),
+    "debug frontend must not render a separate recovery block"
+  );
+}
+
+function verifyNoDirtyOwners(runtimeSource, workerSource) {
+  invariant(
+    !runtimeSource.includes("createFixedSocialTradeActions"),
+    "Unused fixed social trade entry must be removed from runtime"
+  );
+  invariant(
+    !workerSource.includes("retarget_social_target"),
+    "Unused retarget_social_target owner must be removed from worker"
+  );
+  invariant(
+    !workerSource.includes("recover_front_target_visibility"),
+    "Unused recover_front_target_visibility owner must be removed from worker"
   );
 }
 
@@ -84,13 +103,13 @@ function verifyRuntimeDoc(runtimeDoc) {
     "状态：执行完成",
     "social_warm",
     "social_dark",
-    "第一句固定发：",
+    "第一轮固定开场白",
     "你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？",
-    "前 `5` 轮：正常问搞钱门路。",
-    "后 `5` 轮：黑化追问",
-    "`99`：不送礼，直接聊天。",
-    "其他一律按高门槛处理，连续送 `10` 个礼物。",
-    "任何失败都不再静默吞掉"
+    "前 `5` 轮按“正常搞钱”目标聊",
+    "后 `5` 轮按“黑化搞钱”目标聊",
+    "`99`：不送礼，直接聊",
+    "其余所有上限（含 `199 / 299 / 499 / 599`）：连续送 `10` 个礼物再聊",
+    "失败时只显示 LLM 生成的“救救我”类内容"
   ];
 
   requiredSnippets.forEach((snippet) => {
@@ -103,13 +122,17 @@ export async function loadFixedScriptArtifacts(projectRoot = process.cwd()) {
     serverPath: path.resolve(projectRoot, "src/server/index.js"),
     workerPath: path.resolve(projectRoot, "scripts/windows_input_worker.py"),
     debugPath: path.resolve(projectRoot, "public/debug.js"),
-    runtimeDocPath: path.resolve(projectRoot, "docs/specs/fixed-script-detailed-runtime-flow.md")
+    debugHtmlPath: path.resolve(projectRoot, "public/debug.html"),
+    runtimePath: path.resolve(projectRoot, "src/runtime/windows-executor.js"),
+    runtimeDocPath: path.resolve(projectRoot, "docs/specs/fixed-script-automation-flow.md")
   };
 
-  const [serverSource, workerSource, debugSource, runtimeDoc] = await Promise.all([
+  const [serverSource, workerSource, debugSource, debugHtmlSource, runtimeSource, runtimeDoc] = await Promise.all([
     readFile(files.serverPath, "utf8"),
     readFile(files.workerPath, "utf8"),
     readFile(files.debugPath, "utf8"),
+    readFile(files.debugHtmlPath, "utf8"),
+    readFile(files.runtimePath, "utf8"),
     readFile(files.runtimeDocPath, "utf8")
   ]);
 
@@ -118,6 +141,8 @@ export async function loadFixedScriptArtifacts(projectRoot = process.cwd()) {
     serverSource,
     workerSource,
     debugSource,
+    debugHtmlSource,
+    runtimeSource,
     runtimeDoc
   };
 }
@@ -128,7 +153,8 @@ export async function checkFixedScriptConfig(projectRoot = process.cwd()) {
   verifyStageRounds(artifacts.serverSource);
   verifySocialIntent(artifacts.serverSource);
   verifyGiftPolicy(artifacts.serverSource, artifacts.workerSource);
-  verifyFailureVisibility(artifacts.serverSource, artifacts.debugSource);
+  verifyFailureVisibility(artifacts.serverSource, artifacts.debugSource, artifacts.debugHtmlSource);
+  verifyNoDirtyOwners(artifacts.runtimeSource, artifacts.workerSource);
   verifyRuntimeDoc(artifacts.runtimeDoc);
 
   return {

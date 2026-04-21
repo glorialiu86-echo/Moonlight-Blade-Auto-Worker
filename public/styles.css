@@ -542,8 +542,7 @@ textarea:focus {
 .chat-meta,
 .message-meta,
 .message-perception,
-.message-interpretation,
-.message-recovery {
+.message-interpretation {
   margin: 0;
   line-height: 1.75;
   white-space: pre-wrap;
@@ -552,8 +551,7 @@ textarea:focus {
 .chat-meta,
 .message-meta,
 .message-perception,
-.message-interpretation,
-.message-recovery {
+.message-interpretation {
   color: var(--muted);
 }
 

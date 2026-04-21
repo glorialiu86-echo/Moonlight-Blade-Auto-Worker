@@ -190,11 +190,8 @@ function renderAssistantMessage(message) {
     actionBlock.hidden = true;
   }
 
-  if (message.recoveryLine) {
-    recoveryText.textContent = message.recoveryLine;
-  } else {
-    recoveryBlock.hidden = true;
-  }
+  recoveryBlock.hidden = true;
+  recoveryText.textContent = "";
 
   return node;
 }

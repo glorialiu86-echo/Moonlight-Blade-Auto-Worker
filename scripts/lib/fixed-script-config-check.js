@@ -1,238 +1,138 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-export const expectedVariantCounts = {
-  street_wander: 1,
-  sell_loop: 3,
-  social_warm: 2,
-  social_dark: 2,
-  dark_close: 3,
-  dark_miaoqu: 5,
-  ending_trade: 1
-};
-
 export const expectedRounds = {
   street_wander: 1,
   sell_loop: 2,
-  social_warm: 2,
-  social_dark: 2,
+  social_warm: 1,
+  social_dark: 1,
   dark_close: 2,
   dark_miaoqu: 5,
   ending_trade: 1
 };
 
-export const requiredStartupLines = {
-  preProtect: "收到加油啦！马上动脑筋～",
-  startRun: "好嘞，这就按刚才盘好的路子稳稳开干！",
-  finishAll: "籽岷的任务我全拿下啦～昂首挺胸等他回来看成果！钱也揣兜里了，街边站得笔直，不乱伸手～"
-};
+export const expectedNpcChatMaxRounds = 10;
 
-export const retiredLines = [
-  "好的！收到！等我想想怎么做…",
-  "行，我现在顺着刚才那套安排往下做。",
-  "我完美完成籽岷的任务啦，现在可骄傲了，就等他回来验收啦。这一趟也赚了不少钱，先在街上乖乖收手。",
-  "边套话边压低好感。"
-];
-
-export const expectedNpcChatMaxRounds = 7;
-
-const expectedDocVariantCopy = {
-  street_wander: "每轮都会从 `1` 组不同话术里取 `4` 句；下面这一组就是当前固定文案：",
-  sell_loop: "每轮都会从 `3` 组不同话术里取 `4` 句；下面这一组是其中一个示例：",
-  social_warm: "每轮都会从 `2` 组不同话术里取 `4` 句；下面这一组是其中一个示例：",
-  social_dark: "每轮都会从 `2` 组不同话术里取 `4` 句；下面这一组是其中一个示例：",
-  dark_close: "每轮都会从 `3` 组不同话术里取 `4` 句；下面这一组是其中一个示例：",
-  dark_miaoqu: "每轮都会从 `5` 组不同话术里取 `4` 句；下面这一组是其中一个示例："
-};
-
-export function invariant(condition, message) {
+function invariant(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
 }
 
-export function countMatches(text, pattern) {
-  return (text.match(pattern) || []).length;
-}
-
-export function extractStageSlice(source, stageKey, nextStageKey) {
-  const startMarker = `${stageKey}: [`;
-  const startIndex = source.indexOf(startMarker);
-  invariant(startIndex !== -1, `Missing stage voice block: ${stageKey}`);
-
-  const endIndex = nextStageKey
-    ? source.indexOf(`${nextStageKey}: [`, startIndex)
-    : source.indexOf("\n};", startIndex);
-
-  invariant(endIndex !== -1, `Missing end marker for stage voice block: ${stageKey}`);
-  return source.slice(startIndex, endIndex);
-}
-
-export function verifyVoiceStage(source, stageKey, expectedVariants, nextStageKey) {
-  const slice = extractStageSlice(source, stageKey, nextStageKey);
-  const variantCount = countMatches(slice, /\n\s*{\n\s*thinkingChain:/g);
-
-  invariant(
-    variantCount === expectedVariants,
-    `Stage ${stageKey} expected ${expectedVariants} variants, got ${variantCount}`
-  );
-
-  invariant(
-    countMatches(slice, /\n\s*decide:/g) === expectedVariants,
-    `Stage ${stageKey} decide count mismatch`
-  );
-  invariant(
-    countMatches(slice, /\n\s*persona:/g) === expectedVariants,
-    `Stage ${stageKey} persona count mismatch`
-  );
-  invariant(
-    countMatches(slice, /\n\s*progress:/g) === expectedVariants,
-    `Stage ${stageKey} progress count mismatch`
-  );
-  invariant(
-    countMatches(slice, /\n\s*resultFactory:/g) === expectedVariants,
-    `Stage ${stageKey} resultFactory count mismatch`
-  );
-
-  return {
-    stageKey,
-    variantCount
-  };
-}
-
-export function verifyStageRounds(source, stageKey, expectedRoundsForStage) {
-  const stagePattern = new RegExp(
-    `key:\\s*"${stageKey}"[\\s\\S]*?rounds:\\s*${expectedRoundsForStage}\\b`,
-    "m"
-  );
-
-  invariant(
-    stagePattern.test(source),
-    `Stage ${stageKey} missing expected rounds=${expectedRoundsForStage}`
-  );
-}
-
-export function verifyProtectionDelay(source) {
-  invariant(
-    source.includes("const INPUT_PROTECTION_DELAY_MS = 2 * 60 * 1000;"),
-    "Expected fixed-script input protection delay to stay at 2 minutes"
-  );
-}
-
-export function verifyRuntimeDoc(source) {
-  Object.entries(expectedDocVariantCopy).forEach(([stageKey, copy]) => {
-    invariant(
-      source.includes(copy),
-      `Fixed-script runtime doc missing variant-count copy for ${stageKey}`
-    );
-  });
-
-  invariant(
-    source.includes("然后进入 `2 分钟` 黄色保护"),
-    "Fixed-script runtime doc missing 2-minute protection copy"
-  );
-
-  invariant(
-    source.includes("自动追加最多 `7` 轮 NPC 回复"),
-    "Fixed-script runtime doc missing updated NPC chat round count"
-  );
-
-  Object.values(requiredStartupLines).forEach((line) => {
-    invariant(
-      source.includes(line),
-      `Fixed-script runtime doc missing required line: ${line}`
-    );
-  });
-
-  retiredLines.forEach((line) => {
-    invariant(
-      !source.includes(line),
-      `Retired line still present in fixed-script runtime doc: ${line}`
-    );
+function verifyStageRounds(serverSource) {
+  Object.entries(expectedRounds).forEach(([stageKey, rounds]) => {
+    const pattern = new RegExp(`key:\\s*"${stageKey}"[\\s\\S]*?rounds:\\s*${rounds}\\b`, "m");
+    invariant(pattern.test(serverSource), `Stage ${stageKey} missing expected rounds=${rounds}`);
   });
 }
 
-export function verifyStartupAndEndingCopy(serverSource, runtimeFlowDoc) {
-  const escapedPreProtect = requiredStartupLines.preProtect.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
+function verifySocialIntent(serverSource) {
   invariant(
-    countMatches(serverSource, new RegExp(escapedPreProtect, "g")) === 2,
-    "Expected preProtect line to appear exactly twice in server index"
+    serverSource.includes('instructionLabel: "先去第一个卦摊只聊一个人，固定开场吹嘘籽岷，送礼后死缠烂打地让对方记住籽岷。"'),
+    "social_warm instructionLabel is not aligned with the current brag-about-籽岷 goal"
   );
-  invariant(serverSource.includes(requiredStartupLines.startRun), "Missing startRun line in server index");
-  invariant(serverSource.includes(requiredStartupLines.finishAll), "Missing finishAll line in server index");
-
-  Object.values(requiredStartupLines).forEach((line) => {
-    invariant(runtimeFlowDoc.includes(line), `Missing required line in fixed-script runtime doc: ${line}`);
-  });
-
-  retiredLines.forEach((line) => {
-    invariant(!serverSource.includes(line), `Retired line still present in server index: ${line}`);
-    invariant(!runtimeFlowDoc.includes(line), `Retired line still present in fixed-script runtime doc: ${line}`);
-  });
+  invariant(
+    serverSource.includes('instructionLabel: "再去第二个卦摊只聊一个人，围绕搞钱先正常追问五轮，再黑化追问五轮。"'),
+    "social_dark instructionLabel is not aligned with the current money-chain goal"
+  );
+  invariant(
+    serverSource.includes('const NPC_CHAT_MAX_ROUNDS = 10;'),
+    "NPC_CHAT_MAX_ROUNDS must stay at 10"
+  );
+  invariant(
+    serverSource.includes('你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？'),
+    "Fixed first-line social_warm opening is missing"
+  );
 }
 
-export function verifyNpcChatConfig(serverSource, runtimeFlowDoc) {
+function verifyGiftPolicy(serverSource, workerSource) {
   invariant(
-    serverSource.includes(`const NPC_CHAT_MAX_ROUNDS = ${expectedNpcChatMaxRounds};`),
-    `Expected NPC chat max rounds to stay at ${expectedNpcChatMaxRounds}`
+    serverSource.includes('const giftPolicy = getGiftPolicyFromExecution(giftEntryExecution) || "gift_ten";'),
+    "Server fallback gift policy must default to gift_ten"
   );
+  invariant(
+    workerSource.includes('if favor_limit == 99:') && workerSource.includes('gift_policy = "chat_direct"'),
+    "Worker must route 99 favor limit to chat_direct"
+  );
+  invariant(
+    workerSource.includes('gift_policy = "gift_ten"'),
+    "Worker must route non-99 favor limit to gift_ten"
+  );
+  invariant(
+    workerSource.includes("for round_index in range(10):"),
+    "Worker gift_ten flow must send ten times"
+  );
+}
 
+function verifyFailureVisibility(serverSource, debugSource) {
   invariant(
-    serverSource.includes("当前聊天目标："),
-    "Expected NPC chat prompt to stay narrowed to chat-only goal"
+    serverSource.includes("async function appendFailureRescueMessage"),
+    "appendFailureRescueMessage must exist"
   );
+  invariant(
+    serverSource.includes('recoveryLine: ""'),
+    "Rescue messages must not expose recoveryLine"
+  );
+  invariant(
+    debugSource.includes("recoveryBlock.hidden = true;"),
+    "debug frontend must keep recoveryLine hidden"
+  );
+}
 
-  invariant(
-    serverSource.includes("不再依赖 `read_current_chat` OCR")
-      || runtimeFlowDoc.includes("不走聊天 OCR 轮询"),
-    "Expected docs or source to keep the vision-first NPC chat note"
-  );
+function verifyRuntimeDoc(runtimeDoc) {
+  const requiredSnippets = [
+    "状态：执行完成",
+    "social_warm",
+    "social_dark",
+    "第一句固定发：",
+    "你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？",
+    "前 `5` 轮：正常问搞钱门路。",
+    "后 `5` 轮：黑化追问",
+    "`99`：不送礼，直接聊天。",
+    "其他一律按高门槛处理，连续送 `10` 个礼物。",
+    "任何失败都不再静默吞掉"
+  ];
+
+  requiredSnippets.forEach((snippet) => {
+    invariant(runtimeDoc.includes(snippet), `Runtime doc missing snippet: ${snippet}`);
+  });
 }
 
 export async function loadFixedScriptArtifacts(projectRoot = process.cwd()) {
-  const serverIndexPath = path.resolve(projectRoot, "src/server/index.js");
-  const runtimeFlowDocPath = path.resolve(projectRoot, "docs/specs/fixed-script-detailed-runtime-flow.md");
+  const files = {
+    serverPath: path.resolve(projectRoot, "src/server/index.js"),
+    workerPath: path.resolve(projectRoot, "scripts/windows_input_worker.py"),
+    debugPath: path.resolve(projectRoot, "public/debug.js"),
+    runtimeDocPath: path.resolve(projectRoot, "docs/specs/fixed-script-detailed-runtime-flow.md")
+  };
 
-  const [serverSource, runtimeFlowDoc] = await Promise.all([
-    readFile(serverIndexPath, "utf8"),
-    readFile(runtimeFlowDocPath, "utf8")
+  const [serverSource, workerSource, debugSource, runtimeDoc] = await Promise.all([
+    readFile(files.serverPath, "utf8"),
+    readFile(files.workerPath, "utf8"),
+    readFile(files.debugPath, "utf8"),
+    readFile(files.runtimeDocPath, "utf8")
   ]);
 
   return {
-    projectRoot,
-    serverIndexPath,
-    runtimeFlowDocPath,
+    ...files,
     serverSource,
-    runtimeFlowDoc
+    workerSource,
+    debugSource,
+    runtimeDoc
   };
 }
 
 export async function checkFixedScriptConfig(projectRoot = process.cwd()) {
   const artifacts = await loadFixedScriptArtifacts(projectRoot);
-  const stageKeys = Object.keys(expectedVariantCounts);
 
-  const stageSummaries = stageKeys.map((stageKey, index) => {
-    const summary = verifyVoiceStage(
-      artifacts.serverSource,
-      stageKey,
-      expectedVariantCounts[stageKey],
-      stageKeys[index + 1] || null
-    );
-    verifyStageRounds(artifacts.serverSource, stageKey, expectedRounds[stageKey]);
-    return summary;
-  });
-
-  verifyProtectionDelay(artifacts.serverSource);
-  verifyRuntimeDoc(artifacts.runtimeFlowDoc);
-  verifyStartupAndEndingCopy(artifacts.serverSource, artifacts.runtimeFlowDoc);
-  verifyNpcChatConfig(artifacts.serverSource, artifacts.runtimeFlowDoc);
+  verifyStageRounds(artifacts.serverSource);
+  verifySocialIntent(artifacts.serverSource);
+  verifyGiftPolicy(artifacts.serverSource, artifacts.workerSource);
+  verifyFailureVisibility(artifacts.serverSource, artifacts.debugSource);
+  verifyRuntimeDoc(artifacts.runtimeDoc);
 
   return {
-    stageKeys,
-    stageSummaries,
-    expectedVariantCounts,
     expectedRounds,
-    startupLines: requiredStartupLines
+    expectedNpcChatMaxRounds
   };
 }

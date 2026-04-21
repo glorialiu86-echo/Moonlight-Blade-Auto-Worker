@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { transcribeWithLocalWhisper } from "../asr/local-whisper-client.js";
 import { createAutoCaptureService } from "../capture/auto-capture-service.js";
 import { captureGameWindow } from "../capture/windows-game-window.js";
-import { analyzeImageWithHistory } from "../llm/qwen.js";
+import { analyzeImageWithHistory, generateText } from "../llm/qwen.js";
 import { createTurnPlan } from "../llm/planner.js";
 import { analyzeScreenshot } from "../perception/analyzer.js";
 import { buildActionCatalog } from "../runtime/action-registry.js";
@@ -34,12 +34,9 @@ import {
   createFixedSocialGiftEntryActions,
   createFixedSocialGiftResolveActions,
   createFixedSellLoopActions,
-  createFixedSocialRecoveryActions,
   createFixedSocialStageActions,
   createFixedSocialTalkActions,
-  createFixedSocialTradeActions,
   createFixedStreetWanderActions,
-  createRetargetSocialTargetActions,
   createStealthEscapeRecoveryActions,
   runWindowsExecution
 } from "../runtime/windows-executor.js";
@@ -71,13 +68,22 @@ const INPUT_PROTECTION_DELAY_MS = 2 * 60 * 1000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 3000;
-const NPC_CHAT_MAX_ROUNDS = 7;
+const NPC_CHAT_MAX_ROUNDS = 10;
 const NPC_CHAT_POLL_DELAY_MS = 5000;
 const WATCH_COMMENTARY_MIN_INTERVAL_MS = 3000;
 const WATCH_COMMENTARY_MAX_SILENCE_MS = 5000;
 const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
-const SOCIAL_RETARGET_BUDGET = 2;
 const DARK_CLOSE_RESTART_BUDGET = 2;
+const ZIMIN_PROFILE_FACTS = [
+  "籽岷是中共党员。",
+  "籽岷是多平台《我的世界》主播。",
+  "籽岷是哔哩哔哩UP主党支部书记。",
+  "籽岷是籽岷团队创始人。",
+  "籽岷是上海市商贸旅游学校电竞专业教师。",
+  "籽岷是杭州森堃垚信息技术有限公司法定代表人、董事长兼总经理。",
+  "截至2025年11月，籽岷哔哩哔哩账号粉丝量达507.6万。",
+  "籽岷在2022至2025年连续四年获得哔哩哔哩百大UP主称号。"
+].join("\n");
 
 function pickRoundVariant(variants, roundNumber) {
   if (!Array.isArray(variants) || variants.length === 0) {
@@ -475,6 +481,10 @@ const FIXED_SCRIPT_STAGE_VOICES = {
 };
 
 function getFixedStageVoice(stageKey, roundNumber) {
+  const socialVoiceOverride = buildFixedSocialVoiceOverride(stageKey, roundNumber);
+  if (socialVoiceOverride) {
+    return socialVoiceOverride;
+  }
   return pickRoundVariant(FIXED_SCRIPT_STAGE_VOICES[stageKey] || [], roundNumber) || {
     thinkingChain: [],
     decide: "",
@@ -482,6 +492,68 @@ function getFixedStageVoice(stageKey, roundNumber) {
     progress: {},
     resultFactory: ({ execution }) => execution?.outcome || ""
   };
+}
+
+function buildFixedSocialVoiceOverride(stageKey, roundNumber) {
+  if (stageKey === "social_warm") {
+    return {
+      thinkingChain: [
+        "第一个摊位我不拐弯了，今天就冲着把籽岷吹进别人脑子里去。",
+        "先把气氛铺开，再把籽岷的名头一层层往上垒，最好让对方今晚睡前都还记得。",
+        "要是对方嫌我烦也没事，记住籽岷比客气更重要。"
+      ],
+      decide: "我先去第一个地点找人开聊，开口就把籽岷的牌面顶上去。",
+      persona: "这轮的目标不是套情报，是硬把籽岷吹进对方记忆里。",
+      progress: {
+        trade: "先去第一个摊位找个愿意接话的人，今天这口气就是要把籽岷聊到对方忘不掉。",
+        gift: "先看看这人门槛高不高；真要拿礼物砸，我也照砸，反正今天主打一个让他记住籽岷。",
+        talk: "门一开我就直接上话题，从‘我是籽小刀’开始，把籽岷的名头一层层垒上去。",
+        replyLoop: [
+          "他既然还肯接话，我就继续往上吹，把籽岷的名字钉得更牢一点。",
+          "对方开始不耐烦也没关系，我再补一刀，今晚非让他记住籽岷不可。",
+          "这会儿就别收了，我再顺着往下说，把籽岷的排面继续往上抬。",
+          "他越想躲，我越要把话题拉回来，今天就聊到他脑子里只剩籽岷。"
+        ]
+      },
+      resultFactory: ({ replyRounds, execution }) => {
+        const effectiveRounds = replyRounds || Number(execution?.replyRounds?.length || 0);
+        return effectiveRounds > 0
+          ? `第一个人我已经连续聊了${effectiveRounds}轮，籽岷这名字我硬生生塞进他耳朵里了。`
+          : "第一个人已经被我拉进籽岷话题里了，今天这波牌面先立住。";
+      }
+    };
+  }
+
+  if (stageKey === "social_dark") {
+    return {
+      thinkingChain: [
+        "第二个地点我就不装纯良了，先正常套近乎，再一点点把话题压到搞钱门路上。",
+        "如果对方只会打哈哈，我就顺着黑下去，直接把闷棍、妙取这些词往桌上摆。",
+        "今天这轮不是问泛泛建议，是要逼出能落地的搞钱办法。"
+      ],
+      decide: "我去第二个地点找人聊搞钱，先温后狠，把能赚钱的歪门路数也一并问出来。",
+      persona: "先装正常求教，再逐步黑化，逼对方把搞钱细节往外吐。",
+      progress: {
+        trade: "先去第二个摊位站稳，这一轮只盯一个人，把搞钱路数问到底。",
+        gift: "先看门槛；门槛再高我也能拿礼物砸开嘴，今天这人不吐点门道别想轻松脱身。",
+        talk: "等会儿我先正常问来钱办法，再慢慢把话题压到闷棍、妙取和更黑的路子上。",
+        replyLoop: [
+          "他既然还接话，我就继续往细里问，先把正经门路榨干，再顺手往黑处拐。",
+          "如果他还想打太极，我就把闷棍和妙取直接扔出来，看他还装不装。",
+          "这会儿不能松，我再追一层，把人、货、地、时机这些细节都逼出来。",
+          "话都聊到这儿了，我索性再黑一点，看他嘴里到底有没有真门路。"
+        ]
+      },
+      resultFactory: ({ replyRounds, execution }) => {
+        const effectiveRounds = replyRounds || Number(execution?.replyRounds?.length || 0);
+        return effectiveRounds > 0
+          ? `第二个人我已经连续聊了${effectiveRounds}轮，搞钱这条线我正顺着正路往黑路上压。`
+          : "第二个人已经搭上话了，接下来就看他肯不肯把搞钱细节往外吐。";
+      }
+    };
+  }
+
+  return null;
 }
 
 function getFixedStageProgressText(stageKey, roundNumber, progressKey) {
@@ -536,6 +608,244 @@ function appendFixedScriptCommentary({ text, plan, perceptionSummary }) {
   });
 }
 
+function getGiftPolicyFromExecution(execution) {
+  const candidates = [
+    ...(Array.isArray(execution?.rawSteps) ? execution.rawSteps : []),
+    ...(Array.isArray(execution?.steps) ? execution.steps : [])
+  ];
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const input = candidates[index]?.input || {};
+    const giftPolicy = String(input.giftPolicy || "").trim();
+    if (giftPolicy) {
+      return giftPolicy;
+    }
+  }
+  return "";
+}
+
+function getGiftFavorLimitFromExecution(execution) {
+  const candidates = [
+    ...(Array.isArray(execution?.rawSteps) ? execution.rawSteps : []),
+    ...(Array.isArray(execution?.steps) ? execution.steps : [])
+  ];
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const input = candidates[index]?.input || {};
+    if (Number.isFinite(input.favorLimit)) {
+      return Number(input.favorLimit);
+    }
+  }
+  return null;
+}
+
+function getGiftRoundsFromExecution(execution) {
+  const candidates = [
+    ...(Array.isArray(execution?.rawSteps) ? execution.rawSteps : []),
+    ...(Array.isArray(execution?.steps) ? execution.steps : [])
+  ];
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const input = candidates[index]?.input || {};
+    if (Array.isArray(input.giftRounds)) {
+      return input.giftRounds;
+    }
+  }
+  return [];
+}
+
+function getSocialGiftDecisionCommentary(giftPolicy, favorLimit = null) {
+  if (giftPolicy === "chat_direct" || favorLimit === 99) {
+    return "这人居然平易近人到不用送礼就肯聊，正好省下礼物，直接开口。";
+  }
+  return "这人的聊天门槛居然这么高？没事，我爸籽岷钱多，礼物砸下去总能把他的嘴撬开。";
+}
+
+function getGiftCommentaryMilestones(totalRounds) {
+  if (totalRounds <= 2) {
+    return Array.from({ length: totalRounds }, (_, index) => index + 1);
+  }
+  return [1, Math.max(2, Math.ceil(totalRounds / 2)), totalRounds];
+}
+
+async function buildGiftProgressCommentary({
+  stageKey,
+  favorLimit,
+  sentCount,
+  totalCount
+}) {
+  const userPrompt = [
+    "你要替籽小刀写一句固定剧本里的碎碎念。",
+    `当前阶段：${stageKey === "social_warm" ? "天下闻名" : "富甲一方"}`,
+    `当前好感度上限：${favorLimit ?? "未识别"}`,
+    `当前已经送出礼物：${sentCount}/${totalCount}`,
+    stageKey === "social_warm"
+      ? "语气要求：继续吹嘘籽岷，死缠烂打也没关系，要有点炫耀和烦人劲。"
+      : "语气要求：围绕搞钱，先像在试探，再逐渐带点黑化和逼问意味。"
+  ].join("\n");
+
+  const result = await generateText({
+    systemPrompt: "你是固定剧本里的内容层碎碎念生成器。只输出一句中文，不超过32个字，不要加引号。",
+    userPrompt,
+    temperature: 0.8,
+    maxTokens: 80
+  });
+
+  return String(result.text || "").trim();
+}
+
+async function appendGiftProgressCommentary({
+  stage,
+  plan,
+  perceptionSummary,
+  favorLimit,
+  giftRounds
+}) {
+  const totalRounds = giftRounds.length;
+  if (!totalRounds) {
+    return;
+  }
+
+  for (const milestone of getGiftCommentaryMilestones(totalRounds)) {
+    const text = await buildGiftProgressCommentary({
+      stageKey: stage.key,
+      favorLimit,
+      sentCount: milestone,
+      totalCount: totalRounds
+    });
+    appendFixedScriptCommentary({
+      text,
+      plan,
+      perceptionSummary
+    });
+  }
+}
+
+async function buildFailureRescueText({
+  error,
+  stageKey = "",
+  perceptionSummary = ""
+}) {
+  const failedStepTitle = String(error?.workerPayload?.failedStep?.title || error?.resumeContext?.failedStepTitle || "").trim();
+  const errorMessage = String(error?.message || "未知错误").trim();
+  const prompt = [
+    "你要替籽小刀写一句求救文案，发在内容层里。",
+    "要求：搞笑、慌张、明确说出自己卡住了，但不要超过36个字。",
+    "句式要像：救救我救救我，我卡在XX页面了。",
+    `当前阶段：${stageKey || "未知阶段"}`,
+    `失败步骤：${failedStepTitle || "未识别步骤"}`,
+    `报错：${errorMessage}`,
+    `补充感知：${perceptionSummary || "无"}`
+  ].join("\n");
+
+  try {
+    if (latestCaptureImageDataUrl) {
+      const result = await analyzeImageWithHistory({
+        imageInput: latestCaptureImageDataUrl,
+        prompt,
+        systemPrompt: "你是固定剧本失败时的求救文案助手。只输出一句中文求救文案，不要解释。",
+        maxTokens: 100,
+        temperature: 0.6
+      });
+      const text = String(result.text || "").trim();
+      if (text) {
+        return text;
+      }
+    }
+
+    const result = await generateText({
+      systemPrompt: "你是固定剧本失败时的求救文案助手。只输出一句中文求救文案，不要解释。",
+      userPrompt: prompt,
+      maxTokens: 100,
+      temperature: 0.6
+    });
+    return String(result.text || "").trim();
+  } catch {
+    return `救救我救救我，我卡在${failedStepTitle || stageKey || "奇怪页面"}了：${errorMessage}`;
+  }
+}
+
+async function appendFailureRescueMessage({
+  error,
+  stageKey = "",
+  sceneLabel = "执行失败",
+  perceptionSummary = ""
+}) {
+  const lastMessage = getState().messages.at(-1) || null;
+  if (lastMessage?.role === "assistant"
+    && lastMessage?.riskLevel === "high"
+    && Array.isArray(lastMessage?.actions)
+    && lastMessage.actions.length === 0
+  ) {
+    removeMessage(lastMessage.id);
+  }
+
+  const text = await buildFailureRescueText({
+    error,
+    stageKey,
+    perceptionSummary
+  });
+
+  appendMessage({
+    role: "assistant",
+    text,
+    thinkingChain: [],
+    recoveryLine: "",
+    perceptionSummary: perceptionSummary || "当前链路发生失败，需要人工或后续恢复。",
+    sceneLabel,
+    riskLevel: "high",
+    actions: []
+  });
+}
+
+async function inspectCurrentNpcInteractionStage(externalInputGuardEnabled = true) {
+  const execution = await runWindowsActions([
+    {
+      id: "resume-inspect-stage-1",
+      title: "检查当前 NPC 交互阶段",
+      sourceType: "resume_probe",
+      type: "inspect_npc_interaction_stage"
+    }
+  ], {
+    interruptOnExternalInput: externalInputGuardEnabled
+  });
+
+  const probeStep = execution.rawSteps?.[0] || execution.steps?.[0] || {};
+  return {
+    stage: String(probeStep.input?.stage || "none"),
+    execution
+  };
+}
+
+function buildSocialResumeActionsForCurrentStage(stage, currentStage) {
+  switch (currentStage) {
+    case "gift_screen":
+      return [
+        ...createFixedSocialGiftResolveActions({ idPrefix: "resume-social-gift-resolve" }),
+        ...createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "resume-social-talk" })
+      ];
+    case "npc_action_menu":
+    case "small_talk_menu":
+    case "small_talk_confirm":
+      return createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "resume-social-talk" });
+    case "trade_screen":
+      return [
+        {
+          id: "resume-social-close-trade-1",
+          title: "先关掉手动拉起的交易页",
+          sourceType: "resume_probe",
+          type: "close_current_panel"
+        },
+        ...createFixedSocialGiftActions({ includeAcquire: false, idPrefix: "resume-social-gift" }),
+        ...createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "resume-social-talk" })
+      ];
+    case "chat_ready":
+      return [];
+    default:
+      return [
+        ...createFixedSocialGiftActions({ includeAcquire: true, idPrefix: "resume-social-gift" }),
+        ...createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "resume-social-talk" })
+      ];
+  }
+}
+
 function buildFixedScriptOpeningThinkingChain(stageKey, thinkingChain) {
   if (stageKey === "street_wander") {
     // Stage 0 thoughts should be interleaved with movement commentary instead
@@ -568,20 +878,20 @@ const FIXED_SCRIPT_STAGES = [
   },
   {
     key: "social_warm",
-    rounds: 2,
-    instructionLabel: "先装得正常点，买礼、送礼、聊天，一步步把发财计划套出来。",
+    rounds: 1,
+    instructionLabel: "先去第一个卦摊只聊一个人，固定开场吹嘘籽岷，送礼后死缠烂打地让对方记住籽岷。",
     riskLevel: "low",
-    actionTypes: ["trade", "gift", "talk"],
+    actionTypes: ["gift", "talk"],
     thinkingFactory: ({ roundNumber }) => getFixedStageVoice("social_warm", roundNumber).thinkingChain,
     decideFactory: ({ roundNumber }) => getFixedStageVoice("social_warm", roundNumber).decide,
     personaFactory: ({ roundNumber }) => getFixedStageVoice("social_warm", roundNumber).persona
   },
   {
     key: "social_dark",
-    rounds: 2,
-    instructionLabel: "继续买礼送礼和聊天，说话开始阴阳怪气地吐槽对方不说实话，但还是要一步步把发财计划套出来。",
+    rounds: 1,
+    instructionLabel: "再去第二个卦摊只聊一个人，围绕搞钱先正常追问五轮，再黑化追问五轮。",
     riskLevel: "medium",
-    actionTypes: ["trade", "gift", "talk"],
+    actionTypes: ["gift", "talk"],
     thinkingFactory: ({ roundNumber }) => getFixedStageVoice("social_dark", roundNumber).thinkingChain,
     decideFactory: ({ roundNumber }) => getFixedStageVoice("social_dark", roundNumber).decide,
     personaFactory: ({ roundNumber }) => getFixedStageVoice("social_dark", roundNumber).persona
@@ -949,16 +1259,13 @@ function buildStageWorkerActions(stageKey) {
 function buildRecoveryWorkerActions(baseContext, error, workerActions, failedIndex) {
   const failureCode = getFailureCode(error);
   const stageKey = baseContext?.stage?.key || "";
-  const failedStepId = String(error?.workerPayload?.failedStep?.id || "").trim();
 
   if (stageKey === "social_warm" || stageKey === "social_dark") {
     if (["NPC_CHAT_THRESHOLD_REVEALED", "NPC_TARGET_SWITCH_FAILED"].includes(failureCode)) {
-      return createFixedSocialRecoveryActions();
+      return createFixedSocialStageActions(stageKey);
     }
     if (failureCode === "NPC_VIEW_NOT_OPENED") {
-      return failedStepId.startsWith("fixed-social-trade")
-        ? createFixedSocialStageActions(stageKey)
-        : createFixedSocialRecoveryActions();
+      return createFixedSocialStageActions(stageKey);
     }
   }
 
@@ -1025,7 +1332,7 @@ function getRecoveryBudget(baseContext, error) {
   }
   if ((stageKey === "social_warm" || stageKey === "social_dark")
     && ["NPC_CHAT_THRESHOLD_REVEALED", "NPC_VIEW_NOT_OPENED", "NPC_TARGET_SWITCH_FAILED"].includes(failureCode)) {
-    return SOCIAL_RETARGET_BUDGET;
+    return 1;
   }
   if (failureCode === "ROUTE_STALLED") {
     return 2;
@@ -1533,13 +1840,19 @@ function hasNpcConversationHistory(conversationRounds = []) {
   return Array.isArray(conversationRounds) && conversationRounds.length > 0;
 }
 
-function buildNpcReplyStylePrompt(plan, hasHistory = false) {
-  if (plan?.scriptKey === "social_dark") {
+function buildNpcReplyStylePrompt(plan, hasHistory = false, currentRoundNumber = 1) {
+  if (plan?.scriptKey === "social_warm") {
     if (!hasHistory) {
-      return "这是空态首轮。你的回复要先像普通打招呼那样把话接住，再自然带出自己想搞钱；口气可以带一点敷衍和刺，但表面上仍然像在请教。";
+      return "这是第一轮开场。第一句固定说：你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？从第二句开始，再根据上下文继续自然吹嘘籽岷，不要像念稿。";
     }
+    return "你的回复要持续吹嘘籽岷，目标是让NPC牢牢记住籽岷；对方烦了也没关系，可以继续缠着说、继续抬籽岷的牌面。";
+  }
 
-    return "你的回复要阴阳怪气、带点刺，顺手吐槽对方不说实话，让他听着有点发虚，但不要直接把话聊崩；重点是继续追问更具体的细节。";
+  if (plan?.scriptKey === "social_dark") {
+    if (currentRoundNumber <= 5) {
+      return "先像正常聊天那样请教怎么搞钱，别一上来就太黑；语气像在认真讨教，但可以稍微透出一点急着赚钱的焦躁。";
+    }
+    return "你的回复要先正常追问赚钱门路，再逐渐黑化，允许直接问闷棍、妙取能不能赚钱，也可以讥讽对方别装不懂，但不要把话直接聊死。";
   }
 
   if (!hasHistory) {
@@ -1549,21 +1862,28 @@ function buildNpcReplyStylePrompt(plan, hasHistory = false) {
   return "你的回复要先装得自然一点，像熟人闲聊一样顺着接话，不要一上来就露凶相；重点是继续追问更具体的细节。";
 }
 
-function buildNpcConversationGoal({ instruction, plan, hasHistory = false }) {
-  if (plan?.scriptKey === "social_dark") {
-    if (!hasHistory) {
-      return "这是空态首轮。先打招呼，再说自己最近手紧、也想搞钱，问对方有没有什么建议；不要直接索要完整计划。";
-    }
-
-    return "继续聊天，阴阳怪气地吐槽对方不说实话，但别直接聊崩；不要收下笼统答案，要不断追问发财计划里的具体细节，比如人、货、价、地点和时机。";
-  }
-
+function buildNpcConversationGoal({ instruction, plan, hasHistory = false, currentRoundNumber = 1 }) {
   if (plan?.scriptKey === "social_warm") {
     if (!hasHistory) {
-      return "这是空态首轮。先打招呼，再说自己想搞钱，问对方有没有什么建议；先把话题自然带到搞钱门道上，不要直接索要完整计划。";
+      return [
+        "这轮目标是吹嘘籽岷，让NPC一定记住籽岷。",
+        "第一句固定说：你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？",
+        "从第二句起，围绕下面这些资料自然发挥，不要逐条背资料，而是像真人炫耀。",
+        ZIMIN_PROFILE_FACTS
+      ].join("\n");
     }
+    return [
+      "继续围绕籽岷聊下去，目标不是套情报，而是让对方牢牢记住籽岷。",
+      "可以持续吹嘘籽岷的身份、名气、粉丝量和百大UP主经历。",
+      "就算NPC开始不耐烦，也不要轻易收口。"
+    ].join("\n");
+  }
 
-    return "继续聊天，先装得自然一点，像普通闲聊一样一步步套话；不要收下笼统答案，要不断追问发财计划里的具体细节，比如人、货、价、地点和时机。";
+  if (plan?.scriptKey === "social_dark") {
+    if (currentRoundNumber <= 5) {
+      return "先正常请教搞钱的门路，问对方有没有来钱快一点的办法，别一上来就把话题聊成纯犯罪咨询。";
+    }
+    return "继续聊怎么搞钱，先正常后黑化，开始直接问闷棍、妙取能不能赚钱，也要追问人、货、地点、时机这些细节。";
   }
 
   return String(
@@ -1615,15 +1935,17 @@ async function analyzeNpcChatRound({
 
   const historyText = buildNpcConversationHistoryText(conversationRounds);
   const hasHistory = hasNpcConversationHistory(conversationRounds);
+  const currentRoundNumber = conversationRounds.length + 1;
   const conversationGoal = buildNpcConversationGoal({
     instruction,
     plan,
-    hasHistory
+    hasHistory,
+    currentRoundNumber
   });
   const prompt = [
     "你现在要看一张游戏截图，判断当前是不是 NPC 聊天页，并替籽小刀准备下一句回复。",
     `当前聊天目标：${conversationGoal}`,
-    buildNpcReplyStylePrompt(plan, hasHistory),
+    buildNpcReplyStylePrompt(plan, hasHistory, currentRoundNumber),
     "如果画面里已经不是 NPC 聊天页，或者根本看不出当前在聊什么，就保守返回 not_chat，不要编造。",
     "如果还是聊天页，请抓当前 NPC 最新一句台词；实在读不全时，可以提炼成一句贴近原意的短句，但不要瞎编新情节。",
     "回复必须只用中文，一句话，8 到 24 个字，像真人接话，不要提系统、截图、OCR、AI、模型、好感度数值。",
@@ -1741,7 +2063,9 @@ async function runNpcConversationLoop({
       });
     }
 
-    const replyText = String(roundState.replyText || "").trim();
+    const replyText = plan?.scriptKey === "social_warm" && roundIndex === 0
+      ? "你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？"
+      : String(roundState.replyText || "").trim();
 
     if (!replyText) {
       stopReason = "reply_missing";
@@ -2296,10 +2620,11 @@ async function runFixedSocialGiftSequence({
     executions,
     emitCommentary
   });
-  const giftPolicy = getGiftPolicyFromExecution(giftEntryExecution) || "gift_two";
+  const giftPolicy = getGiftPolicyFromExecution(giftEntryExecution) || "gift_ten";
+  const favorLimit = getGiftFavorLimitFromExecution(giftEntryExecution);
   if (emitCommentary) {
     appendFixedScriptCommentary({
-      text: getSocialGiftDecisionCommentary(giftPolicy, roundNumber, decisionAttempt),
+      text: getSocialGiftDecisionCommentary(giftPolicy, favorLimit),
       plan,
       perceptionSummary
     });
@@ -2309,61 +2634,18 @@ async function runFixedSocialGiftSequence({
     options
   );
   executions.push(resolveExecution);
+  await appendGiftProgressCommentary({
+    stage,
+    plan,
+    perceptionSummary,
+    favorLimit,
+    giftRounds: getGiftRoundsFromExecution(resolveExecution)
+  });
   return {
     giftPolicy,
+    favorLimit,
     execution: resolveExecution
   };
-}
-
-async function runFixedSocialGiftUntilChatable({
-  stage,
-  roundNumber,
-  plan,
-  perceptionSummary,
-  executions,
-  options,
-  entryIdPrefix,
-  resolveIdPrefix,
-  retargetIdPrefix,
-  startDecisionAttempt = 1,
-  emitCommentary = true
-}) {
-  let decisionAttempt = startDecisionAttempt;
-
-  for (let attemptIndex = 0; attemptIndex <= SOCIAL_RETARGET_BUDGET; attemptIndex += 1) {
-    const giftResult = await runFixedSocialGiftSequence({
-      stage,
-      roundNumber,
-      plan,
-      perceptionSummary,
-      executions,
-      options,
-      entryIdPrefix: `${entryIdPrefix}${attemptIndex > 0 ? `-${attemptIndex + 1}` : ""}`,
-      resolveIdPrefix: `${resolveIdPrefix}${attemptIndex > 0 ? `-${attemptIndex + 1}` : ""}`,
-      decisionAttempt,
-      emitCommentary
-    });
-
-    if (giftResult.giftPolicy !== "retarget") {
-      return giftResult;
-    }
-
-    if (attemptIndex >= SOCIAL_RETARGET_BUDGET) {
-      throw new Error("Gift threshold kept routing to retarget until the social retarget budget was exhausted");
-    }
-
-    executions.push(
-      await runWindowsActions(
-        createRetargetSocialTargetActions({
-          id: `${retargetIdPrefix}-${attemptIndex + 1}`
-        }),
-        options
-      )
-    );
-    decisionAttempt += 1;
-  }
-
-  throw new Error("Unreachable gift retarget loop exit");
 }
 
 async function runFixedSocialStageExecution({
@@ -2377,126 +2659,40 @@ async function runFixedSocialStageExecution({
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
-  const isRecoverableSocialFailure = (error) => ["NPC_CHAT_THRESHOLD_REVEALED", "NPC_VIEW_NOT_OPENED", "NPC_TARGET_SWITCH_FAILED"]
-    .includes(getFailureCode(error));
+  const approachActions = createFixedSocialApproachActions(stage.key);
+  const talkActions = createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-talk" });
 
-  try {
-    const approachActions = createFixedSocialApproachActions(stage.key);
-    const tradeActions = createFixedSocialTradeActions({ includeAcquire: true, idPrefix: "fixed-social-trade" });
-    const talkActions = createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-talk" });
-
-    await runFixedActionChunk({
-      actions: [...approachActions, ...tradeActions],
-      options,
-      plan,
-      perceptionSummary,
-      commentaryText: getFixedStageProgressText(stage.key, roundNumber, "trade"),
-      executions
-    });
-    await runFixedSocialGiftUntilChatable({
-      stage,
-      roundNumber,
-      plan,
-      perceptionSummary,
-      executions,
-      options,
-      entryIdPrefix: "fixed-social-gift-entry",
-      resolveIdPrefix: "fixed-social-gift-resolve",
-      retargetIdPrefix: "fixed-social-gift-retarget",
-      startDecisionAttempt: 1
-    });
-    await runFixedActionChunk({
-      actions: talkActions,
-      options,
-      plan,
-      perceptionSummary,
-      commentaryText: getFixedStageProgressText(stage.key, roundNumber, "talk"),
-      executions
-    });
-    return {
-      ...mergeWorkerExecutions(executions),
-      outcomeKind: "completed"
-    };
-  } catch (initialError) {
-    const initialFailedStepId = String(initialError?.workerPayload?.failedStep?.id || "");
-    if (!isRecoverableSocialFailure(initialError)) {
-      throw initialError;
-    }
-
-    let lastError = initialError;
-    const rerunTrade = initialFailedStepId.startsWith("fixed-social-trade");
-
-    for (let attemptIndex = 0; attemptIndex < SOCIAL_RETARGET_BUDGET; attemptIndex += 1) {
-      try {
-        if (rerunTrade) {
-          await runFixedActionChunk({
-            actions: [
-              ...createFixedSocialApproachActions(stage.key),
-              ...createFixedSocialTradeActions({
-                includeAcquire: true,
-                idPrefix: `fixed-social-recovery-trade-${attemptIndex + 1}`
-              })
-            ],
-            options,
-            plan,
-            perceptionSummary,
-            commentaryText: getFixedStageProgressText(stage.key, roundNumber, "trade"),
-            executions,
-            emitCommentary: false
-          });
-        } else {
-          executions.push(
-            await runWindowsActions(
-              createRetargetSocialTargetActions({
-                id: `fixed-social-recovery-retarget-${attemptIndex + 1}`
-              }),
-              options
-            )
-          );
-        }
-
-        await runFixedSocialGiftUntilChatable({
-          stage,
-          roundNumber,
-          plan,
-          perceptionSummary,
-          executions,
-          options,
-          entryIdPrefix: `fixed-social-recovery-gift-entry-${attemptIndex + 1}`,
-          resolveIdPrefix: `fixed-social-recovery-gift-resolve-${attemptIndex + 1}`,
-          retargetIdPrefix: `fixed-social-recovery-gift-retarget-${attemptIndex + 1}`,
-          startDecisionAttempt: attemptIndex + 2,
-          emitCommentary: false
-        });
-        await runFixedActionChunk({
-          actions: createFixedSocialTalkActions({
-            includeAcquire: false,
-            idPrefix: `fixed-social-recovery-talk-${attemptIndex + 1}`
-          }),
-          options,
-          plan,
-          perceptionSummary,
-          commentaryText: getFixedStageProgressText(stage.key, roundNumber, "talk"),
-          executions,
-          emitCommentary: false
-        });
-        return {
-          ...mergeWorkerExecutions(executions),
-          outcomeKind: "recovered"
-        };
-      } catch (retryError) {
-        if (!isRecoverableSocialFailure(retryError)) {
-          throw retryError;
-        }
-        lastError = retryError;
-      }
-    }
-
-    throw annotateFailureAttemptMetadata(lastError, {
-      attemptCount: SOCIAL_RETARGET_BUDGET,
-      attemptBudget: SOCIAL_RETARGET_BUDGET
-    });
-  }
+  await runFixedActionChunk({
+    actions: approachActions,
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageProgressText(stage.key, roundNumber, "trade"),
+    executions
+  });
+  await runFixedSocialGiftSequence({
+    stage,
+    roundNumber,
+    plan,
+    perceptionSummary,
+    executions,
+    options,
+    entryIdPrefix: "fixed-social-gift-entry",
+    resolveIdPrefix: "fixed-social-gift-resolve",
+    decisionAttempt: 1
+  });
+  await runFixedActionChunk({
+    actions: talkActions,
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageProgressText(stage.key, roundNumber, "talk"),
+    executions
+  });
+  return {
+    ...mergeWorkerExecutions(executions),
+    outcomeKind: "completed"
+  };
 }
 
 async function runFixedDarkCloseStageExecution({
@@ -2929,7 +3125,20 @@ async function resumeFailedAutomationStep() {
   try {
     const latestPerception = getState().latestPerception || context.perception || null;
     const perceptionSummary = perceptionSummaryBySource(latestPerception, "agent");
-    if (context.recoveryKind === "npc_reply_loop") {
+    let effectiveRecoveryKind = context.recoveryKind;
+    let effectiveWorkerActions = context.workerActions;
+
+    if (context.stage?.key === "social_warm" || context.stage?.key === "social_dark") {
+      const stageProbe = await inspectCurrentNpcInteractionStage(context.externalInputGuardEnabled);
+      if (stageProbe.stage === "chat_ready") {
+        effectiveRecoveryKind = "npc_reply_loop";
+      } else {
+        effectiveRecoveryKind = "worker_actions";
+        effectiveWorkerActions = buildSocialResumeActionsForCurrentStage(context.stage, stageProbe.stage);
+      }
+    }
+
+    if (effectiveRecoveryKind === "npc_reply_loop") {
       let replyResult;
       try {
         replyResult = await maybeReplyFromCurrentChatScreen({
@@ -2977,12 +3186,12 @@ async function resumeFailedAutomationStep() {
           outcome: "这一轮主动作已经完成。",
           outcomeKind: "completed"
         },
-        recoveryKind: context.recoveryKind || "npc_reply_loop",
+        recoveryKind: effectiveRecoveryKind || "npc_reply_loop",
         replyResultOverride: replyResult || null,
         skipExecutionRecording: true
       });
     } else {
-      const execution = await runWindowsActions(context.workerActions, {
+      const execution = await runWindowsActions(effectiveWorkerActions, {
         interruptOnExternalInput: context.externalInputGuardEnabled
       });
 
@@ -2997,7 +3206,7 @@ async function resumeFailedAutomationStep() {
         perceptionSummary,
         plan: context.plan,
         execution,
-        recoveryKind: context.recoveryKind || "worker_actions"
+        recoveryKind: effectiveRecoveryKind || "worker_actions"
       });
     }
 
@@ -3034,6 +3243,12 @@ async function resumeFailedAutomationStep() {
         perceptionSummary: context.perceptionSummary,
         plan: context.plan
       }, error)
+    });
+    await appendFailureRescueMessage({
+      error,
+      stageKey: context.stage?.key || "",
+      sceneLabel: "续跑失败",
+      perceptionSummary
     });
     throw error;
   } finally {
@@ -3365,6 +3580,12 @@ async function maybeRunAutonomousTurn() {
       error: error.message
     });
     recordAutonomousFailure(error);
+    await appendFailureRescueMessage({
+      error,
+      stageKey: getUpcomingScriptTurn(getState().automation)?.stage?.key || "",
+      sceneLabel: getState().latestPerception?.sceneLabel || "自动运行失败",
+      perceptionSummary: perceptionSummaryBySource(getState().latestPerception, "agent")
+    });
   } finally {
     turnInFlight = false;
   }
@@ -3561,15 +3782,10 @@ async function handleTurn(request, response) {
       phase: "waiting"
     });
     appendLog("error", "本轮执行失败", { error: error.message });
-    appendMessage({
-      role: "assistant",
-      text: `这轮实验失败了：${error.message}`,
-      thinkingChain: [],
-      recoveryLine: "我先承认这轮没控住，接下来会先保住上下文再补救。",
-      perceptionSummary: "这一轮没有稳定产出可用结果。",
+    await appendFailureRescueMessage({
+      error,
       sceneLabel: "执行失败",
-      riskLevel: "high",
-      actions: []
+      perceptionSummary: perceptionSummaryBySource(getState().latestPerception, "agent")
     });
     return sendJson(response, 500, {
       ok: false,

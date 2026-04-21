@@ -1510,12 +1510,19 @@ def ensure_map_screen_closed(hwnd: int, title: str, toggle_key: str = "m", timeo
     if not current_state["visible"]:
         return current_state
 
-    pydirectinput.press(toggle_key)
-    INPUT_GUARD.refresh_baseline()
     deadline = time.time() + timeout_ms / 1000.0
 
     while time.time() <= deadline:
-        INPUT_GUARD.guarded_sleep(80, title)
+        teleport_dialog = detect_teleport_confirm_dialog(hwnd)
+        if teleport_dialog["visible"]:
+            click_named_point(hwnd, "teleport_confirm")
+            INPUT_GUARD.guarded_sleep(220, title)
+        else:
+            # Stable fixed UI owner: map close now uses the top-right close button
+            # instead of keyboard toggle, so transient overlays on top of the map
+            # do not leave the route flow hanging at the map-close step.
+            click_named_point(hwnd, "close_panel")
+            INPUT_GUARD.guarded_sleep(220, title)
         current_state = detect_map_screen(hwnd)
         if not current_state["visible"]:
             return current_state
@@ -3540,12 +3547,8 @@ def inspect_gift_chat_threshold(stage_state: dict[str, Any]) -> dict[str, Any]:
     favor_limit = parse_favor_limit(gift_panel_text)
     if favor_limit == 99:
         gift_policy = "chat_direct"
-    elif favor_limit == 199:
-        gift_policy = "gift_two"
-    elif favor_limit is not None:
-        gift_policy = "retarget"
     else:
-        gift_policy = "gift_two"
+        gift_policy = "gift_ten"
     return {
         "favorBefore": favor_before,
         "favorLimit": favor_limit,
@@ -5230,6 +5233,22 @@ def run_submit_gift_once(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def run_inspect_npc_interaction_stage(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "inspect_npc_interaction_stage")
+    stage_state = detect_npc_interaction_stage(hwnd)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Detected current NPC interaction stage: {stage_state['stage'] or 'none'}",
+        "input": {
+            "mode": "inspect_npc_interaction_stage",
+            **collect_npc_stage_input(hwnd, stage_state),
+        },
+    }
+
+
 def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "resolve_gift_chat_threshold")
@@ -5262,7 +5281,7 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
             },
         }
 
-    if gift_policy == "gift_two":
+    if gift_policy == "gift_ten":
         gift_rounds: list[dict[str, Any]] = []
         current_stage_state = stage_state
         initial_select_click = click_named_point(hwnd, "gift_first_slot")
@@ -5270,7 +5289,7 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
         reselect_click = click_named_point(hwnd, "gift_first_slot")
         INPUT_GUARD.guarded_sleep(select_detail_delay_ms, title)
         current_stage_state = detect_npc_interaction_stage(hwnd)
-        for round_index in range(2):
+        for round_index in range(10):
             before_panel_text = str(current_stage_state["texts"].get("gift_panel") or "")
             favor_before = parse_favor_value(before_panel_text)
             submit_click = click_named_point(hwnd, "gift_submit")
@@ -5297,7 +5316,7 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
             "id": action_id,
             "title": title,
             "status": "performed",
-            "detail": "Selected the first gift twice, submitted twice, and closed the gift screen",
+            "detail": "Selected the first gift twice, submitted ten times, and closed the gift screen",
             "input": {
                 "mode": "resolve_gift_chat_threshold",
                 **collect_npc_stage_input(hwnd, next_stage_state),
@@ -5328,7 +5347,7 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
         error_code="NPC_CHAT_THRESHOLD_REVEALED",
         failed_step=build_failed_step_payload(
             action,
-            "Gift threshold is too high for the fixed two-gift chat route",
+            "Gift threshold could not be resolved into the fixed gift route",
             failed_input,
         ),
     )
@@ -6570,6 +6589,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "inspect_gift_chat_threshold":
         return run_inspect_gift_chat_threshold(hwnd, action)
+
+    if action_type == "inspect_npc_interaction_stage":
+        return run_inspect_npc_interaction_stage(hwnd, action)
 
     if action_type == "select_gift_first_slot":
         return run_select_gift_first_slot(hwnd, action)

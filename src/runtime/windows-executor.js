@@ -290,19 +290,6 @@ function createNpcStealActions(baseAction, options = {}) {
   ]);
 }
 
-export function createRetargetSocialTargetActions(options = {}) {
-  return [
-    createWorkerAction(options.id || "social-retarget-1", options.title || "换一个可查看的路人目标", "retarget_social_target", {
-      attemptsPerCycle: options.attemptsPerCycle || 5,
-      maxCycles: options.maxCycles || 2,
-      dragStartRatio: options.dragStartRatio || [0.54, 0.48],
-      dragEndRatio: options.dragEndRatio || [0.64, 0.48],
-      dragDurationMs: options.dragDurationMs || 180,
-      settleMs: options.settleMs || 220
-    })
-  ];
-}
-
 function getFixedSocialStageConfig(stageKey = "social_warm") {
   switch (stageKey) {
     case "social_dark":
@@ -423,17 +410,8 @@ export function createFixedSocialTalkActions(options = {}) {
 export function createFixedSocialStageActions(stageKey = "social_warm") {
   return [
     ...createFixedSocialApproachActions(stageKey),
-    ...createFixedSocialTradeActions({ includeAcquire: true, idPrefix: "fixed-social-trade" }),
     ...createFixedSocialGiftActions({ includeAcquire: false, idPrefix: "fixed-social-gift" }),
     ...createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-talk" })
-  ];
-}
-
-export function createFixedSocialRecoveryActions() {
-  return [
-    ...createRetargetSocialTargetActions({ id: "fixed-social-recovery-retarget" }),
-    ...createFixedSocialGiftActions({ includeAcquire: false, idPrefix: "fixed-social-recovery-gift" }),
-    ...createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-recovery-talk" })
   ];
 }
 
@@ -520,6 +498,11 @@ export function createFixedDarkCloseStageActions() {
       yCoordinate: 812,
       confirmPointName: "teleport_confirm"
     }),
+    createAcquireNpcTargetAction("fixed-dark-close-1b", "先点中 stage 4 的目标人", {
+      timeoutMs: 5000,
+      movePulseMs: 0,
+      scanIntervalMs: 180
+    }),
     createPressKeyAction("fixed-dark-close-2", "下马准备潜行", "1", { postDelayMs: 800 }),
     createPressKeyAction("fixed-dark-close-2b", "校正视角准备潜行", "v", { postDelayMs: 800 }),
     createWorkerAction("fixed-dark-close-3", "进入潜行并在失败时短退一步再重试", "enter_stealth_with_retry", {
@@ -528,6 +511,7 @@ export function createFixedDarkCloseStageActions() {
       retryBackstepMs: 180,
       retryMoveSettleMs: 140
     }),
+    createPressKeyAction("fixed-dark-close-3b", "潜行成功后补一次 2 上隐匿 buff", "2", { postDelayMs: 300 }),
     createWorkerAction("fixed-dark-close-4", "潜行后直接按 3 闷棍附近目标", "stealth_front_arc_strike", {
       knockoutTimeoutMs: 2600,
       retryPressMs: 180,

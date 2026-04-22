@@ -255,8 +255,11 @@ ACTION_POINTS = {
     "trade_right_up_shelf_button": (1612 / 2544, 1028 / 1388),
     "trade_final_submit_button": (1345 / 2544, 1296 / 1388),
     "vendor_purchase_plus": (427 / 2544, 706 / 1388),
-    "vendor_purchase_buy": (372 / 2544, 1012 / 1388),
-    "vendor_purchase_max_quantity": (479 / 2544, 706 / 1388),
+    # User re-marked on April 22, 2026 from the red-circled purchase panel:
+    # keep these two points pinned to the visual centers of the max-quantity
+    # arrow and the buy button. Do not adjust other vendor points here.
+    "vendor_purchase_buy": (676 / 2538, 935 / 1384),
+    "vendor_purchase_max_quantity": (702 / 2048, 578 / 1390),
     "vendor_purchase_close": (2478 / 2544, 31 / 1388),
     "vendor_purchase_option": (2051 / 2544, 212 / 1388),
     "vendor_purchase_item_sanjiu": (2051 / 2544, 212 / 1388),
@@ -279,6 +282,10 @@ ACTION_POINTS = {
     "small_talk_confirm_dialog": (1456 / 2544, 1046 / 1388),
     "small_talk_cancel_dialog": (1090 / 2544, 1046 / 1388),
     "chat_input": (278 / 2048, 1040 / 1152),
+    # User re-marked on April 22, 2026 from the red-circled chat send button
+    # and re-validated by drawing the expected mouse point back onto the latest
+    # local chat-page reference capture. Keep this pinned unless re-marked.
+    "chat_send": (975 / 2544, 1299 / 1388),
     "chat_exit": (1089 / 2544, 688 / 1388),
     # The user has pinned the in-game render resolution to 2560x1440, so the
     # coordinate route bar uses one fixed reference layout again.
@@ -1024,6 +1031,52 @@ def contains_any_keyword(text: str, keywords: list[str]) -> bool:
 def count_keywords(text: str, keywords: list[str]) -> int:
     normalized = str(text or "").replace(" ", "")
     return sum(1 for keyword in keywords if keyword in normalized)
+
+
+def looks_like_vendor_purchase_dialog(text: str, target_name: str = "", option_text: str = "") -> bool:
+    normalized = str(text or "").replace(" ", "")
+    if not normalized:
+        return False
+    strong_keywords = [
+        "进货",
+        "货物",
+        "打零工",
+        "低效",
+        "告辞",
+        "暂时不用",
+        "进些货物",
+        "我来进些货物",
+    ]
+    dynamic_keywords = [str(target_name or "").replace(" ", ""), str(option_text or "").replace(" ", "")]
+    keywords = [keyword for keyword in [*strong_keywords, *dynamic_keywords] if keyword]
+    return count_keywords(normalized, keywords) >= 2
+
+
+def retry_probe_state(
+    title: str,
+    probe_fn,
+    success_fn,
+    attempts: int = 5,
+    interval_ms: int = 500,
+) -> tuple[Any, list[dict[str, Any]]]:
+    history: list[dict[str, Any]] = []
+    last_state = None
+    max_attempts = max(1, int(attempts or 1))
+    for attempt_index in range(max_attempts):
+        last_state = probe_fn()
+        success = bool(success_fn(last_state))
+        history.append(
+            {
+                "attempt": attempt_index + 1,
+                "success": success,
+                "state": last_state,
+            }
+        )
+        if success:
+            break
+        if attempt_index + 1 < max_attempts:
+            INPUT_GUARD.guarded_sleep(max(0, int(interval_ms or 0)), title)
+    return last_state, history
 
 
 def pulse_turn_key(hwnd: int, key: str, duration_ms: int, action_title: str) -> dict[str, Any]:
@@ -2281,8 +2334,7 @@ def send_chat_message(
     INPUT_GUARD.refresh_baseline()
     INPUT_GUARD.guarded_sleep(80, "send_chat_message")
 
-    pydirectinput.press("enter")
-    INPUT_GUARD.refresh_baseline()
+    send_click = click_named_point(hwnd, "chat_send")
     INPUT_GUARD.guarded_sleep(180, "send_chat_message")
 
     if close_after_send:
@@ -2291,6 +2343,7 @@ def send_chat_message(
 
     return {
         "textLength": len(text),
+        "sendClick": send_click,
         "closeAfterSend": close_after_send,
         "closeSettleMs": close_settle_ms,
     }
@@ -3854,6 +3907,7 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
     target_name = str(action.get("targetName") or "").strip()
     option_text = str(action.get("optionText") or "进些货物").strip()
     interact_attempts = max(1, int(action.get("interactAttempts") or 3))
+    verify_attempts = max(1, int(action.get("verifyAttempts") or 5))
 
     if not target_name:
         raise RuntimeError("open_named_vendor_purchase action requires targetName")
@@ -3872,13 +3926,29 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
         prompt_state = detect_vendor_interact_prompt(hwnd)
         pydirectinput.press("f")
         INPUT_GUARD.refresh_baseline()
-        INPUT_GUARD.guarded_sleep(800, title)
+        INPUT_GUARD.guarded_sleep(1200, title)
 
         dialog_state = detect_dialog(hwnd)
         quick_menu_state = detect_bottom_right_menu_stage(hwnd)
+        confirm_dialog_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["confirm_dialog"]))
         purchase_state = detect_vendor_purchase_screen(hwnd)
         option_click = None
         option_match = None
+        purchase_checks: list[dict[str, Any]] = []
+        combined_dialog_text = "\n".join(
+            part
+            for part in [
+                str(dialog_state.get("text") or ""),
+                str(quick_menu_state.get("text") or ""),
+                str(confirm_dialog_text or ""),
+            ]
+            if str(part or "").strip()
+        )
+        fixed_option_ready = looks_like_vendor_purchase_dialog(
+            combined_dialog_text,
+            target_name=target_name,
+            option_text=option_text,
+        )
         if not purchase_state["visible"]:
             option_match = find_text_button_in_roi(hwnd, NPC_STAGE_ROIS["confirm_dialog"], option_text)
             if option_match is not None:
@@ -3888,12 +3958,24 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
                     int(option_match["screenY"]),
                     "left",
                 )
-                INPUT_GUARD.guarded_sleep(800, title)
-                purchase_state = detect_vendor_purchase_screen(hwnd)
-            elif dialog_state["visible"] or quick_menu_state["stage"] in {"npc_action_menu", "small_talk_menu"}:
+                INPUT_GUARD.guarded_sleep(1200, title)
+                purchase_state, purchase_checks = retry_probe_state(
+                    title,
+                    lambda: detect_vendor_purchase_screen(hwnd),
+                    lambda state: bool(state["visible"]),
+                    attempts=verify_attempts,
+                    interval_ms=500,
+                )
+            elif fixed_option_ready or dialog_state["visible"] or quick_menu_state["stage"] in {"npc_action_menu", "small_talk_menu"}:
                 option_click = click_named_point(hwnd, "vendor_purchase_option")
-                INPUT_GUARD.guarded_sleep(800, title)
-                purchase_state = detect_vendor_purchase_screen(hwnd)
+                INPUT_GUARD.guarded_sleep(1200, title)
+                purchase_state, purchase_checks = retry_probe_state(
+                    title,
+                    lambda: detect_vendor_purchase_screen(hwnd),
+                    lambda state: bool(state["visible"]),
+                    attempts=verify_attempts,
+                    interval_ms=500,
+                )
 
         interact_attempt_log.append(
             {
@@ -3902,12 +3984,15 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
                 "promptText": prompt_state["text"],
                 "dialogVisible": bool(dialog_state["visible"]),
                 "dialogText": dialog_state["text"],
+                "confirmDialogText": confirm_dialog_text,
                 "menuStage": quick_menu_state["stage"],
                 "menuText": quick_menu_state["text"],
+                "fixedOptionReady": fixed_option_ready,
                 "optionMatch": option_match,
                 "optionClick": option_click,
                 "purchaseVisible": bool(purchase_state["visible"]),
                 "purchaseText": purchase_state["text"],
+                "purchaseChecks": purchase_checks,
             }
         )
 
@@ -4040,8 +4125,6 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
     item_name = str(action.get("itemName") or "墨锭").strip()
 
     purchase_state = detect_vendor_purchase_screen(hwnd)
-    if not purchase_state["visible"]:
-        raise RuntimeError("Current screen is not vendor purchase screen")
 
     item_key = normalize_npc_name(item_name)
     if item_key == normalize_npc_name("墨锭"):
@@ -4060,7 +4143,14 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
     INPUT_GUARD.guarded_sleep(1000, title)
     close_click = click_named_point(hwnd, "vendor_purchase_close")
     INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 1000), title)
-    after_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
+    after_state, after_checks = retry_probe_state(
+        title,
+        lambda: detect_vendor_purchase_screen(hwnd),
+        lambda state: not bool(state["visible"]),
+        attempts=max(1, int(action.get("verifyAttempts") or 5)),
+        interval_ms=500,
+    )
+    after_text = str(after_state["text"] or "")
 
     return {
         "id": action_id,
@@ -4078,6 +4168,7 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
             "closeClick": close_click,
             "beforeText": purchase_state["text"],
             "afterText": after_text,
+            "afterChecks": after_checks,
         },
     }
 
@@ -4103,8 +4194,6 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "stock_first_hawking_item")
     hawking_state = detect_hawking_screen(hwnd)
-    if not hawking_state["visible"]:
-        raise RuntimeError("Current screen is not hawking screen")
 
     inventory_click = click_named_point(hwnd, "hawking_inventory_first_slot")
     INPUT_GUARD.guarded_sleep(1000, title)
@@ -4113,7 +4202,14 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
     stock_click = click_named_point(hwnd, "hawking_stock_button")
     settle_ms = int(action.get("postDelayMs") or 1000)
     INPUT_GUARD.guarded_sleep(settle_ms, title)
-    after_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["trade_panel"]))
+    after_state, after_checks = retry_probe_state(
+        title,
+        lambda: detect_hawking_screen(hwnd),
+        lambda state: bool(state["visible"]),
+        attempts=max(1, int(action.get("verifyAttempts") or 5)),
+        interval_ms=500,
+    )
+    after_text = str(after_state["text"] or "")
 
     return {
         "id": action_id,
@@ -4127,6 +4223,7 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
             "maxQuantityClick": max_quantity_click,
             "stockClick": stock_click,
             "afterText": after_text,
+            "afterChecks": after_checks,
             "settleMs": settle_ms,
         },
     }
@@ -4136,8 +4233,6 @@ def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "submit_hawking")
     hawking_state = detect_hawking_screen(hwnd)
-    if not hawking_state["visible"]:
-        raise RuntimeError("Current screen is not hawking screen")
 
     submit_ready_delay_ms = max(400, int(action.get("submitReadyDelayMs") or 1000))
 

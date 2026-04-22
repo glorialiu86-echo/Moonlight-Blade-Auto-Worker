@@ -829,6 +829,15 @@ async function buildFailureRescueText({
   }
 }
 
+function buildFallbackFailureRescueText({
+  error,
+  stageKey = ""
+}) {
+  const failedStepTitle = String(error?.workerPayload?.failedStep?.title || error?.resumeContext?.failedStepTitle || "").trim();
+  const errorMessage = String(error?.message || "未知错误").trim();
+  return `救救我救救我，我卡在${failedStepTitle || stageKey || "奇怪页面"}了：${errorMessage}`;
+}
+
 async function appendFailureRescueMessage({
   error,
   stageKey = "",
@@ -844,11 +853,23 @@ async function appendFailureRescueMessage({
     removeMessage(lastMessage.id);
   }
 
-  const text = await buildFailureRescueText({
+  const fallbackText = buildFallbackFailureRescueText({
     error,
-    stageKey,
-    perceptionSummary
+    stageKey
   });
+  let text = fallbackText;
+  try {
+    text = String(await Promise.race([
+      buildFailureRescueText({
+        error,
+        stageKey,
+        perceptionSummary
+      }),
+      new Promise((resolve) => setTimeout(() => resolve(fallbackText), 5000))
+    ]) || "").trim() || fallbackText;
+  } catch {
+    text = fallbackText;
+  }
 
   appendMessage({
     role: "assistant",

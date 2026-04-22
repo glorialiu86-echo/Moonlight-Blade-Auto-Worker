@@ -88,14 +88,23 @@ function buildPerceptionContext(perception) {
     return "暂无截图识别结果。";
   }
 
-  return [
+  const lines = [
     `截图总结：${perception.summary || "暂无总结"}`,
-    `场景标签：${perception.sceneLabel || "未判定"}`,
-    `OCR 文字：${perception.ocrText || "无"}`,
-    `NPC：${perception.npcNames?.join("、") || "无"}`,
     `交互项：${perception.interactiveOptions?.join("、") || "无"}`,
     `警告：${perception.alerts?.join("、") || "无"}`
-  ].join("\n");
+  ];
+
+  if (perception.sceneLabel && perception.sceneLabel !== "未判定") {
+    lines.push(`场景标签：${perception.sceneLabel}`);
+  }
+  if (perception.npcNames?.length) {
+    lines.push(`NPC：${perception.npcNames.join("、")}`);
+  }
+  if (perception.ocrText) {
+    lines.push(`OCR 文字：${perception.ocrText}`);
+  }
+
+  return lines.join("\n");
 }
 
 function buildPlannerHistoryUserMessage(message) {
@@ -116,10 +125,13 @@ function buildCurrentPlannerUserMessage({ instruction, scene, perception }) {
     : null;
 
   return [
+    "你是籽小刀。",
+    `当前任务：按籽岷这轮指令规划下一步动作。`,
     `当前场景：${sceneDescription(scene)}`,
     `籽岷指令：${instruction}`,
     lingshuContextLine,
-    "最新观察：",
+    "当前上下文：最新观察如下",
+    "输出要求：只为当前这一轮返回规划结果。",
     buildPerceptionContext(perception)
   ].filter(Boolean).join("\n");
 }

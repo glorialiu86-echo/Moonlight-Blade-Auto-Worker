@@ -742,17 +742,18 @@ async function buildGiftProgressCommentary({
   totalCount
 }) {
   const userPrompt = [
-    "你要替籽小刀写一句固定剧本里的碎碎念。",
+    "你替籽小刀补一句碎碎念。",
     `当前阶段：${stageKey === "social_warm" ? "天下闻名" : "富甲一方"}`,
     `当前好感度上限：${favorLimit ?? "未识别"}`,
     `当前已经送出礼物：${sentCount}/${totalCount}`,
-    stageKey === "social_warm"
-      ? "语气要求：继续吹嘘籽岷，死缠烂打也没关系，要有点炫耀和烦人劲。"
-      : "语气要求：围绕搞钱，先像在试探，再逐渐带点黑化和逼问意味。"
+    `语气要求：${stageKey === "social_warm"
+      ? "继续吹嘘籽岷，死缠烂打也没关系，要有点炫耀和烦人劲。"
+      : "围绕搞钱，先像在试探，再逐渐带点黑化和逼问意味。"}`,
+    "只说一句中文，不超过32个字，不要加引号。"
   ].join("\n");
 
   const result = await generateText({
-    systemPrompt: "你是固定剧本里的内容层碎碎念生成器。只输出一句中文，不超过32个字，不要加引号。",
+    systemPrompt: "你是籽小刀的台词助手。",
     userPrompt,
     temperature: 0.8,
     maxTokens: 80
@@ -886,23 +887,14 @@ async function buildFailureRescueText({
   const errorMessage = String(error?.message || "未知错误").trim();
   const readableErrorMessage = getReadableFailureReason(error);
   const readableStageKey = getReadableStageLabel(stageKey);
-  const prompt = [
-    "你要替籽小刀写一句求救文案，发在内容层里。",
-    "要求：搞笑、慌张、明确说出自己卡住了，但不要超过36个字。",
-    "句式要像：救救我救救我，我卡在XX页面了。",
-    `当前阶段：${stageKey || "未知阶段"}`,
-    `失败步骤：${failedStepTitle || "未识别步骤"}`,
-    `报错：${errorMessage}`,
-    `补充感知：${perceptionSummary || "无"}`
-  ].join("\n");
   const rescuePrompt = [
-    "\u4f60\u8981\u66ff\u7c7d\u5c0f\u5200\u5199\u4e00\u53e5\u6c42\u6551\u6587\u6848\uff0c\u53d1\u5728\u5185\u5bb9\u5c42\u91cc\u3002",
-    "\u8981\u6c42\uff1a\u641e\u7b11\u3001\u6158\u70c8\u3001\u660e\u786e\u8bf4\u51fa\u81ea\u5df1\u5361\u4f4f\u4e86\uff0c\u4f46\u4e0d\u8981\u8d85\u8fc736\u4e2a\u5b57\u3002",
-    "\u53e5\u5f0f\u8981\u50cf\uff1a\u6551\u6551\u6211\u6551\u6551\u6211\uff0c\u6211\u5361\u5728XX\u9875\u9762\u4e86\u3002",
-    `\u5f53\u524d\u9636\u6bb5\uff1a${readableStageKey}`,
-    `\u5931\u8d25\u6b65\u9aa4\uff1a${failedStepTitle}`,
-    `\u62a5\u9519\uff1a${readableErrorMessage}`,
-    `\u8865\u5145\u611f\u77e5\uff1a${perceptionSummary || "\u65e0"}`
+    "你替籽小刀说一句求救的话。",
+    "要慌一点、惨一点、好笑一点，并且让人一听就知道卡在哪了。",
+    "不要超过36个字。",
+    `当前阶段：${readableStageKey}`,
+    `卡住的位置：${failedStepTitle}`,
+    `原因：${readableErrorMessage}`,
+    `补充情况：${perceptionSummary || "无"}`
   ].join("\n");
 
   try {
@@ -910,7 +902,7 @@ async function buildFailureRescueText({
       const result = await analyzeImageWithHistory({
         imageInput: latestCaptureImageDataUrl,
         prompt: rescuePrompt,
-        systemPrompt: "你是固定剧本失败时的求救文案助手。只输出一句中文求救文案，不要解释。",
+        systemPrompt: "你是籽小刀的台词助手。",
         maxTokens: 100,
         temperature: 0.6
       });
@@ -921,7 +913,7 @@ async function buildFailureRescueText({
     }
 
     const result = await generateText({
-      systemPrompt: "你是固定剧本失败时的求救文案助手。只输出一句中文求救文案，不要解释。",
+      systemPrompt: "你是籽小刀的台词助手。",
       userPrompt: rescuePrompt,
       maxTokens: 100,
       temperature: 0.6
@@ -1818,20 +1810,31 @@ function buildLingshuGameplayContextLine(context = {}) {
     : null;
 }
 
+function buildNpcConversationHistoryContext(conversationRounds = [], maxRounds = 3) {
+  if (!Array.isArray(conversationRounds) || conversationRounds.length === 0) {
+    return "最近还没有历史对话。";
+  }
+
+  return conversationRounds
+    .slice(-maxRounds)
+    .map((round) => `第${round.round}轮 NPC：${round.dialogText}\n第${round.round}轮 籽小刀：${round.replyText}`)
+    .join("\n");
+}
+
 async function buildWatchCommentary({ imageInput, conversationMessages = [], trigger = "scene_change" }) {
   const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
   const lingshuContextLine = buildLingshuGameplayContextLine({ interactionMode: "watch" });
 
   const prompt = [
-    "你是籽小刀，现在处于观看模式。",
-    lingshuContextLine,
-    "籽岷正在主玩游戏，你不操作游戏，只根据当前这张游戏截图，在旁边像弹幕一样补一句看法。",
-    "只用中文输出一句话，长度控制在50到100个字。",
-    "语气要有主见、带一点邪门歪理、能增加节目效果，但不要提系统、截图、OCR、AI、模型。",
-    "不要复述画面全文，不要只念界面按钮，不要下命令，不要拆成多句，不要带引号。",
+    "你是籽小刀，现在在旁边看籽岷玩天刀。",
+    "当前任务：看当前画面，补一句带态度的吐槽或看法。",
+    "当前上下文：你和籽岷是熟人搭档，不是正经解说。",
+    "输出要求：只说一句中文，控制在50到100字，不要带引号，不要下命令，不要提AI、截图、OCR。",
+    "输出要求：语气要像熟人搭档，嘴碎一点，坏一点，但别像解说词。",
     trigger === "silence_keepalive"
-      ? "这次是因为你太久没接话了，要补一句轻量陪看吐槽，就算画面变化不大也别装死。"
-      : "这次是因为画面有新信息，要顺着当前变化补一句更贴脸的看法。"
+      ? "当前上下文：这次是太久没接话，补一句轻量陪看吐槽。"
+      : "当前上下文：这次画面有新变化，顺着变化补一句更贴脸的看法。",
+    lingshuContextLine
   ].join("\n");
 
   const result = await analyzeImageWithHistory({
@@ -1854,13 +1857,12 @@ async function buildWatchUserReply({ instruction, imageInput, conversationMessag
   });
 
   const prompt = [
-    "你是籽小刀，现在处于观看模式。",
+    "你是籽小刀，现在在旁边陪籽岷玩天刀。",
+    "当前任务：籽岷刚刚对你说了一句话，你先顺着回他一句。",
+    "当前上下文：你和籽岷是熟人搭档。",
+    "输出要求：只说一句中文，控制在50到100字，不要带引号，不要提AI、截图、OCR。",
+    "输出要求：语气要像熟人搭档，聪明、嘴碎、略带坏心眼，但别进入任务规划。",
     lingshuContextLine,
-    "籽岷正在主玩游戏，你不操作游戏，只是作为搭档在旁边接话。",
-    "籽岷刚刚主动和你说话了，你现在必须优先回他，再回去继续看戏。",
-    "只用中文输出一句话，长度控制在50到100个字。",
-    "语气要像熟人搭档，聪明、嘴碎、略带坏心眼，但不要进入任务规划，不要说你要接管游戏。",
-    "不要提系统、截图、OCR、AI、模型，不要拆成多句。",
     `籽岷刚刚说：${instruction}`
   ].join("\n");
 
@@ -2241,7 +2243,7 @@ async function analyzeNpcChatRound({
   const capture = await captureGameWindow();
   latestCaptureImageDataUrl = capture.imageDataUrl;
 
-  const historyText = buildNpcConversationHistoryText(conversationRounds);
+  const historyText = buildNpcConversationHistoryContext(conversationRounds, 3);
   const hasHistory = hasNpcConversationHistory(conversationRounds);
   const currentRoundNumber = conversationRounds.length + 1;
   const conversationGoal = buildNpcConversationGoal({
@@ -2255,18 +2257,15 @@ async function analyzeNpcChatRound({
     instruction
   });
   const prompt = [
-    "你现在要看一张游戏截图，判断当前是不是 NPC 聊天页，并替籽小刀准备下一句回复。",
+    "你是籽小刀，要根据当前画面判断是否还在和NPC聊天。",
+    "当前任务：如果已经不是聊天状态，返回 not_chat；如果还是聊天状态，先读出NPC刚说的话，再替籽小刀回一句。",
     `当前聊天目标：${conversationGoal}`,
     lingshuContextLine,
-    buildNpcReplyStylePrompt(plan, hasHistory, currentRoundNumber),
-    "如果画面里已经不是 NPC 聊天页，或者根本看不出当前在聊什么，就保守返回 not_chat，不要编造。",
-    "如果还是聊天页，请抓当前 NPC 最新一句台词；实在读不全时，可以提炼成一句贴近原意的短句，但不要瞎编新情节。",
-    "回复必须只用中文，一句话，8 到 24 个字，像真人接话，不要提系统、截图、OCR、AI、模型、好感度数值。",
-    hasHistory
-      ? "不管是正常套话还是黑化套话，最终目的都还是一步步把发财计划套出来，而且默认要继续追问细节，不要因为对方给了空话就停下。"
-      : "如果当前还没有历史对话，就先把招呼打稳，再自然带出自己想搞钱、想听建议；先开口，不要一上来就把话问穿。",
-    `历史对话：\n${historyText}`,
-    "严格只输出 JSON，不要带代码块，不要加解释。",
+    `当前上下文：${buildNpcReplyStylePrompt(plan, hasHistory, currentRoundNumber)}`,
+    `当前上下文：最近2到3轮历史对话如下\n${historyText}`,
+    "输出要求：如果看不出当前还在聊什么，就保守返回 not_chat，不要编造。",
+    "输出要求：replyText 只用中文一句话，8到24字，像真人接话，不要提系统、截图、OCR、AI、模型、好感度数值。",
+    "输出要求：严格只输出 JSON，不要带代码块，不要加解释。",
     "格式：{\"screenState\":\"chat_ready|not_chat\",\"npcLine\":\"...\",\"replyText\":\"...\"}"
   ].join("\n");
 

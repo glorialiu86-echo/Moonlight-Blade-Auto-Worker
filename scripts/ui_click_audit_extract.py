@@ -57,8 +57,6 @@ VIDEO_AUDIT_PLAN: dict[str, tuple[AuditFrame, ...]] = {
     "叫卖.mp4": (
         AuditFrame("hawking_inventory", 8.0, ("hawking_inventory_first_slot",)),
         AuditFrame("hawking_quantity", 14.0, ("hawking_max_quantity",)),
-        AuditFrame("hawking_stock", 19.0, ("hawking_stock_button",)),
-        AuditFrame("hawking_submit", 28.0, ("hawking_submit",)),
     ),
     "潜行-妙取.mp4": (
         AuditFrame("steal_button_1", 4.0, ("steal_button_1",)),

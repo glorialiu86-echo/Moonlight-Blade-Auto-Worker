@@ -242,7 +242,7 @@ ACTION_POINTS = {
     "close_panel": (2004 / 2048, 32 / 1152),
     "trade_left_item_tab": (49 / 2544, 530 / 1388),
     "trade_left_item_slot": (166 / 2544, 388 / 1388),
-    "trade_left_up_shelf_button": (1604 / 2544, 1090 / 1388),
+    "trade_left_up_shelf_button": (938 / 2544, 1121 / 1388),
     "trade_sell_money_slot": (2038 / 2544, 120 / 1388),
     "trade_gift_item_tab": (49 / 2544, 530 / 1388),
     "trade_gift_item_slot": (166 / 2544, 388 / 1388),
@@ -265,8 +265,6 @@ ACTION_POINTS = {
     "vendor_purchase_item_moding": (2051 / 2544, 485 / 1388),
     "hawking_inventory_first_slot": (2072 / 2544, 216 / 1388),
     "hawking_max_quantity": (1776 / 2544, 706 / 1388),
-    "hawking_stock_button": (1714 / 2544, 866 / 1388),
-    "hawking_submit": (2320 / 2544, 1328 / 1388),
     "steal_button_1": (2371 / 2544, 614 / 1388),
     "steal_button_2": (1916 / 2048, 704 / 1360),
     "steal_button_3": (1916 / 2048, 893 / 1360),
@@ -4198,7 +4196,8 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
     INPUT_GUARD.guarded_sleep(1000, title)
     max_quantity_click = click_named_point(hwnd, "hawking_max_quantity")
     INPUT_GUARD.guarded_sleep(1000, title)
-    stock_click = click_named_point(hwnd, "hawking_stock_button")
+    stock_key = str(action.get("stockKey") or resolve_shortcut_key("hawking"))
+    pydirectinput.press(stock_key)
     settle_ms = int(action.get("postDelayMs") or 1000)
     INPUT_GUARD.guarded_sleep(settle_ms, title)
     after_state, after_checks = retry_probe_state(
@@ -4214,13 +4213,13 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Selected the first hawking item, maximized quantity, and clicked the stock button",
+        "detail": "Selected the first hawking item, maximized quantity, and pressed the hawking shortcut",
         "input": {
             "mode": "stock_first_hawking_item",
             "beforeText": hawking_state["text"],
             "inventoryClick": inventory_click,
             "maxQuantityClick": max_quantity_click,
-            "stockClick": stock_click,
+            "stockKey": stock_key,
             "afterText": after_text,
             "afterChecks": after_checks,
             "settleMs": settle_ms,
@@ -5430,7 +5429,8 @@ def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("Current screen is not hawking screen")
 
     submit_ready_delay_ms = max(400, int(action.get("submitReadyDelayMs") or 1000))
-    submit_click = click_named_point(hwnd, "hawking_submit")
+    submit_key = str(action.get("submitKey") or "3")
+    pydirectinput.press(submit_key)
     INPUT_GUARD.guarded_sleep(submit_ready_delay_ms, title)
     runtime_state = detect_hawking_runtime_state(hwnd)
 
@@ -5439,13 +5439,13 @@ def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         "title": title,
         "status": "performed",
         "detail": (
-            f"Clicked hawking submit and observed "
+            f"Pressed hawking runtime shortcut and observed "
             f"{'active' if runtime_state['active'] else 'ready' if runtime_state['ready'] else 'unknown'} runtime state"
         ),
         "input": {
             "mode": "submit_hawking",
             "beforeText": hawking_state["text"],
-            "submitClick": submit_click,
+            "submitKey": submit_key,
             "submitReadyDelayMs": submit_ready_delay_ms,
             "afterText": runtime_state["text"],
             "active": bool(runtime_state["active"]),

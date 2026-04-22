@@ -1787,21 +1787,6 @@ function buildWatchHistoryMessages(conversationMessages = [], rounds = 5) {
   return selected;
 }
 
-function buildWatchCommentaryFingerprint(perception) {
-  if (!perception) {
-    return "";
-  }
-
-  return JSON.stringify({
-    sceneLabel: perception.sceneLabel || "",
-    summary: perception.summary || "",
-    ocrText: perception.ocrText || "",
-    npcNames: Array.isArray(perception.npcNames) ? perception.npcNames.slice(0, 4) : [],
-    interactiveOptions: Array.isArray(perception.interactiveOptions) ? perception.interactiveOptions.slice(0, 4) : [],
-    alerts: Array.isArray(perception.alerts) ? perception.alerts.slice(0, 4) : []
-  });
-}
-
 function buildLingshuGameplayContextLine(context = {}) {
   return shouldInjectLingshuGameplayContext(context)
     ? `灵枢玩法资料：${LINGSHU_GAMEPLAY_CONTEXT}`
@@ -1829,7 +1814,7 @@ async function buildWatchCommentary({ imageInput, conversationMessages = [] }) {
     "当前上下文：你和籽岷是熟人搭档，不是正经解说。",
     "输出要求：只说一句中文，控制在50到100字，不要带引号，不要下命令，不要提AI、截图、OCR。",
     "输出要求：语气要像熟人搭档，嘴碎一点，坏一点，但别像解说词。",
-    "当前上下文：这次画面有新变化，顺着变化补一句更贴脸的看法。",
+    "当前上下文：你现在就是在旁边陪看，顺手补一句带态度的接话。",
     lingshuContextLine
   ].join("\n");
 
@@ -1898,14 +1883,6 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
     return false;
   }
 
-  const fingerprint = buildWatchCommentaryFingerprint(perception);
-  const fingerprintUnchanged =
-    fingerprint && runtimeState.agent?.lastWatchCommentaryFingerprint === fingerprint;
-
-  if (fingerprintUnchanged) {
-    return false;
-  }
-
   const text = await buildWatchCommentary({
     imageInput,
     conversationMessages: runtimeState.messages
@@ -1928,7 +1905,7 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
 
   appendLog("info", "观看模式自动旁白已发送", {
     text,
-    trigger: "scene_change",
+    trigger: "scheduled_commentary",
     sceneLabel: perception.sceneLabel || "",
     alerts: perception.alerts || []
   });
@@ -1941,7 +1918,6 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
     lastTurnAt: new Date().toISOString(),
     lastAutonomousInstruction: "watch_commentary",
     lastWatchCommentaryAt: new Date().toISOString(),
-    lastWatchCommentaryFingerprint: fingerprint,
     watchCommentaryCooldownUntil: null,
     autonomousTurnCount: (runtimeState.agent?.autonomousTurnCount || 0) + 1
   });

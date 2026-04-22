@@ -75,7 +75,6 @@ const NPC_CHAT_MAX_ROUNDS = 10;
 const NPC_CHAT_POLL_DELAY_MS = 5000;
 const FIXED_SCRIPT_COMMENTARY_PAUSE_MS = 1200;
 const WATCH_COMMENTARY_MIN_INTERVAL_MS = 10000;
-const WATCH_COMMENTARY_MAX_SILENCE_MS = 5000;
 const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
 const DARK_CLOSE_RESTART_BUDGET = 2;
 let voiceAutoCaptureHoldActive = false;
@@ -1820,7 +1819,7 @@ function buildNpcConversationHistoryContext(conversationRounds = [], maxRounds =
     .join("\n");
 }
 
-async function buildWatchCommentary({ imageInput, conversationMessages = [], trigger = "scene_change" }) {
+async function buildWatchCommentary({ imageInput, conversationMessages = [] }) {
   const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
   const lingshuContextLine = buildLingshuGameplayContextLine({ interactionMode: "watch" });
 
@@ -1830,9 +1829,7 @@ async function buildWatchCommentary({ imageInput, conversationMessages = [], tri
     "当前上下文：你和籽岷是熟人搭档，不是正经解说。",
     "输出要求：只说一句中文，控制在50到100字，不要带引号，不要下命令，不要提AI、截图、OCR。",
     "输出要求：语气要像熟人搭档，嘴碎一点，坏一点，但别像解说词。",
-    trigger === "silence_keepalive"
-      ? "当前上下文：这次是太久没接话，补一句轻量陪看吐槽。"
-      : "当前上下文：这次画面有新变化，顺着变化补一句更贴脸的看法。",
+    "当前上下文：这次画面有新变化，顺着变化补一句更贴脸的看法。",
     lingshuContextLine
   ].join("\n");
 
@@ -1902,17 +1899,16 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
   }
 
   const fingerprint = buildWatchCommentaryFingerprint(perception);
-  const fingerprintUnchanged = fingerprint && runtimeState.agent?.lastWatchCommentaryFingerprint === fingerprint;
-  const silenceTooLong = !lastCommentaryAt || now - lastCommentaryAt >= WATCH_COMMENTARY_MAX_SILENCE_MS;
+  const fingerprintUnchanged =
+    fingerprint && runtimeState.agent?.lastWatchCommentaryFingerprint === fingerprint;
 
-  if (fingerprintUnchanged && !silenceTooLong) {
+  if (fingerprintUnchanged) {
     return false;
   }
 
   const text = await buildWatchCommentary({
     imageInput,
-    conversationMessages: runtimeState.messages,
-    trigger: fingerprintUnchanged ? "silence_keepalive" : "scene_change"
+    conversationMessages: runtimeState.messages
   });
 
   if (!text) {
@@ -1932,7 +1928,7 @@ async function maybeRunWatchCommentaryTurn(runtimeState) {
 
   appendLog("info", "观看模式自动旁白已发送", {
     text,
-    trigger: fingerprintUnchanged ? "silence_keepalive" : "scene_change",
+    trigger: "scene_change",
     sceneLabel: perception.sceneLabel || "",
     alerts: perception.alerts || []
   });

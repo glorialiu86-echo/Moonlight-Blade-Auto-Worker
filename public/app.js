@@ -23,11 +23,13 @@ const state = {
     lastVoiceAt: 0,
     lastProcessAt: 0,
     activityNotified: false,
-    sending: false
+    sending: false,
+    noiseFloorRms: 0
   }
 };
 
-const VOICE_ACTIVITY_RMS_THRESHOLD = 0.009;
+const VOICE_ACTIVITY_RMS_THRESHOLD = 0.0008;
+const VOICE_ACTIVITY_DYNAMIC_THRESHOLD_MULTIPLIER = 1.15;
 const VOICE_AUTO_SEND_SILENCE_MS = 2000;
 const VOICE_MIN_SPEECH_MS = 450;
 const VOICE_CAPTURE_STALL_MS = 1800;
@@ -439,6 +441,14 @@ function resetVoiceState() {
   state.voice.lastVoiceAt = 0;
   state.voice.lastProcessAt = 0;
   state.voice.activityNotified = false;
+  state.voice.noiseFloorRms = 0;
+}
+
+function getVoiceActivityThreshold() {
+  const baseline = state.voice.noiseFloorRms > 0
+    ? state.voice.noiseFloorRms * VOICE_ACTIVITY_DYNAMIC_THRESHOLD_MULTIPLIER
+    : 0;
+  return Math.max(VOICE_ACTIVITY_RMS_THRESHOLD, baseline);
 }
 
 async function releaseVoiceCapture() {
@@ -674,7 +684,15 @@ async function startVoiceRecording() {
       state.voice.lastProcessAt = Date.now();
       const samples = new Float32Array(event.inputBuffer.getChannelData(0));
       const rms = computeRms(samples);
-      if (rms >= VOICE_ACTIVITY_RMS_THRESHOLD) {
+      if (!state.voice.speechDetected) {
+        if (state.voice.noiseFloorRms > 0) {
+          state.voice.noiseFloorRms = (state.voice.noiseFloorRms * 0.92) + (rms * 0.08);
+        } else {
+          state.voice.noiseFloorRms = rms;
+        }
+      }
+
+      if (rms >= getVoiceActivityThreshold()) {
         if (!state.voice.speechDetected) {
           state.voice.speechStartedAt = Date.now();
         }

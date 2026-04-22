@@ -77,6 +77,7 @@
 - 只在观看模式下触发
 - 只受 `WATCH_COMMENTARY_MIN_INTERVAL_MS = 10000` 控制
 - 如果刚回复过籽岷，还会受 `watchCommentaryCooldownUntil` 冷却控制
+- 如果语音占用中，还会被 `voiceAutoCaptureHoldActive` 直接拦住
 - 不再判断“画面有变化”
 - 不再存在“太久没接话”的保活链路
 

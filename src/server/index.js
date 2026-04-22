@@ -3751,6 +3751,9 @@ async function maybeRunAutonomousTurn() {
 
   if (!automation || ["idle", "paused", "completed"].includes(automation.status)) {
     if ((runtimeState.interactionMode || "act") === "watch") {
+      if (voiceAutoCaptureHoldActive) {
+        return;
+      }
       await maybeRunWatchCommentaryTurn(runtimeState);
     }
     return;

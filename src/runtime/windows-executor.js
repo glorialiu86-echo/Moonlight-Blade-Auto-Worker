@@ -87,19 +87,19 @@ export function createFixedStreetWanderActions() {
   return [
     createPressKeyAction("fixed-street-wander-1", "原地先往前晃一小段", "w", {
       durationMs: 5000,
-      postDelayMs: 260
+      postDelayMs: 500
     }),
     createPressKeyAction("fixed-street-wander-2", "原地往左侧乱拐一小段", "a", {
       durationMs: 5000,
-      postDelayMs: 260
+      postDelayMs: 500
     }),
     createPressKeyAction("fixed-street-wander-3", "原地往后退着晃一小段", "s", {
       durationMs: 5000,
-      postDelayMs: 260
+      postDelayMs: 500
     }),
     createPressKeyAction("fixed-street-wander-4", "原地往右侧再晃一小段", "d", {
       durationMs: 5000,
-      postDelayMs: 320
+      postDelayMs: 500
     }),
     createSleepAction("fixed-street-wander-5", "停下来缓一口气", 700)
   ];
@@ -424,7 +424,7 @@ export function createFixedSellLoopActions(options = {}) {
       retryLimit: 5,
       forwardPulseMs: 180,
       dragDurationMs: 220,
-      settleMs: 280
+      settleMs: 500
     }),
     createWorkerAction("fixed-sale-4", "按 F 打开阿依娜进货页", "open_named_vendor_purchase", {
       targetName: "阿依娜",
@@ -714,7 +714,7 @@ function createWorkerActions(plan) {
         return {
           ...baseAction,
           type: "focus_window",
-          postDelayMs: 200
+          postDelayMs: 500
         };
     }
   });
@@ -916,7 +916,7 @@ export function createPrimitiveActions(sequenceName) {
           title: "Small Forward Step",
           type: "move_forward_pulse",
           movePulseMs: 180,
-          postDelayMs: 300
+          postDelayMs: 500
         },
         {
           id: "primitive-3",
@@ -925,7 +925,7 @@ export function createPrimitiveActions(sequenceName) {
           startRatio: [0.52, 0.48],
           endRatio: [0.68, 0.48],
           durationMs: 240,
-          postDelayMs: 300
+          postDelayMs: 500
         },
         {
           id: "primitive-4",
@@ -933,7 +933,7 @@ export function createPrimitiveActions(sequenceName) {
           type: "click_relative",
           xRatio: 0.50,
           yRatio: 0.46,
-          postDelayMs: 300
+          postDelayMs: 500
         }
       ];
     case "vendor_purchase_to_hawking":
@@ -1020,7 +1020,7 @@ export function createPrimitiveActions(sequenceName) {
           retryLimit: 5,
           forwardPulseMs: 180,
           dragDurationMs: 220,
-          settleMs: 280
+          settleMs: 500
         },
         {
           id: "primitive-4",

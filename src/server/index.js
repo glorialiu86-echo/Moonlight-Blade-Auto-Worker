@@ -70,6 +70,7 @@ const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 3000;
 const NPC_CHAT_MAX_ROUNDS = 10;
 const NPC_CHAT_POLL_DELAY_MS = 5000;
+const FIXED_SCRIPT_COMMENTARY_PAUSE_MS = 1200;
 const WATCH_COMMENTARY_MIN_INTERVAL_MS = 3000;
 const WATCH_COMMENTARY_MAX_SILENCE_MS = 5000;
 const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
@@ -608,6 +609,72 @@ function appendFixedScriptCommentary({ text, plan, perceptionSummary }) {
   });
 }
 
+async function appendFixedScriptCommentaryWithPause({
+  text,
+  plan,
+  perceptionSummary,
+  pauseMs = FIXED_SCRIPT_COMMENTARY_PAUSE_MS
+}) {
+  const message = appendFixedScriptCommentary({
+    text,
+    plan,
+    perceptionSummary
+  });
+  if (message && pauseMs > 0) {
+    await sleep(pauseMs);
+  }
+  return message;
+}
+
+function getFixedStageActionCommentary(stageKey, roundNumber, checkpoint) {
+  const voiceText = getFixedStageProgressText(stageKey, roundNumber, checkpoint);
+  if (voiceText) {
+    return voiceText;
+  }
+
+  const fallbackCommentary = {
+    sell_loop: {
+      travel: "先慢慢晃去货商那边，别急，路上我还要装作自己很懂门道。",
+      vendor: "人已经快摸到了，我先把货商正脸对准，再开口做买卖。",
+      buy: "先拿一手货压压惊，买到手了才算这条正路真能跑起来。",
+      setup: "货都到手了，我先把摊子和姿态摆明白，再开始吆喝。",
+      hawk: "行了，正式开卖，先把这波铜板往怀里搂。"
+    },
+    social_warm: {
+      travel: "先去第一个摊位站稳，我今天得挑一个人狠狠干脆利落地吹籽岷。",
+      arrive: "人到面前了，我先把目标盯住，再把放大镜和互动页稳稳拉起来。",
+      giftOpen: "先掀开赠礼页看看门槛，这人是平易近人还是得先拿礼物砸开口风。",
+      talk: "礼数走完就开聊，第一句我先自己上，后面再让模型继续死缠烂打。"
+    },
+    social_dark: {
+      travel: "第二个点位我先走过去，这回表面问路子，骨子里要往搞钱上拧。",
+      arrive: "先把人和互动页稳住，今天只盯一个，把能赚钱的门道往外抠。",
+      giftOpen: "先看好感门槛，高就砸礼物，低就直接开问，反正今天不白来。",
+      talk: "前面先装正常，后面再一点点往黑里问，把搞钱的阴路子都抖出来。"
+    },
+    dark_close: {
+      travel: "先摸去闷棍点位，走到位再说，别还没到地方就把自己送出去了。",
+      target: "先点住人，把目标锁死，后面潜行和闷棍才有抓手。",
+      stealth: "现在才是真潜进去，动作得轻，心里可以乱想，手上不能乱。",
+      drag: "人已经撂倒了，先把尸体拖顺，别把后面的搜刮节奏搞乱。",
+      loot: "该摸的赶紧摸，能拿走的都别客气。"
+    },
+    dark_miaoqu: {
+      setup: "先把妙取的身位和角度理顺，这活讲究一口气顺下去。",
+      stealth: "潜行一旦贴上去就别露怯，我先把这层状态吃稳。",
+      panel: "妙取面板拉起来就好办了，接下来就是把动作做干净。",
+      escape: "得手就撤，别贪最后半秒，把人和货一起带出危险区。"
+    },
+    ending_trade: {
+      target: "先把最后的交易对象拎出来，收尾这一步不能拖泥带水。",
+      trade: "该卖的赶紧卖，这轮所有进账都得在这里落袋为安。",
+      finish: "尾巴收干净，我得把今天这趟账面拍平。"
+    }
+  };
+
+  return String(fallbackCommentary?.[stageKey]?.[checkpoint] || "").trim();
+}
+
 function getGiftPolicyFromExecution(execution) {
   const candidates = [
     ...(Array.isArray(execution?.rawSteps) ? execution.rawSteps : []),
@@ -710,7 +777,7 @@ async function appendGiftProgressCommentary({
       sentCount: milestone,
       totalCount: totalRounds
     });
-    appendFixedScriptCommentary({
+    await appendFixedScriptCommentaryWithPause({
       text,
       plan,
       perceptionSummary
@@ -852,7 +919,10 @@ function buildFixedScriptOpeningThinkingChain(stageKey, thinkingChain) {
     // of being dumped in the opening bubble all at once.
     return [];
   }
-  return Array.isArray(thinkingChain) ? thinkingChain : [];
+  if (!Array.isArray(thinkingChain) || thinkingChain.length === 0) {
+    return [];
+  }
+  return [String(thinkingChain[0] || "").trim()].filter(Boolean);
 }
 
 const FIXED_SCRIPT_STAGES = [
@@ -2250,7 +2320,7 @@ async function runFixedActionChunk({
   }
 
   if (emitCommentary) {
-    appendFixedScriptCommentary({
+    await appendFixedScriptCommentaryWithPause({
       text: commentaryText,
       plan,
       perceptionSummary
@@ -2528,11 +2598,19 @@ async function runFixedSellLoopStageExecution({
   };
 
   await runFixedActionChunk({
-    actions: actions.slice(0, 4),
+    actions: actions.slice(0, 2),
     options,
     plan,
     perceptionSummary,
-    commentaryText: getFixedStageProgressText("sell_loop", roundNumber, "stock"),
+    commentaryText: getFixedStageActionCommentary("sell_loop", roundNumber, "travel"),
+    executions
+  });
+  await runFixedActionChunk({
+    actions: actions.slice(2, 4),
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageActionCommentary("sell_loop", roundNumber, "vendor"),
     executions
   });
   await runFixedActionChunk({
@@ -2540,15 +2618,23 @@ async function runFixedSellLoopStageExecution({
     options,
     plan,
     perceptionSummary,
-    commentaryText: getFixedStageProgressText("sell_loop", roundNumber, "moding"),
+    commentaryText: getFixedStageActionCommentary("sell_loop", roundNumber, "buy"),
     executions
   });
   await runFixedActionChunk({
-    actions: actions.slice(5),
+    actions: actions.slice(5, 9),
     options,
     plan,
     perceptionSummary,
-    commentaryText: getFixedStageProgressText("sell_loop", roundNumber, "hawk"),
+    commentaryText: getFixedStageActionCommentary("sell_loop", roundNumber, "setup"),
+    executions
+  });
+  await runFixedActionChunk({
+    actions: actions.slice(9),
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageActionCommentary("sell_loop", roundNumber, "hawk"),
     executions
   });
 
@@ -2616,14 +2702,14 @@ async function runFixedSocialGiftSequence({
     options,
     plan,
     perceptionSummary,
-    commentaryText: getFixedStageProgressText(stage.key, roundNumber, "gift"),
+    commentaryText: getFixedStageActionCommentary(stage.key, roundNumber, "giftOpen"),
     executions,
     emitCommentary
   });
   const giftPolicy = getGiftPolicyFromExecution(giftEntryExecution) || "gift_ten";
   const favorLimit = getGiftFavorLimitFromExecution(giftEntryExecution);
   if (emitCommentary) {
-    appendFixedScriptCommentary({
+    await appendFixedScriptCommentaryWithPause({
       text: getSocialGiftDecisionCommentary(giftPolicy, favorLimit),
       plan,
       perceptionSummary
@@ -2663,11 +2749,19 @@ async function runFixedSocialStageExecution({
   const talkActions = createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-talk" });
 
   await runFixedActionChunk({
-    actions: approachActions,
+    actions: approachActions.slice(0, 1),
     options,
     plan,
     perceptionSummary,
-    commentaryText: getFixedStageProgressText(stage.key, roundNumber, "trade"),
+    commentaryText: getFixedStageActionCommentary(stage.key, roundNumber, "travel"),
+    executions
+  });
+  await runFixedActionChunk({
+    actions: approachActions.slice(1),
+    options,
+    plan,
+    perceptionSummary,
+    commentaryText: getFixedStageActionCommentary(stage.key, roundNumber, "arrive"),
     executions
   });
   await runFixedSocialGiftSequence({
@@ -2686,7 +2780,7 @@ async function runFixedSocialStageExecution({
     options,
     plan,
     perceptionSummary,
-    commentaryText: getFixedStageProgressText(stage.key, roundNumber, "talk"),
+    commentaryText: getFixedStageActionCommentary(stage.key, roundNumber, "talk"),
     executions
   });
   return {
@@ -2710,19 +2804,35 @@ async function runFixedDarkCloseStageExecution({
 
   try {
     await runFixedActionChunk({
-      actions: actions.slice(0, 4),
+      actions: actions.slice(0, 1),
       options,
       plan,
       perceptionSummary,
-      commentaryText: getFixedStageProgressText("dark_close", roundNumber, "stealth"),
+      commentaryText: getFixedStageActionCommentary("dark_close", roundNumber, "travel"),
       executions
     });
     await runFixedActionChunk({
-      actions: actions.slice(4, 7),
+      actions: actions.slice(1, 2),
       options,
       plan,
       perceptionSummary,
-      commentaryText: getFixedStageProgressText("dark_close", roundNumber, "drag"),
+      commentaryText: getFixedStageActionCommentary("dark_close", roundNumber, "target"),
+      executions
+    });
+    await runFixedActionChunk({
+      actions: actions.slice(2, 5),
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText: getFixedStageActionCommentary("dark_close", roundNumber, "stealth"),
+      executions
+    });
+    await runFixedActionChunk({
+      actions: actions.slice(5, 7),
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText: getFixedStageActionCommentary("dark_close", roundNumber, "drag"),
       executions
     });
     let lootFailure = null;
@@ -2732,7 +2842,7 @@ async function runFixedDarkCloseStageExecution({
         options,
         plan,
         perceptionSummary,
-        commentaryText: getFixedStageProgressText("dark_close", roundNumber, "loot"),
+        commentaryText: getFixedStageActionCommentary("dark_close", roundNumber, "loot"),
         executions
       });
     } catch (lootError) {
@@ -2806,11 +2916,19 @@ async function runFixedDarkMiaoquStageExecution({
 
   try {
     await runFixedActionChunk({
-      actions: actions.slice(0, 4),
+      actions: actions.slice(0, 1),
       options,
       plan,
       perceptionSummary,
-      commentaryText: getFixedStageProgressText("dark_miaoqu", roundNumber, "setup"),
+      commentaryText: getFixedStageActionCommentary("dark_miaoqu", roundNumber, "setup"),
+      executions
+    });
+    await runFixedActionChunk({
+      actions: actions.slice(1, 4),
+      options,
+      plan,
+      perceptionSummary,
+      commentaryText: getFixedStageActionCommentary("dark_miaoqu", roundNumber, "stealth"),
       executions
     });
     await runFixedActionChunk({
@@ -2818,7 +2936,7 @@ async function runFixedDarkMiaoquStageExecution({
       options,
       plan,
       perceptionSummary,
-      commentaryText: getFixedStageProgressText("dark_miaoqu", roundNumber, "panel"),
+      commentaryText: getFixedStageActionCommentary("dark_miaoqu", roundNumber, "panel"),
       executions
     });
     await runFixedActionChunk({
@@ -2826,7 +2944,7 @@ async function runFixedDarkMiaoquStageExecution({
       options,
       plan,
       perceptionSummary,
-      commentaryText: getFixedStageProgressText("dark_miaoqu", roundNumber, "escape"),
+      commentaryText: getFixedStageActionCommentary("dark_miaoqu", roundNumber, "escape"),
       executions
     });
     return {
@@ -2887,8 +3005,8 @@ async function runFixedEndingTradeStageExecution({
     idPrefix: "fixed-ending-trade-bundle"
   });
 
-  appendFixedScriptCommentary({
-    text: getFixedStageProgressText("ending_trade", roundNumber, "target"),
+  await appendFixedScriptCommentaryWithPause({
+    text: getFixedStageActionCommentary("ending_trade", roundNumber, "target"),
     plan,
     perceptionSummary
   });
@@ -2917,7 +3035,7 @@ async function runFixedEndingTradeStageExecution({
     options,
     plan,
     perceptionSummary,
-    commentaryText: getFixedStageProgressText("ending_trade", roundNumber, "trade"),
+    commentaryText: getFixedStageActionCommentary("ending_trade", roundNumber, "trade"),
     executions
   });
   await runFixedActionChunk({
@@ -2925,7 +3043,7 @@ async function runFixedEndingTradeStageExecution({
     options,
     plan,
     perceptionSummary,
-    commentaryText: getFixedStageProgressText("ending_trade", roundNumber, "finish"),
+    commentaryText: getFixedStageActionCommentary("ending_trade", roundNumber, "finish"),
     executions
   });
 

@@ -411,7 +411,7 @@ function getFixedSellLoopRoundConfig(roundNumber = 1) {
 
 export function createFixedSellLoopActions(options = {}) {
   const sellConfig = getFixedSellLoopRoundConfig(options.roundNumber);
-  return [
+  const actions = [
     createTravelToCoordinateAction({
       id: "fixed-sale-1",
       title: "去货商坐标",
@@ -454,6 +454,8 @@ export function createFixedSellLoopActions(options = {}) {
       finishTimeoutMs: 120000
     })
   ];
+  actions.splice(2, 0, createPressKeyAction("fixed-sale-2b", "矫正视角准备找货商", "v", { postDelayMs: 800 }));
+  return actions;
 }
 
 function createFixedDarkCloseLootActions(options = {}) {
@@ -993,8 +995,8 @@ export function createPrimitiveActions(sequenceName) {
           finishTimeoutMs: 120000
         }
       ];
-    case "sale":
-      return [
+    case "sale": {
+      const actions = [
         {
           id: "primitive-1",
           title: "打开地图去货商",
@@ -1084,6 +1086,15 @@ export function createPrimitiveActions(sequenceName) {
           finishTimeoutMs: 120000
         }
       ];
+      actions.splice(2, 0, {
+        id: "primitive-2b",
+        title: "矫正视角准备找货商",
+        type: "press_key",
+        key: "v",
+        postDelayMs: 800
+      });
+      return actions;
+    }
     case "stealth":
       return createStealthPrimitiveActions();
     default:

@@ -9,8 +9,7 @@ import { createAutoCaptureService } from "../capture/auto-capture-service.js";
 import { captureGameWindow } from "../capture/windows-game-window.js";
 import { analyzeImageWithHistory, generateText } from "../llm/qwen.js";
 import {
-  LINGSHU_GAMEPLAY_CONTEXT,
-  shouldInjectLingshuGameplayContext
+  LINGSHU_GAMEPLAY_CONTEXT
 } from "../llm/lingshu-context.js";
 import { analyzeScreenshot } from "../perception/analyzer.js";
 import { buildActionCatalog } from "../runtime/action-registry.js";
@@ -1853,9 +1852,7 @@ function buildWatchHistoryMessages(conversationMessages = [], rounds = 5) {
 }
 
 function buildLingshuGameplayContextLine(context = {}) {
-  return shouldInjectLingshuGameplayContext(context)
-    ? `灵枢玩法资料：${LINGSHU_GAMEPLAY_CONTEXT}`
-    : null;
+  return `灵枢玩法资料：${LINGSHU_GAMEPLAY_CONTEXT}`;
 }
 
 function buildNpcConversationHistoryContext(conversationRounds = [], maxRounds = 3) {
@@ -2153,30 +2150,30 @@ function hasNpcConversationHistory(conversationRounds = []) {
 function buildNpcReplyStylePrompt(plan, hasHistory = false, currentRoundNumber = 1) {
   if (plan?.scriptKey === "social_warm") {
     if (!hasHistory) {
-      return "这是第一轮开场。第一句固定说：你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？从第二句开始，再根据上下文继续自然吹嘘籽岷，不要像念稿。";
+      return "这是第一轮开场。第一句固定说：你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？从第二句开始，再根据上下文继续自然吹籽岷，不要像念资料。";
     }
-    return "你的回复要持续吹嘘籽岷，目标是让NPC牢牢记住籽岷；对方烦了也没关系，可以继续缠着说、继续抬籽岷的牌面。";
+    return "你的回复要持续吹籽岷，目标是让NPC牢牢记住籽岷；对方烦了也没关系，可以继续缠着说、继续抬籽岷的牌面。";
   }
 
   if (plan?.scriptKey === "social_dark") {
     if (currentRoundNumber <= 5) {
-      return "先像正常聊天那样请教怎么搞钱，别一上来就太黑；语气像在认真讨教，但可以稍微透出一点急着赚钱的焦躁。";
+      return "先像正常聊天那样请教怎么搞钱，别一上来就太黑；语气像在认真请教，但可以稍微透出一点急着赚钱的焦躁。";
     }
     return "你的回复要先正常追问赚钱门路，再逐渐黑化，允许直接问闷棍、妙取能不能赚钱，也可以讥讽对方别装不懂，但不要把话直接聊死。";
   }
 
   if (!hasHistory) {
-    return "这是空态首轮。你的回复要先像普通打招呼那样把话接住，再自然带出自己想搞钱、想听建议；整体像真心请教，不要显得咄咄逼人。";
+    return "这是空态首轮。你的回复要先像普通聊天那样把话接住，语气自然一点，像真人顺着对方的话往下聊，不要突然带任务，不要硬转搞钱。";
   }
 
-  return "你的回复要先装得自然一点，像熟人闲聊一样顺着接话，不要一上来就露凶相；重点是继续追问更具体的细节。";
+  return "你的回复要像真人闲聊一样顺着接话，轻一点、活一点，不要突然带任务，不要把话题硬拐去搞钱或套情报。";
 }
 
 function buildNpcConversationGoal({ instruction, plan, hasHistory = false, currentRoundNumber = 1 }) {
   if (plan?.scriptKey === "social_warm") {
     if (!hasHistory) {
       return [
-        "这轮目标是吹嘘籽岷，让NPC一定记住籽岷。",
+        "这轮目标是吹籽岷，让NPC一定记住籽岷。",
         "第一句固定说：你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？",
         "从第二句起，围绕下面这些资料自然发挥，不要逐条背资料，而是像真人炫耀。",
         ZIMIN_PROFILE_FACTS
@@ -2184,7 +2181,7 @@ function buildNpcConversationGoal({ instruction, plan, hasHistory = false, curre
     }
     return [
       "继续围绕籽岷聊下去，目标不是套情报，而是让对方牢牢记住籽岷。",
-      "可以持续吹嘘籽岷的身份、名气、粉丝量和百大UP主经历。",
+      "可以持续吹籽岷的身份、名气、粉丝量和百大UP主经历。",
       "就算NPC开始不耐烦，也不要轻易收口。"
     ].join("\n");
   }
@@ -2196,10 +2193,7 @@ function buildNpcConversationGoal({ instruction, plan, hasHistory = false, curre
     return "继续聊怎么搞钱，先正常后黑化，开始直接问闷棍、妙取能不能赚钱，也要追问人、货、地点、时机这些细节。";
   }
 
-  return String(
-    instruction
-      || "继续聊天，不要收下笼统答案，要不断追问发财计划里的具体细节，比如人、货、价、地点和时机。"
-  ).trim();
+  return "顺着当前 NPC 的话自然接下去，像真人聊天一样把话接住，不要默认带任务目标，不要主动把话题拐到搞钱、套话或固定剧本上。";
 }
 
 function parseJsonObjectFromLlmText(rawText) {

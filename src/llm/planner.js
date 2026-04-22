@@ -94,40 +94,64 @@ function buildPerceptionContext(perception) {
   ].join("\n");
 }
 
-function buildTurnUserPrompt({ instruction, scene, perception, isLatest = false }) {
+function buildPlannerHistoryUserMessage(message) {
   return [
-    isLatest ? "这是当前最新一轮，请返回本轮 JSON 规划。" : "这是历史轮次，请按当时上下文理解。",
+    `籽岷：${message?.text || "无"}`,
+    `场景：${sceneDescription(message?.scene)}`,
+    `观察：${message?.perception?.summary || "无"}`
+  ].join("\n");
+}
+
+function buildCurrentPlannerUserMessage({ instruction, scene, perception }) {
+  return [
     `当前场景：${sceneDescription(scene)}`,
     `籽岷指令：${instruction}`,
-    "最近一张截图识别结果：",
+    "最新观察：",
     buildPerceptionContext(perception)
   ].join("\n");
 }
 
-function buildAssistantHistoryMessage(message) {
+function buildPlannerHistoryAssistantMessage(message) {
   if (!message?.plannerContext) {
     return String(message?.text || "无历史 assistant 内容。").trim();
   }
 
-  return JSON.stringify({
+  const planSummary = JSON.stringify({
     actions: Array.isArray(message.plannerContext.actions) ? message.plannerContext.actions : [],
     decide: message.plannerContext.decide || "",
     thinking: Array.isArray(message.plannerContext.thinking) ? message.plannerContext.thinking : []
   }, null, 2);
+
+  return `上轮规划结果：\n${planSummary}`;
+}
+
+function takeRecentCompleteTurns(conversationMessages, maxTurns = 3) {
+  const messages = conversationMessages.filter((message) => message?.role === "user" || message?.role === "assistant");
+  const turns = [];
+  let pendingUserMessage = null;
+
+  for (const message of messages) {
+    if (message.role === "user") {
+      pendingUserMessage = message;
+      continue;
+    }
+
+    if (message.role === "assistant" && pendingUserMessage) {
+      turns.push([pendingUserMessage, message]);
+      pendingUserMessage = null;
+    }
+  }
+
+  return turns.slice(-maxTurns).flat();
 }
 
 function buildHistoryMessages(conversationMessages) {
-  return conversationMessages
-    .filter((message) => message?.role === "user" || message?.role === "assistant")
+  return takeRecentCompleteTurns(conversationMessages)
     .map((message) => ({
       role: message.role,
       content: message.role === "user"
-        ? buildTurnUserPrompt({
-          instruction: message.text,
-          scene: message.scene,
-          perception: message.perception || null
-        })
-        : buildAssistantHistoryMessage(message)
+        ? buildPlannerHistoryUserMessage(message)
+        : buildPlannerHistoryAssistantMessage(message)
     }));
 }
 
@@ -421,11 +445,10 @@ export async function createTurnPlan({ instruction, scene, conversationMessages 
     const response = await generateText({
       systemPrompt: plannerSystemPrompt,
       historyMessages: buildHistoryMessages(conversationMessages),
-      userPrompt: buildTurnUserPrompt({
+      userPrompt: buildCurrentPlannerUserMessage({
         instruction,
         scene,
-        perception,
-        isLatest: true
+        perception
       }),
       useReasoningModel: false,
       maxTokens: 300,

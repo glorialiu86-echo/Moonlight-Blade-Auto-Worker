@@ -1,6 +1,10 @@
 import { generateText } from "./qwen.js";
 import { extractJsonObject } from "../lib/json.js";
 import { ALLOWED_ACTIONS } from "../runtime/action-registry.js";
+import {
+  LINGSHU_GAMEPLAY_CONTEXT,
+  shouldInjectLingshuGameplayContext
+} from "./lingshu-context.js";
 
 // Note: the current actions whitelist is still incomplete.
 // We still need to expand and refine the behavior paths behind these actions.
@@ -103,12 +107,21 @@ function buildPlannerHistoryUserMessage(message) {
 }
 
 function buildCurrentPlannerUserMessage({ instruction, scene, perception }) {
+  const lingshuContextLine = shouldInjectLingshuGameplayContext({
+    scene,
+    sceneLabel: perception?.sceneLabel || "",
+    instruction
+  })
+    ? `灵枢玩法资料：${LINGSHU_GAMEPLAY_CONTEXT}`
+    : null;
+
   return [
     `当前场景：${sceneDescription(scene)}`,
     `籽岷指令：${instruction}`,
+    lingshuContextLine,
     "最新观察：",
     buildPerceptionContext(perception)
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 function buildPlannerHistoryAssistantMessage(message) {

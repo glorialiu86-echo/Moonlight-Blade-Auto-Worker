@@ -9,6 +9,10 @@ import { createAutoCaptureService } from "../capture/auto-capture-service.js";
 import { captureGameWindow } from "../capture/windows-game-window.js";
 import { analyzeImageWithHistory, generateText } from "../llm/qwen.js";
 import { createTurnPlan } from "../llm/planner.js";
+import {
+  LINGSHU_GAMEPLAY_CONTEXT,
+  shouldInjectLingshuGameplayContext
+} from "../llm/lingshu-context.js";
 import { analyzeScreenshot } from "../perception/analyzer.js";
 import { buildActionCatalog } from "../runtime/action-registry.js";
 import {
@@ -1810,11 +1814,19 @@ function buildWatchCommentaryFingerprint(perception) {
   });
 }
 
+function buildLingshuGameplayContextLine(context = {}) {
+  return shouldInjectLingshuGameplayContext(context)
+    ? `灵枢玩法资料：${LINGSHU_GAMEPLAY_CONTEXT}`
+    : null;
+}
+
 async function buildWatchCommentary({ imageInput, conversationMessages = [], trigger = "scene_change" }) {
   const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
+  const lingshuContextLine = buildLingshuGameplayContextLine({ interactionMode: "watch" });
 
   const prompt = [
     "你是籽小刀，现在处于观看模式。",
+    lingshuContextLine,
     "籽岷正在主玩游戏，你不操作游戏，只根据当前这张游戏截图，在旁边像弹幕一样补一句看法。",
     "只用中文输出一句话，长度控制在50到100个字。",
     "语气要有主见、带一点邪门歪理、能增加节目效果，但不要提系统、截图、OCR、AI、模型。",
@@ -1838,9 +1850,14 @@ async function buildWatchCommentary({ imageInput, conversationMessages = [], tri
 
 async function buildWatchUserReply({ instruction, imageInput, conversationMessages = [] }) {
   const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
+  const lingshuContextLine = buildLingshuGameplayContextLine({
+    interactionMode: "watch",
+    instruction
+  });
 
   const prompt = [
     "你是籽小刀，现在处于观看模式。",
+    lingshuContextLine,
     "籽岷正在主玩游戏，你不操作游戏，只是作为搭档在旁边接话。",
     "籽岷刚刚主动和你说话了，你现在必须优先回他，再回去继续看戏。",
     "只用中文输出一句话，长度控制在50到100个字。",
@@ -2235,9 +2252,14 @@ async function analyzeNpcChatRound({
     hasHistory,
     currentRoundNumber
   });
+  const lingshuContextLine = buildLingshuGameplayContextLine({
+    scriptKey: plan?.scriptKey || "",
+    instruction
+  });
   const prompt = [
     "你现在要看一张游戏截图，判断当前是不是 NPC 聊天页，并替籽小刀准备下一句回复。",
     `当前聊天目标：${conversationGoal}`,
+    lingshuContextLine,
     buildNpcReplyStylePrompt(plan, hasHistory, currentRoundNumber),
     "如果画面里已经不是 NPC 聊天页，或者根本看不出当前在聊什么，就保守返回 not_chat，不要编造。",
     "如果还是聊天页，请抓当前 NPC 最新一句台词；实在读不全时，可以提炼成一句贴近原意的短句，但不要瞎编新情节。",

@@ -226,7 +226,6 @@ NPC_CAPTURE_SCAN_POINTS = [
 ]
 
 ACTION_POINTS = {
-    "view": (1362 / 2544, 931 / 1388),
     "talk": (1830 / 2544, 1217 / 1388),
     # User-pinned fixed UI point: small-talk entry center was re-marked from
     # the provided red-circle screenshot on April 20, 2026. Do not adjust
@@ -266,7 +265,7 @@ ACTION_POINTS = {
     "vendor_purchase_item_moding": (2051 / 2544, 485 / 1388),
     "hawking_inventory_first_slot": (2072 / 2544, 216 / 1388),
     "hawking_max_quantity": (1776 / 2544, 706 / 1388),
-    "hawking_stock_button": (1603 / 2544, 1011 / 1388),
+    "hawking_stock_button": (1714 / 2544, 866 / 1388),
     "hawking_submit": (2320 / 2544, 1328 / 1388),
     "steal_button_1": (2371 / 2544, 614 / 1388),
     "steal_button_2": (1916 / 2048, 704 / 1360),

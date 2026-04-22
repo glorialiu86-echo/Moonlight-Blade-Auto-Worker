@@ -22,6 +22,8 @@ class AuditFrame:
     label: str
     second: float
     points: tuple[str, ...]
+    frame_count: int = 5
+    frame_interval_ms: int = 200
 
 
 VIDEO_AUDIT_PLAN: dict[str, tuple[AuditFrame, ...]] = {
@@ -42,7 +44,6 @@ VIDEO_AUDIT_PLAN: dict[str, tuple[AuditFrame, ...]] = {
         AuditFrame("vendor_close", 24.0, ("vendor_purchase_close",)),
     ),
     "选人-点查看放大镜-拉起右下角UI-交易买一次卖一次-赠礼-聊天.mp4": (
-        AuditFrame("view", 5.0, ("view",)),
         AuditFrame("trade_entry", 13.0, ("trade",)),
         AuditFrame("trade_flow_left", 18.0, ("trade_left_item_tab", "trade_left_item_slot", "trade_left_up_shelf_button")),
         AuditFrame("trade_flow_right", 24.0, ("trade_right_money_slot", "trade_scale_button", "trade_right_up_shelf_button")),
@@ -144,6 +145,8 @@ def point_ratio(point_name: str, action_points: dict[str, tuple[float, float]], 
     if ":" in point_name:
         field_name, key_name = point_name.split(":", 1)
         return keypad_points[field_name][key_name]
+    if point_name not in action_points:
+        raise KeyError(f"Unknown fixed action point in audit plan: {point_name}")
     return action_points[point_name]
 
 
@@ -238,6 +241,11 @@ def extract_frame(video_path: Path, second: float) -> np.ndarray:
     return frame
 
 
+def sample_seconds(anchor_second: float, frame_count: int, frame_interval_ms: int) -> list[float]:
+    interval_seconds = frame_interval_ms / 1000.0
+    return [anchor_second + index * interval_seconds for index in range(max(1, frame_count))]
+
+
 def imwrite_unicode(path: Path, image: np.ndarray) -> None:
     suffix = path.suffix or ".png"
     ok, encoded = cv2.imencode(suffix, image)
@@ -271,24 +279,42 @@ def main() -> None:
         saved_paths: list[Path] = []
         frame_summaries: list[dict[str, object]] = []
         for audit_frame in frames:
-            frame = extract_frame(video_path, audit_frame.second)
-            annotated, point_meta = annotate_frame(
-                frame,
-                audit_frame.label,
+            sampled_seconds = sample_seconds(
                 audit_frame.second,
-                audit_frame.points,
-                action_points,
-                keypad_points,
+                audit_frame.frame_count,
+                audit_frame.frame_interval_ms,
             )
-            output_path = video_dir / f"{audit_frame.label}.png"
-            imwrite_unicode(output_path, annotated)
-            saved_paths.append(output_path)
+            sequence_paths: list[Path] = []
+            sequence_frames: list[dict[str, object]] = []
+            for frame_index, frame_second in enumerate(sampled_seconds, start=1):
+                frame = extract_frame(video_path, frame_second)
+                annotated, point_meta = annotate_frame(
+                    frame,
+                    f"{audit_frame.label} [{frame_index}/{len(sampled_seconds)}]",
+                    frame_second,
+                    audit_frame.points,
+                    action_points,
+                    keypad_points,
+                )
+                output_path = video_dir / f"{audit_frame.label}_{frame_index:02d}.png"
+                imwrite_unicode(output_path, annotated)
+                saved_paths.append(output_path)
+                sequence_paths.append(output_path)
+                sequence_frames.append(
+                    {
+                        "second": round(frame_second, 3),
+                        "image": str(output_path.relative_to(PROJECT_ROOT)),
+                        "points": point_meta,
+                    }
+                )
             frame_summaries.append(
                 {
                     "label": audit_frame.label,
-                    "second": audit_frame.second,
-                    "image": str(output_path.relative_to(PROJECT_ROOT)),
-                    "points": point_meta,
+                    "anchorSecond": audit_frame.second,
+                    "frameCount": audit_frame.frame_count,
+                    "frameIntervalMs": audit_frame.frame_interval_ms,
+                    "frames": sequence_frames,
+                    "sequenceImages": [str(path.relative_to(PROJECT_ROOT)) for path in sequence_paths],
                 }
             )
         contact_sheet_path = video_dir / "_contact_sheet.png"

@@ -44,7 +44,7 @@ function createInitialCaptureState() {
   return {
     enabled: false,
     status: "idle",
-    intervalMs: 3000,
+    intervalMs: 10000,
     lastCaptureAt: null,
     lastAnalyzeAt: null,
     lastWindowTitle: null,

@@ -1405,6 +1405,98 @@ function hasAutomationTrigger(instruction) {
   return String(instruction || "").includes("加油");
 }
 
+function hasChatAssistTrigger(instruction) {
+  return String(instruction || "").includes("帮我聊吧");
+}
+
+function stopChatAssist({
+  reason = "stopped",
+  message = "",
+  appendNotice = false,
+  riskLevel = "low"
+} = {}) {
+  const latestState = getState();
+  updateAutomation({
+    status: "idle",
+    mode: null,
+    instruction: null,
+    armedAt: null,
+    armedActionKind: null,
+    startsAt: null,
+    inputProtectionUntil: null,
+    inputProtectionButton: null,
+    startedAt: null,
+    finishedAt: latestState.automation?.status === "chat_assist" ? new Date().toISOString() : latestState.automation?.finishedAt || null,
+    stageIndex: 0,
+    completedRoundsInStage: 0,
+    totalTurns: 0,
+    lastThought: null,
+    lastOutcome: reason,
+    lastFailureCode: null,
+    lastRecoveryKind: null,
+    lastRecoveryAttemptCount: 0,
+    chatAssistLastDialogText: null,
+    chatAssistRounds: [],
+    resumeAvailable: false,
+    resumeFailedStepTitle: null
+  });
+  updateAgent({
+    mode: "autonomous",
+    phase: "waiting",
+    currentObjective: "等待下一句指令",
+    queuedUserObjective: null
+  });
+  if (appendNotice && message) {
+    appendMessage({
+      role: "assistant",
+      text: message,
+      thinkingChain: [],
+      perceptionSummary: perceptionSummaryBySource(latestState.latestPerception, "agent"),
+      sceneLabel: latestState.latestPerception?.sceneLabel || "聊天代打已停止",
+      riskLevel,
+      actions: [],
+      decide: ""
+    });
+  }
+}
+
+function armChatAssist(instruction) {
+  clearPendingResumeContext();
+  setStatus("running");
+  updateAutomation({
+    status: "chat_assist",
+    mode: "chat_assist",
+    instruction,
+    armedAt: null,
+    armedActionKind: null,
+    startsAt: null,
+    inputProtectionUntil: null,
+    inputProtectionButton: null,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    stageIndex: 0,
+    completedRoundsInStage: 0,
+    totalTurns: 0,
+    lastThought: null,
+    lastOutcome: null,
+    lastFailureCode: null,
+    lastRecoveryKind: null,
+    lastRecoveryAttemptCount: 0,
+    chatAssistLastDialogText: null,
+    chatAssistRounds: [],
+    resumeAvailable: false,
+    resumeFailedStepTitle: null
+  });
+  updateAgent({
+    mode: "autonomous",
+    phase: "autonomous",
+    currentObjective: "盯当前聊天页并帮忙续聊",
+    queuedUserObjective: instruction,
+    lastUserInstruction: instruction
+  });
+  ensureAutoCaptureRunning();
+}
+
 function mergeWorkerExecutions(executions = []) {
   const normalizedExecutions = executions.filter(Boolean);
   return {
@@ -2359,6 +2451,77 @@ async function maybeReplyFromCurrentChatScreen({
     probeExecution: null,
     execution: loopResult.execution,
     stopReason: loopResult.stopReason
+  };
+}
+
+async function runChatAssistTurn(runtimeState) {
+  const automation = runtimeState.automation || {};
+  const instruction = String(automation.instruction || "帮我聊吧").trim() || "帮我聊吧";
+  const conversationRounds = Array.isArray(automation.chatAssistRounds)
+    ? automation.chatAssistRounds
+    : [];
+
+  const roundState = await analyzeNpcChatRound({
+    instruction,
+    conversationRounds
+  });
+
+  if (roundState.screenState !== "chat_ready") {
+    return false;
+  }
+
+  const dialogText = String(roundState.dialogText || "").trim();
+  const replyText = String(roundState.replyText || "").trim();
+  const lastDialogText = String(automation.chatAssistLastDialogText || "").trim();
+
+  if (!dialogText || !replyText || dialogText === lastDialogText) {
+    return false;
+  }
+
+  const replyExecution = await sendNpcChatReply({
+    replyText,
+    externalInputGuardEnabled: true,
+    closeAfterSend: false
+  });
+
+  const nextRounds = [
+    ...conversationRounds,
+    {
+      round: conversationRounds.length + 1,
+      dialogText,
+      replyText
+    }
+  ].slice(-6);
+
+  updateAutomation({
+    status: "chat_assist",
+    mode: "chat_assist",
+    totalTurns: (automation.totalTurns || 0) + 1,
+    chatAssistLastDialogText: dialogText,
+    chatAssistRounds: nextRounds,
+    lastOutcome: `已代聊 ${nextRounds.length} 轮`
+  });
+
+  appendMessage({
+    role: "assistant",
+    text: replyText,
+    thinkingChain: [],
+    perceptionSummary: perceptionSummaryBySource(getState().latestPerception, "agent"),
+    sceneLabel: getState().latestPerception?.sceneLabel || "当前聊天页",
+    riskLevel: "low",
+    actions: [],
+    decide: ""
+  });
+
+  appendLog("info", "帮聊模式已发送一轮聊天回复", {
+    dialogText,
+    replyText
+  });
+
+  return {
+    replyExecution,
+    dialogText,
+    replyText
   };
 }
 
@@ -3733,6 +3896,32 @@ async function maybeRunAutonomousTurn() {
     return;
   }
 
+  if (automation.status === "chat_assist") {
+    try {
+      await runChatAssistTurn(runtimeState);
+    } catch (error) {
+      if (handleExternalInputInterrupted(error, "帮聊模式")) {
+        stopChatAssist({
+          reason: "external_input_interrupted",
+          message: "你刚才动了鼠标或键盘，我先把帮聊停下来了。",
+          appendNotice: true
+        });
+        appendLog("info", "帮聊模式因人工输入已停止");
+        return;
+      }
+      stopChatAssist({
+        reason: "chat_assist_failed",
+        message: `帮聊模式已停止：${error.message || "未知错误"}`,
+        appendNotice: true,
+        riskLevel: "medium"
+      });
+      appendLog("error", "帮聊模式执行失败", {
+        error: error.message
+      });
+    }
+    return;
+  }
+
   turnInFlight = true;
 
   try {
@@ -3889,7 +4078,7 @@ async function handleControl(request, response) {
       setStatus("paused");
       autoCaptureService.pause();
       const automation = getState().automation;
-      if (automation.status === "armed" || automation.status === "running") {
+      if (automation.status === "armed" || automation.status === "running" || automation.status === "chat_assist") {
         updateAutomation({
           status: "paused"
         });
@@ -3901,7 +4090,11 @@ async function handleControl(request, response) {
       const automation = getState().automation;
       if (automation.status === "paused" && automation.instruction) {
         updateAutomation({
-          status: automation.startedAt ? "running" : "armed"
+          status: automation.mode === "chat_assist"
+            ? "chat_assist"
+            : automation.startedAt
+              ? "running"
+              : "armed"
         });
       }
     },
@@ -4160,6 +4353,7 @@ async function handleChat(request, response) {
   const body = await readRequestBody(request);
   const instruction = String(body.instruction || "").trim();
   const automationTriggered = hasAutomationTrigger(instruction);
+  const chatAssistTriggered = hasChatAssistTrigger(instruction);
   const requestedInteractionMode = typeof body.interactionMode === "string"
     ? body.interactionMode.trim()
     : "";
@@ -4179,6 +4373,16 @@ async function handleChat(request, response) {
     ? "act"
     : requestedInteractionMode || getState().interactionMode || "watch";
 
+  const automationState = getState().automation;
+  if (automationState?.status === "chat_assist" && !chatAssistTriggered) {
+    stopChatAssist({
+      reason: "user_instruction_override"
+    });
+    appendLog("info", "帮聊模式已因新的用户指令停止", {
+      instruction
+    });
+  }
+
   setStatus("running");
   syncAutoCaptureForInteractionMode(effectiveInteractionMode);
   setLastError(null);
@@ -4195,7 +4399,23 @@ async function handleChat(request, response) {
     origin: "user"
   }));
 
-  if (automationTriggered) {
+  if (chatAssistTriggered) {
+    armChatAssist(instruction);
+    appendLog("info", "帮聊模式已启动", {
+      instruction,
+      triggerWord: "帮我聊吧"
+    });
+    appendMessage({
+      role: "assistant",
+      text: "收到，我来帮你盯着当前聊天页接话；你一动鼠标或键盘，我就立刻停。",
+      thinkingChain: [],
+      recoveryLine: "",
+      perceptionSummary: "帮聊模式已启动，只在当前聊天页按画面内容续聊并点击发送。",
+      sceneLabel: getState().latestPerception?.sceneLabel || "等待聊天页",
+      riskLevel: "low",
+      actions: []
+    });
+  } else if (automationTriggered) {
     armAutomationScript(instruction);
     appendLog("info", "固定剧本自动化已布置", {
       instruction,

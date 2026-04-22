@@ -19,6 +19,7 @@ function createInitialAgentState() {
 function createInitialAutomationState() {
   return {
     status: "idle",
+    mode: null,
     instruction: null,
     armedAt: null,
     armedActionKind: null,
@@ -35,6 +36,8 @@ function createInitialAutomationState() {
     lastFailureCode: null,
     lastRecoveryKind: null,
     lastRecoveryAttemptCount: 0,
+    chatAssistLastDialogText: null,
+    chatAssistRounds: [],
     resumeAvailable: false,
     resumeFailedStepTitle: null
   };

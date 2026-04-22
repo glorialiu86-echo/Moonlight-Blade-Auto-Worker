@@ -20,6 +20,9 @@ const state = {
     healthTimerId: null,
     speechDetected: false,
     speechStartedAt: 0,
+    listeningStartedAt: 0,
+    lastAudibleAt: 0,
+    autoCaptureReleased: false,
     lastVoiceAt: 0,
     lastProcessAt: 0,
     activityNotified: false,
@@ -33,6 +36,7 @@ const VOICE_ACTIVITY_DYNAMIC_THRESHOLD_MULTIPLIER = 1.15;
 const VOICE_AUTO_SEND_SILENCE_MS = 1000;
 const VOICE_MIN_SPEECH_MS = 450;
 const VOICE_CAPTURE_STALL_MS = 1800;
+const VOICE_AUTO_CAPTURE_RESUME_IDLE_MS = 20000;
 
 const elements = {
   composerForm: document.querySelector("#composerForm"),
@@ -272,10 +276,21 @@ async function notifyVoiceActivity() {
   try {
     await request("/api/voice/activity", {
       method: "POST",
-      body: JSON.stringify({ active: true })
+      body: JSON.stringify({ active: true, reason: "speech" })
     });
   } catch {
     // Keep listening even if the pause signal fails.
+  }
+}
+
+async function updateVoiceCaptureGate({ active, reason }) {
+  try {
+    await request("/api/voice/activity", {
+      method: "POST",
+      body: JSON.stringify({ active, reason })
+    });
+  } catch {
+    // Keep voice capture working even if the server-side gate update fails.
   }
 }
 
@@ -444,6 +459,21 @@ function resetVoiceState() {
   state.voice.noiseFloorRms = 0;
 }
 
+function maybeReleaseAutoCaptureForVoiceIdle() {
+  const lastAudibleAt = state.voice.lastAudibleAt || state.voice.listeningStartedAt;
+  if (
+    !state.voice.recording
+    || state.voice.autoCaptureReleased
+    || !lastAudibleAt
+    || Date.now() - lastAudibleAt < VOICE_AUTO_CAPTURE_RESUME_IDLE_MS
+  ) {
+    return;
+  }
+
+  state.voice.autoCaptureReleased = true;
+  updateVoiceCaptureGate({ active: false, reason: "idle_timeout" }).catch(() => {});
+}
+
 function getVoiceActivityThreshold() {
   const baseline = state.voice.noiseFloorRms > 0
     ? state.voice.noiseFloorRms * VOICE_ACTIVITY_DYNAMIC_THRESHOLD_MULTIPLIER
@@ -488,8 +518,12 @@ async function handleVoiceCaptureInterrupted(message) {
   state.voice.recording = false;
   state.voice.sending = false;
   state.voice.transcribing = false;
+  state.voice.listeningStartedAt = 0;
+  state.voice.lastAudibleAt = 0;
+  state.voice.autoCaptureReleased = false;
   resetVoiceState();
   await releaseVoiceCapture();
+  await updateVoiceCaptureGate({ active: false, reason: "interrupted" });
   updateVoiceStatus(message);
   syncUiState();
 }
@@ -547,7 +581,11 @@ async function flushVoiceSegment({ autoSend = false, stopListening = false } = {
   if (!hadSpeech || capturedChunks.length === 0 || speechDuration < VOICE_MIN_SPEECH_MS) {
     if (stopListening) {
       state.voice.recording = false;
+      state.voice.listeningStartedAt = 0;
+      state.voice.lastAudibleAt = 0;
+      state.voice.autoCaptureReleased = false;
       await releaseVoiceCapture();
+      await updateVoiceCaptureGate({ active: false, reason: "manual_stop" });
       updateVoiceStatus("语音监听已停止");
       syncUiState();
     } else if (hadSpeech && speechDuration > 0) {
@@ -561,6 +599,7 @@ async function flushVoiceSegment({ autoSend = false, stopListening = false } = {
         if (silentFor >= VOICE_AUTO_SEND_SILENCE_MS) {
           flushVoiceSegment({ autoSend: true, stopListening: false }).catch(() => {});
         }
+        maybeReleaseAutoCaptureForVoiceIdle();
       }, 120);
       syncUiState();
     }
@@ -592,7 +631,11 @@ async function flushVoiceSegment({ autoSend = false, stopListening = false } = {
     state.voice.transcribing = false;
     if (stopListening) {
       state.voice.recording = false;
+      state.voice.listeningStartedAt = 0;
+      state.voice.lastAudibleAt = 0;
+      state.voice.autoCaptureReleased = false;
       await releaseVoiceCapture();
+      await updateVoiceCaptureGate({ active: false, reason: "manual_stop" });
       updateVoiceStatus("语音监听已停止");
     } else if (state.voice.recording) {
       state.voice.silenceTimerId = window.setInterval(() => {
@@ -604,6 +647,7 @@ async function flushVoiceSegment({ autoSend = false, stopListening = false } = {
         if (silentFor >= VOICE_AUTO_SEND_SILENCE_MS) {
           flushVoiceSegment({ autoSend: true, stopListening: false }).catch(() => {});
         }
+        maybeReleaseAutoCaptureForVoiceIdle();
       }, 120);
       updateVoiceStatus("正在听你说话，静音 2 秒会自动发送。");
     }
@@ -645,8 +689,12 @@ async function startVoiceRecording() {
     state.voice.processorNode = processorNode;
     state.voice.inputSampleRate = audioContext.sampleRate;
     state.voice.recording = true;
+    state.voice.listeningStartedAt = Date.now();
+    state.voice.lastAudibleAt = 0;
+    state.voice.autoCaptureReleased = false;
     resetVoiceState();
     state.voice.lastProcessAt = Date.now();
+    await updateVoiceCaptureGate({ active: true, reason: "listening_start" });
 
     const [audioTrack] = mediaStream.getAudioTracks();
     if (audioTrack) {
@@ -698,6 +746,8 @@ async function startVoiceRecording() {
         }
         state.voice.speechDetected = true;
         state.voice.lastVoiceAt = Date.now();
+        state.voice.lastAudibleAt = state.voice.lastVoiceAt;
+        state.voice.autoCaptureReleased = false;
         if (!state.voice.activityNotified) {
           state.voice.activityNotified = true;
           notifyVoiceActivity().catch(() => {});
@@ -714,14 +764,17 @@ async function startVoiceRecording() {
 
     clearVoiceSilenceTimer();
     state.voice.silenceTimerId = window.setInterval(() => {
-      if (!state.voice.recording || state.voice.sending || !state.voice.speechDetected || !state.voice.lastVoiceAt) {
+      if (!state.voice.recording || state.voice.sending) {
         return;
       }
 
-      const silentFor = Date.now() - state.voice.lastVoiceAt;
-      if (silentFor >= VOICE_AUTO_SEND_SILENCE_MS) {
-        flushVoiceSegment({ autoSend: true, stopListening: false }).catch(() => {});
+      if (state.voice.speechDetected && state.voice.lastVoiceAt) {
+        const silentFor = Date.now() - state.voice.lastVoiceAt;
+        if (silentFor >= VOICE_AUTO_SEND_SILENCE_MS) {
+          flushVoiceSegment({ autoSend: true, stopListening: false }).catch(() => {});
+        }
       }
+      maybeReleaseAutoCaptureForVoiceIdle();
     }, 120);
 
     startVoiceHealthTimer();
@@ -730,8 +783,12 @@ async function startVoiceRecording() {
   } catch (error) {
     await releaseVoiceCapture();
     state.voice.recording = false;
+    state.voice.listeningStartedAt = 0;
+    state.voice.lastAudibleAt = 0;
+    state.voice.autoCaptureReleased = false;
     clearVoiceSilenceTimer();
     resetVoiceState();
+    await updateVoiceCaptureGate({ active: false, reason: "start_failed" });
     syncUiState();
     updateVoiceStatus(`无法开始录音：${error.message}`);
   }

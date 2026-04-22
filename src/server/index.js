@@ -75,6 +75,7 @@ const WATCH_COMMENTARY_MIN_INTERVAL_MS = 3000;
 const WATCH_COMMENTARY_MAX_SILENCE_MS = 5000;
 const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
 const DARK_CLOSE_RESTART_BUDGET = 2;
+let voiceAutoCaptureHoldActive = false;
 const ZIMIN_PROFILE_FACTS = [
   "籽岷是中共党员。",
   "籽岷是多平台《我的世界》主播。",
@@ -1750,7 +1751,7 @@ async function buildWatchUserReply({ instruction, imageInput, conversationMessag
     "你是籽小刀，现在处于观看模式。",
     "籽岷正在主玩游戏，你不操作游戏，只是作为搭档在旁边接话。",
     "籽岷刚刚主动和你说话了，你现在必须优先回他，再回去继续看戏。",
-    "只用中文输出一句话，长度控制在12到32个字。",
+    "只用中文输出一句话，长度尽量控制在40到60个字，目标约50字。",
     "语气要像熟人搭档，聪明、嘴碎、略带坏心眼，但不要进入任务规划，不要说你要接管游戏。",
     "不要提系统、截图、OCR、AI、模型，不要拆成多句。",
     `籽岷刚刚说：${instruction}`
@@ -1761,7 +1762,7 @@ async function buildWatchUserReply({ instruction, imageInput, conversationMessag
     historyMessages,
     prompt,
     systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。",
-    maxTokens: 80,
+    maxTokens: 140,
     temperature: 0.65
   });
 
@@ -1923,12 +1924,21 @@ async function runWatchUserReplyTurn({ instruction, scene, perception, conversat
 function ensureAutoCaptureRunning() {
   const captureState = getState().capture;
 
+  if (voiceAutoCaptureHoldActive) {
+    return;
+  }
+
   if (!captureState.enabled || captureState.status === "idle" || captureState.status === "paused") {
     autoCaptureService.start();
   }
 }
 
 function syncAutoCaptureForInteractionMode(interactionMode) {
+  if (voiceAutoCaptureHoldActive) {
+    autoCaptureService.pause();
+    return;
+  }
+
   if (interactionMode === "watch") {
     ensureAutoCaptureRunning();
     return;
@@ -4122,6 +4132,25 @@ async function handleVoiceTranscription(request, response) {
   }
 }
 
+async function handleVoiceActivity(request, response) {
+  const body = await readRequestBody(request);
+  const active = Boolean(body.active);
+  const reason = String(body.reason || (active ? "speech" : "released")).trim();
+
+  if (active) {
+    voiceAutoCaptureHoldActive = true;
+    autoCaptureService.pause();
+  } else {
+    voiceAutoCaptureHoldActive = false;
+    if ((getState().interactionMode || "watch") === "watch" && getState().status === "running") {
+      ensureAutoCaptureRunning();
+    }
+  }
+
+  appendLog("info", active ? "语音占用已暂停自动轮询" : "语音占用已释放自动轮询", { reason });
+  return sendJson(response, 200, { ok: true, holdActive: voiceAutoCaptureHoldActive });
+}
+
 async function handleChat(request, response) {
   const body = await readRequestBody(request);
   const instruction = String(body.instruction || "").trim();
@@ -4308,6 +4337,10 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/voice/transcribe") {
       return handleVoiceTranscription(request, response);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/voice/activity") {
+      return handleVoiceActivity(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/chat") {

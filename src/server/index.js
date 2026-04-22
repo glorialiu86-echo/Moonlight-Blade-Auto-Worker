@@ -4136,13 +4136,18 @@ async function handleVoiceActivity(request, response) {
   const body = await readRequestBody(request);
   const active = Boolean(body.active);
   const reason = String(body.reason || (active ? "speech" : "released")).trim();
+  const allowAutoCaptureResume = reason === "manual_stop" || reason === "idle_timeout";
 
   if (active) {
     voiceAutoCaptureHoldActive = true;
     autoCaptureService.pause();
   } else {
-    voiceAutoCaptureHoldActive = false;
-    if ((getState().interactionMode || "watch") === "watch" && getState().status === "running") {
+    voiceAutoCaptureHoldActive = !allowAutoCaptureResume;
+    if (
+      allowAutoCaptureResume
+      && (getState().interactionMode || "watch") === "watch"
+      && getState().status === "running"
+    ) {
       ensureAutoCaptureRunning();
     }
   }

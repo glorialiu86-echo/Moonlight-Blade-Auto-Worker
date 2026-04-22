@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { transcribeWithLocalWhisper } from "../asr/local-whisper-client.js";
+import { transcribeWithAliyunAsr } from "../asr/aliyun-file-transcribe.js";
 import { createAutoCaptureService } from "../capture/auto-capture-service.js";
 import { captureGameWindow } from "../capture/windows-game-window.js";
 import { analyzeImageWithHistory, generateText } from "../llm/qwen.js";
@@ -4095,7 +4095,7 @@ async function handleVoiceTranscription(request, response) {
 
   try {
     audioPath = await writeTempAudioFile(audioDataUrl);
-    const text = await transcribeWithLocalWhisper({
+    const text = await transcribeWithAliyunAsr({
       audioPath
     });
 

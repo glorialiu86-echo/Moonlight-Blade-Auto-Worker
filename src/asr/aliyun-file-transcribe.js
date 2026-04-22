@@ -67,12 +67,18 @@ export async function transcribeWithAliyunAsr({ audioPath }) {
             {
               type: "input_audio",
               input_audio: {
-                data: dataUrl
+                data: dataUrl,
+                format: extname(audioPath).replace(".", "").toLowerCase() || "wav"
               }
+            },
+            {
+              type: "text",
+              text: "请把这段音频逐字转写成简体中文；如果听不清，就返回你能确认的内容，不要补充解释。"
             }
           ]
         }
       ],
+      modalities: ["text"],
       stream: false,
       asr_options: {
         language: config.language,

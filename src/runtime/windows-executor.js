@@ -18,7 +18,7 @@ function createWorkerAction(id, title, type, payload = {}) {
 
 function resolvePythonPath() {
   const candidate = process.env.CONTROL_PYTHON?.trim()
-    || process.env.LOCAL_ASR_PYTHON?.trim();
+    || process.env.LOCAL_OCR_PYTHON?.trim();
 
   if (candidate) {
     return candidate;

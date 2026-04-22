@@ -25,7 +25,6 @@ function parseProvider(name, fallback) {
 
 export function getLlmConfig() {
   const provider = parseProvider("LLM_PROVIDER", requireEnv("LLM_PROVIDER"));
-
   const baseUrl = requireEnv("LLM_BASE_URL").replace(/\/+$/, "");
   const apiKey = process.env.LLM_API_KEY?.trim() || "";
 
@@ -53,19 +52,15 @@ export function getTextLlmConfig() {
   };
 }
 
-export function getLocalAsrConfig() {
+export function getAliyunAsrConfig() {
+  const llmConfig = getLlmConfig();
+  const baseUrl = optionalEnv("ALIYUN_ASR_BASE_URL", llmConfig.baseUrl).replace(/\/+$/, "");
+
   return {
-    model: optionalEnv("LOCAL_ASR_MODEL", "medium"),
-    language: optionalEnv("LOCAL_ASR_LANGUAGE", "zh"),
-    device: optionalEnv("LOCAL_ASR_DEVICE", "cpu"),
-    computeType: optionalEnv("LOCAL_ASR_COMPUTE_TYPE", "int8"),
-    cpuThreads: Number(optionalEnv("LOCAL_ASR_CPU_THREADS", "4")),
-    initialPrompt: optionalEnv(
-      "LOCAL_ASR_INITIAL_PROMPT",
-      "以下内容是简体中文普通话口语转写，可能涉及《天涯明月刀》的任务名、NPC 名称、地名和玩家口语，请尽量按发音准确转写。"
-    ),
-    pythonPath: optionalEnv("LOCAL_ASR_PYTHON", ""),
-    modelCacheDir: optionalEnv("LOCAL_ASR_MODEL_CACHE_DIR", "")
+    url: `${baseUrl}/chat/completions`,
+    model: optionalEnv("ALIYUN_ASR_MODEL", "qwen3.5-omni-flash"),
+    language: optionalEnv("ALIYUN_ASR_LANGUAGE", "zh"),
+    apiKey: optionalEnv("ALIYUN_ASR_API_KEY", llmConfig.apiKey)
   };
 }
 

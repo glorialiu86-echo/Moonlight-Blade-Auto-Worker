@@ -1116,6 +1116,68 @@ let turnInFlight = false;
 let pendingResumeContext = null;
 let latestCaptureImageDataUrl = null;
 
+function cloneStageWithOverrides(stage, overrides = {}) {
+  return {
+    ...stage,
+    ...overrides,
+    actionTypes: Array.isArray(overrides.actionTypes)
+      ? [...overrides.actionTypes]
+      : [...stage.actionTypes]
+  };
+}
+
+function buildAutomationStageSequence(stageKeys = null) {
+  if (!Array.isArray(stageKeys) || stageKeys.length === 0) {
+    return FIXED_SCRIPT_STAGES;
+  }
+
+  return stageKeys
+    .map((stageKey) => {
+      const stage = FIXED_SCRIPT_STAGES.find((entry) => entry.key === stageKey);
+      if (!stage) {
+        return null;
+      }
+      if (stageKey === "dark_close" || stageKey === "dark_miaoqu") {
+        return cloneStageWithOverrides(stage, { rounds: 1 });
+      }
+      return stage;
+    })
+    .filter(Boolean);
+}
+
+function getAutomationTriggerConfig(instruction) {
+  const text = String(instruction || "");
+
+  if (text.includes("我想敲他板砖")) {
+    return {
+      triggerWord: "我想敲他板砖",
+      stageKeys: ["dark_close"],
+      armedNotice: "收到，这轮直接走敲板砖的整套黑活：跑图、潜行、种蛊、闷棍、搜刮、后撤。",
+      armedObjective: "先留两分钟鼠标脱离时间，之后直接跑敲板砖整套黑活。"
+    };
+  }
+
+  if (text.includes("我想偷点东西")) {
+    return {
+      triggerWord: "我想偷点东西",
+      stageKeys: ["dark_miaoqu"],
+      armedNotice: "收到，这轮直接走妙取整套黑活：跑图、潜行、妙取、点击、后撤。",
+      armedObjective: "先留两分钟鼠标脱离时间，之后直接跑妙取整套黑活。"
+    };
+  }
+
+  if (text.includes("加油")) {
+    return {
+      triggerWord: "加油",
+      stageKeys: null,
+      armedNotice: "收到加油啦！马上动脑筋～",
+      armedObjective: "先留两分钟鼠标脱离时间，之后再按既定安排动手"
+    };
+  }
+
+  return null;
+}
+
 const autoCaptureService = createAutoCaptureService({
   captureWindow: () => captureGameWindow(),
   analyzeScreenshot,
@@ -1279,7 +1341,8 @@ function buildFixedScriptPlan({ stage, roundNumber, scene, userInstruction }) {
 }
 
 function getUpcomingScriptTurn(automationState) {
-  const stage = FIXED_SCRIPT_STAGES[automationState.stageIndex];
+  const stageSequence = buildAutomationStageSequence(automationState?.stageKeys);
+  const stage = stageSequence[automationState.stageIndex];
 
   if (!stage) {
     return null;
@@ -1292,7 +1355,8 @@ function getUpcomingScriptTurn(automationState) {
 }
 
 function advanceAutomationProgress(automationState) {
-  const stage = FIXED_SCRIPT_STAGES[automationState.stageIndex];
+  const stageSequence = buildAutomationStageSequence(automationState?.stageKeys);
+  const stage = stageSequence[automationState.stageIndex];
 
   if (!stage) {
     return {
@@ -1312,7 +1376,7 @@ function advanceAutomationProgress(automationState) {
 
   const nextStageIndex = automationState.stageIndex + 1;
 
-  if (!FIXED_SCRIPT_STAGES[nextStageIndex]) {
+  if (!stageSequence[nextStageIndex]) {
     return {
       stageIndex: nextStageIndex,
       completedRoundsInStage: 0,
@@ -1327,7 +1391,7 @@ function advanceAutomationProgress(automationState) {
   };
 }
 
-function armAutomationScript(instruction) {
+function armAutomationScript(instruction, triggerConfig = null) {
   clearPendingResumeContext();
   const now = new Date();
   const startsAt = new Date(now.getTime() + INPUT_PROTECTION_DELAY_MS);
@@ -1344,6 +1408,7 @@ function armAutomationScript(instruction) {
     startedAt: null,
     finishedAt: null,
     stageIndex: 0,
+    stageKeys: triggerConfig?.stageKeys || null,
     completedRoundsInStage: 0,
     totalTurns: 0,
     lastThought: null,
@@ -1356,7 +1421,7 @@ function armAutomationScript(instruction) {
   updateAgent({
     mode: "autonomous",
     phase: "armed",
-    currentObjective: "先留两分钟鼠标脱离时间，之后再按既定安排动手",
+    currentObjective: triggerConfig?.armedObjective || "先留两分钟鼠标脱离时间，之后再按既定安排动手",
     queuedUserObjective: instruction,
     lastUserInstruction: instruction
   });
@@ -1394,7 +1459,7 @@ function armResumeFailedStep() {
 }
 
 function hasAutomationTrigger(instruction) {
-  return String(instruction || "").includes("加油");
+  return Boolean(getAutomationTriggerConfig(instruction));
 }
 
 function hasChatAssistTrigger(instruction) {
@@ -4214,6 +4279,7 @@ async function handleVoiceActivity(request, response) {
 async function handleChat(request, response) {
   const body = await readRequestBody(request);
   const instruction = String(body.instruction || "").trim();
+  const automationTriggerConfig = getAutomationTriggerConfig(instruction);
   const automationTriggered = hasAutomationTrigger(instruction);
   const chatAssistTriggered = hasChatAssistTrigger(instruction);
   const requestedInteractionMode = typeof body.interactionMode === "string"
@@ -4278,15 +4344,15 @@ async function handleChat(request, response) {
       actions: []
     });
   } else if (automationTriggered) {
-    armAutomationScript(instruction);
+    armAutomationScript(instruction, automationTriggerConfig);
     appendLog("info", "固定剧本自动化已布置", {
       instruction,
       startsAt: getState().automation.startsAt,
-      triggerWord: "加油"
+      triggerWord: automationTriggerConfig.triggerWord
     });
     appendMessage({
       role: "assistant",
-      text: "收到加油啦！马上动脑筋～",
+      text: automationTriggerConfig.armedNotice,
       thinkingChain: [],
       recoveryLine: "",
       perceptionSummary: "固定剧本已经布置完成，当前只是在等待启动。",
@@ -4305,11 +4371,11 @@ async function handleChat(request, response) {
   } else {
     appendLog("info", "本轮未命中固定剧本触发词", {
       instruction,
-      triggerWord: "加油"
+      triggerWord: "加油 / 我想敲他板砖 / 我想偷点东西"
     });
     appendMessage({
       role: "assistant",
-      text: "收到加油啦！马上动脑筋～",
+      text: "收到，但这句还没命中自动化触发词。",
       thinkingChain: [],
       recoveryLine: "只有你说出触发词，我才会布置整套自动化。",
       perceptionSummary: "本轮没有命中固定剧本触发词，当前不会布置自动化主流程。",

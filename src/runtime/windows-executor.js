@@ -490,7 +490,7 @@ export function createFixedDarkCloseStageActions() {
       retryBackstepMs: 180,
       retryMoveSettleMs: 140
     }),
-    createPressKeyAction("fixed-dark-close-3b", "潜行成功后补一次 2 上隐匿 buff", "2", { postDelayMs: 300 }),
+    createPressKeyAction("fixed-dark-close-3b", "潜行成功后补一次 2 种蛊稳住黑活节奏", "2", { postDelayMs: 300 }),
     createWorkerAction("fixed-dark-close-4", "潜行后直接按 3 闷棍附近目标", "stealth_front_arc_strike", {
       knockoutTimeoutMs: 2600,
       retryPressMs: 180,

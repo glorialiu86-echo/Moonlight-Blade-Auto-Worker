@@ -21,6 +21,7 @@ function createInitialAutomationState() {
     status: "idle",
     mode: null,
     instruction: null,
+    stageKeys: null,
     armedAt: null,
     armedActionKind: null,
     startsAt: null,

@@ -481,6 +481,26 @@ function getVoiceActivityThreshold() {
   return Math.max(VOICE_ACTIVITY_RMS_THRESHOLD, baseline);
 }
 
+function buildListeningVoiceStatus() {
+  if (!state.voice.recording || state.voice.sending || state.voice.transcribing) {
+    return "";
+  }
+
+  if (state.voice.speechDetected && state.voice.lastVoiceAt) {
+    return "听到你在说话了，你停一下我就自动发送。";
+  }
+
+  const listeningFor = state.voice.listeningStartedAt
+    ? Date.now() - state.voice.listeningStartedAt
+    : 0;
+
+  if (listeningFor >= 3000) {
+    return "我还在听，但这段声音还没形成可发送内容。你可以再说完整一点，或按停止语音结束。";
+  }
+
+  return "正在听你说话，说完整一句后我会自动发送。";
+}
+
 async function releaseVoiceCapture() {
   const { sourceNode, processorNode, mediaStream, audioContext } = state.voice;
 
@@ -586,10 +606,14 @@ async function flushVoiceSegment({ autoSend = false, stopListening = false } = {
       state.voice.autoCaptureReleased = false;
       await releaseVoiceCapture();
       await updateVoiceCaptureGate({ active: false, reason: "manual_stop" });
-      updateVoiceStatus("语音监听已停止");
+      updateVoiceStatus(
+        hadSpeech || capturedChunks.length > 0
+          ? "这段声音太短或太轻，还没形成可发送内容，语音监听已停止。"
+          : "没有收到可发送的语音内容，语音监听已停止。"
+      );
       syncUiState();
     } else if (hadSpeech && speechDuration > 0) {
-      updateVoiceStatus("已忽略短促杂音，继续听你说话");
+      updateVoiceStatus("刚才那段太短了，我先不发，继续听你后面的内容。");
       state.voice.silenceTimerId = window.setInterval(() => {
         if (!state.voice.recording || state.voice.sending || !state.voice.speechDetected || !state.voice.lastVoiceAt) {
           return;
@@ -639,17 +663,21 @@ async function flushVoiceSegment({ autoSend = false, stopListening = false } = {
       updateVoiceStatus("语音监听已停止");
     } else if (state.voice.recording) {
       state.voice.silenceTimerId = window.setInterval(() => {
-        if (!state.voice.recording || state.voice.sending || !state.voice.speechDetected || !state.voice.lastVoiceAt) {
+        if (!state.voice.recording || state.voice.sending) {
           return;
         }
 
-        const silentFor = Date.now() - state.voice.lastVoiceAt;
-        if (silentFor >= VOICE_AUTO_SEND_SILENCE_MS) {
-          flushVoiceSegment({ autoSend: true, stopListening: false }).catch(() => {});
+        if (state.voice.speechDetected && state.voice.lastVoiceAt) {
+          const silentFor = Date.now() - state.voice.lastVoiceAt;
+          if (silentFor >= VOICE_AUTO_SEND_SILENCE_MS) {
+            flushVoiceSegment({ autoSend: true, stopListening: false }).catch(() => {});
+            return;
+          }
         }
+        updateVoiceStatus(buildListeningVoiceStatus());
         maybeReleaseAutoCaptureForVoiceIdle();
       }, 120);
-      updateVoiceStatus("正在听你说话，静音 2 秒会自动发送。");
+      updateVoiceStatus(buildListeningVoiceStatus());
     }
     syncUiState();
   }
@@ -772,13 +800,15 @@ async function startVoiceRecording() {
         const silentFor = Date.now() - state.voice.lastVoiceAt;
         if (silentFor >= VOICE_AUTO_SEND_SILENCE_MS) {
           flushVoiceSegment({ autoSend: true, stopListening: false }).catch(() => {});
+          return;
         }
       }
+      updateVoiceStatus(buildListeningVoiceStatus());
       maybeReleaseAutoCaptureForVoiceIdle();
     }, 120);
 
     startVoiceHealthTimer();
-    updateVoiceStatus("正在听你说话，静音 2 秒会自动发送。");
+    updateVoiceStatus(buildListeningVoiceStatus());
     syncUiState();
   } catch (error) {
     await releaseVoiceCapture();

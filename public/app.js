@@ -883,4 +883,4 @@ setInterval(() => {
 
 setInterval(() => {
   refresh().catch(() => {});
-}, 3000);
+}, 10000);

@@ -20,7 +20,7 @@ export function createAutoCaptureService({
   onPerception,
   onStateChange,
   onLog,
-  intervalMs = 3000,
+  intervalMs = 10000,
   maxConsecutiveFailures = 3
 }) {
   let timer = null;

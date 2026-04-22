@@ -633,7 +633,12 @@ async function flushVoiceSegment({ autoSend = false, stopListening = false } = {
   state.voice.sending = true;
   state.voice.transcribing = true;
   syncUiState();
-  updateVoiceStatus(autoSend ? "正在识别并发送语音..." : "正在识别语音...");
+  updateVoiceStatus(
+    autoSend
+      ? "正在识别并发送语音..."
+      : "正在识别你停止前的最后一段语音..."
+  );
+  let finalStopStatus = "语音监听已停止";
 
   try {
     const transcript = await transcribeRecordedVoice(capturedChunks, inputSampleRate);
@@ -644,12 +649,14 @@ async function flushVoiceSegment({ autoSend = false, stopListening = false } = {
       updateVoiceStatus("识别完成，正在发送...");
       await submitVoiceInstruction(transcript);
     } else {
-      updateVoiceStatus("识别完成");
+      finalStopStatus = "最后一段语音已识别，语音监听已停止。";
+      updateVoiceStatus(finalStopStatus);
     }
   } catch (error) {
     state.voice.transcribing = false;
     syncUiState();
-    updateVoiceStatus(`语音识别失败：${error.message}`);
+    finalStopStatus = `最后一段语音识别失败：${error.message}`;
+    updateVoiceStatus(finalStopStatus);
   } finally {
     state.voice.sending = false;
     state.voice.transcribing = false;
@@ -660,7 +667,7 @@ async function flushVoiceSegment({ autoSend = false, stopListening = false } = {
       state.voice.autoCaptureReleased = false;
       await releaseVoiceCapture();
       await updateVoiceCaptureGate({ active: false, reason: "manual_stop" });
-      updateVoiceStatus("语音监听已停止");
+      updateVoiceStatus(finalStopStatus);
     } else if (state.voice.recording) {
       state.voice.silenceTimerId = window.setInterval(() => {
         if (!state.voice.recording || state.voice.sending) {

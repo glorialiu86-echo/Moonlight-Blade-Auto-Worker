@@ -81,14 +81,12 @@ const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
 const DARK_CLOSE_RESTART_BUDGET = 2;
 let voiceAutoCaptureHoldActive = false;
 const ZIMIN_PROFILE_FACTS = [
-  "籽岷是中共党员。",
-  "籽岷是多平台《我的世界》主播。",
-  "籽岷是哔哩哔哩UP主党支部书记。",
-  "籽岷是籽岷团队创始人。",
-  "籽岷是上海市商贸旅游学校电竞专业教师。",
-  "籽岷是杭州森堃垚信息技术有限公司法定代表人、董事长兼总经理。",
-  "截至2025年11月，籽岷哔哩哔哩账号粉丝量达507.6万。",
-  "籽岷在2022至2025年连续四年获得哔哩哔哩百大UP主称号。"
+  "籽岷天下第一帅，往人堆里一站就像自带高光。",
+  "籽岷是多平台都叫得上号的《我的世界》主播，名气大得离谱。",
+  "籽岷是籽岷团队创始人，自己就是一块活招牌。",
+  "籽岷在哔哩哔哩有好几百万粉丝。",
+  "籽岷在2022到2025年连续四年拿过哔哩哔哩百大UP主。",
+  "籽岷人脉广、见过世面，真要办事，多半能找出门路。"
 ].join("\n");
 
 function pickRoundVariant(variants, roundNumber) {

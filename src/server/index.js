@@ -8,7 +8,6 @@ import { transcribeWithAliyunAsr } from "../asr/aliyun-file-transcribe.js";
 import { createAutoCaptureService } from "../capture/auto-capture-service.js";
 import { captureGameWindow } from "../capture/windows-game-window.js";
 import { analyzeImageWithHistory, generateText } from "../llm/qwen.js";
-import { createTurnPlan } from "../llm/planner.js";
 import {
   LINGSHU_GAMEPLAY_CONTEXT,
   shouldInjectLingshuGameplayContext
@@ -2082,32 +2081,6 @@ function buildUserMessage({ instruction, scene, perception, origin = "user" }) {
   };
 }
 
-function buildPlannerContext(plan) {
-  return {
-    intent: plan.intent,
-    personaInterpretation: plan.personaInterpretation,
-    environment: plan.environment,
-    candidateStrategies: plan.candidateStrategies,
-    selectedStrategy: plan.selectedStrategy,
-    riskLevel: plan.riskLevel,
-    thinkingChain: plan.thinkingChain,
-    recoveryLine: plan.recoveryLine,
-    actions: plan.actions,
-    decide: plan.decide
-  };
-}
-
-function appendAssistantPlanMessage({ plan, execution, perceptionSummary }) {
-  return appendMessage({
-    ...buildAssistantMessage({
-      plan,
-      execution,
-      perceptionSummary
-    }),
-    plannerContext: buildPlannerContext(plan)
-  });
-}
-
 function buildExperimentRecord({
   instruction,
   source,
@@ -2134,16 +2107,6 @@ function buildExperimentRecord({
     perceptionSummary,
     outcome: execution.outcome
   };
-}
-
-function buildNpcConversationHistoryText(conversationRounds = []) {
-  if (!Array.isArray(conversationRounds) || conversationRounds.length === 0) {
-    return "还没有历史对话。";
-  }
-
-  return conversationRounds
-    .map((round) => `第${round.round}轮 NPC：${round.dialogText}\n第${round.round}轮 籽小刀：${round.replyText}`)
-    .join("\n");
 }
 
 function hasNpcConversationHistory(conversationRounds = []) {
@@ -3687,202 +3650,108 @@ async function resumeFailedAutomationStep() {
   }
 }
 
-async function runPlannedTurn({
+async function runUserFixedScriptTurn({
   instruction,
   scene,
   perception,
-  source,
   interactionMode = "act",
-  externalInputGuardEnabled = true,
-  perceptionSummary = perceptionSummaryBySource(perception, source)
+  externalInputGuardEnabled = true
 }) {
   const runtimeBefore = getState();
+  const nowIso = new Date().toISOString();
 
   appendMessage(buildUserMessage({
     instruction,
     scene,
     perception,
-    origin: source
+    origin: "user"
   }));
-  appendLog("info", source === "agent" ? `自主目标开始：${instruction}` : `收到对话输入：${instruction}`, {
+  appendLog("info", `收到对话输入：${instruction}`, {
     instruction,
     scene,
-    source,
     interactionMode
   });
 
   updateAgent({
-    mode: source === "user" ? "user_priority" : "autonomous",
-    phase: source === "user" ? "user_priority" : "autonomous",
+    mode: "user_priority",
+    phase: "user_priority",
     currentObjective: instruction,
-    queuedUserObjective: source === "user" ? instruction : null,
-    lastUserInstruction: source === "user" ? instruction : runtimeBefore.agent.lastUserInstruction,
-    lastAutonomousInstruction: source === "agent" ? instruction : runtimeBefore.agent.lastAutonomousInstruction
+    queuedUserObjective: instruction,
+    lastUserInstruction: instruction,
+    lastAutonomousInstruction: runtimeBefore.agent.lastAutonomousInstruction
   });
 
-  const nextState = getState();
-  const plan = await createTurnPlan({
-    instruction,
-    scene,
-    conversationMessages: nextState.messages.slice(0, -1),
-    perception
-  });
+  const automationBeforeTurn = runtimeBefore.automation;
+  const shouldRestartScript = ["idle", "completed"].includes(automationBeforeTurn.status);
+  const shouldResumeScript = automationBeforeTurn.status === "paused";
 
-  let execution;
-  if (interactionMode === "watch") {
-    execution = {
-      executor: "WatchMode",
-      steps: [],
-      rawSteps: [],
-      durationMs: 0,
-      outcome: "当前处于观看模式，本轮只观察屏幕并和籽岷互动，不执行动作。"
-    };
+  if (shouldRestartScript) {
+    updateAutomation({
+      status: "running",
+      mode: "fixed_script",
+      instruction,
+      armedAt: null,
+      armedActionKind: null,
+      startsAt: null,
+      inputProtectionUntil: null,
+      inputProtectionButton: null,
+      startedAt: nowIso,
+      finishedAt: null,
+      stageIndex: 0,
+      completedRoundsInStage: 0,
+      totalTurns: 0,
+      lastThought: null,
+      lastOutcome: null,
+      lastFailureCode: null,
+      lastRecoveryKind: null,
+      lastRecoveryAttemptCount: 0
+    });
   } else {
-    try {
-      execution = await runWindowsExecution(plan, {
-        interruptOnExternalInput: interactionMode === "act" && externalInputGuardEnabled
-      });
-    } catch (error) {
-      const failedExecution = {
-        rawSteps: Array.isArray(error.workerPayload?.steps) ? error.workerPayload.steps : [],
-        durationMs: error.durationMs || null
-      };
-
-      await recordMotionReviewSamples({
-        instruction,
-        source,
-        scene,
-        plan,
-        perception,
-        execution: failedExecution,
-        error
-      });
-
-      await recordInteractionLearningSample({
-        instruction,
-        source,
-        scene,
-        plan,
-        perception,
-        execution: failedExecution,
-        error
-      });
-      throw error;
-    }
-
-    await recordMotionReviewSamples({
-      instruction,
-      source,
-      scene,
-      plan,
-      perception,
-      execution
-    });
-
-    await recordInteractionLearningSample({
-      instruction,
-      source,
-      scene,
-      plan,
-      perception,
-      execution
-    });
-
-    const replyResult = await maybeSendNpcReply({
-      instruction,
-      plan,
-      execution,
-      externalInputGuardEnabled
-    });
-
-    if (replyResult) {
-      execution = {
-        ...execution,
-        steps: [
-          ...execution.steps,
-          ...replyResult.execution.steps
-        ],
-        rawSteps: [
-          ...execution.rawSteps,
-          ...replyResult.execution.rawSteps
-        ],
-        durationMs: execution.durationMs + replyResult.execution.durationMs,
-        outcome: `${execution.outcome} 已自动续聊 ${replyResult.rounds.length} 轮 NPC 对话。`,
-        replyText: replyResult.replyText,
-        replyRounds: replyResult.rounds
-      };
-    }
-  }
-
-  const turn = {
-    id: `turn-${Date.now()}`,
-    instruction,
-    scene,
-    createdAt: new Date().toISOString(),
-    source,
-    interactionMode,
-    externalInputGuardEnabled,
-    plan,
-    execution,
-    perception: perception || null
-  };
-
-  setCurrentTurn(turn);
-
-  appendLog("info", "意图解析完成", {
-    intent: plan.intent,
-    strategy: plan.selectedStrategy,
-    source
-  });
-  appendLog("info", "执行器返回结果", {
-    actionCount: plan.actions.length,
-    riskLevel: plan.riskLevel,
-    source
-  });
-  appendLog("info", interactionMode === "watch" ? "前台已切到观看模式" : "前台已切到行动模式", {
-    interactionMode,
-    source
-  });
-  appendLog("info", "\u6267\u884c\u5668\u8fd4\u56de\u7ed3\u679c", {
-    executor: execution.executor,
-    outcome: execution.outcome,
-    source
-  });
-
-  if (plan.fallbackReason) {
-    appendLog("warn", "本轮使用了回退规划", {
-      reason: plan.fallbackReason,
-      source
+    updateAutomation({
+      status: "running",
+      mode: automationBeforeTurn.mode || "fixed_script",
+      instruction: automationBeforeTurn.instruction || instruction,
+      armedAt: null,
+      armedActionKind: null,
+      startsAt: null,
+      inputProtectionUntil: null,
+      inputProtectionButton: null,
+      startedAt: automationBeforeTurn.startedAt || nowIso,
+      finishedAt: null,
+      ...(shouldResumeScript
+        ? {}
+        : {
+          stageIndex: automationBeforeTurn.stageIndex,
+          completedRoundsInStage: automationBeforeTurn.completedRoundsInStage
+        })
     });
   }
 
-  appendAssistantPlanMessage({
-    plan,
-    execution,
-    perceptionSummary
-  });
+  const latestAutomationState = getState().automation;
+  const upcomingTurn = getUpcomingScriptTurn(latestAutomationState);
+  if (!upcomingTurn) {
+    updateAgent({
+      phase: "waiting",
+      currentObjective: "这套安排已经做完",
+      queuedUserObjective: null
+    });
+    return getState();
+  }
 
-  appendExperiment(buildExperimentRecord({
-    instruction,
-    source,
+  await runFixedScriptTurn({
+    stage: upcomingTurn.stage,
+    roundNumber: upcomingTurn.roundNumber,
+    userInstruction: latestAutomationState.instruction || instruction,
     scene,
-    plan,
-    execution,
     perception,
-    perceptionSummary
-  }));
+    interactionMode,
+    externalInputGuardEnabled
+  });
 
-  const agentBeforeUpdate = getState().agent;
-  updateAgent({
-    mode: "autonomous",
-    phase: source === "user" ? "cooldown" : "autonomous",
-    currentObjective: interactionMode === "watch" ? "watch" : plan.selectedStrategy,
-    queuedUserObjective: source === "user" ? null : agentBeforeUpdate.queuedUserObjective,
-    lastTurnSource: source,
-    lastTurnAt: new Date().toISOString(),
-    autonomousTurnCount: source === "agent"
-      ? agentBeforeUpdate.autonomousTurnCount + 1
-      : agentBeforeUpdate.autonomousTurnCount
+  const progressedState = getState();
+  updateAutomation({
+    ...advanceAutomationProgress(progressedState.automation),
+    totalTurns: progressedState.automation.totalTurns + 1
   });
 
   return getState();
@@ -4216,11 +4085,10 @@ async function handleTurn(request, response) {
 
   try {
     await waitForTurnSlot();
-    const nextState = await runPlannedTurn({
+    const nextState = await runUserFixedScriptTurn({
       instruction,
       scene,
       perception: state.latestPerception,
-      source: "user",
       interactionMode: state.interactionMode || "act",
       externalInputGuardEnabled: state.externalInputGuardEnabled !== false
     });

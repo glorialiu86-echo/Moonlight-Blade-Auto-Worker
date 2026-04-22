@@ -5551,6 +5551,7 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
     title = str(action.get("title") or "enter_stealth_with_retry")
     retry_limit = int(action.get("retryLimit") or 5)
     settle_ms = int(action.get("settleMs") or 260)
+    post_stealth_cooldown_ms = int(action.get("postStealthCooldownMs") or 5000)
     retry_backstep_ms = int(action.get("retryBackstepMs") or action.get("waitBetweenMs") or 180)
     retry_move_settle_ms = int(action.get("retryMoveSettleMs") or 140)
     shortcut_key = SHORTCUT_KEYS.get("stealth", "2")
@@ -5559,6 +5560,7 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
     focus_window(hwnd)
     exit_state = detect_exit_stealth_button(hwnd)
     if exit_state["visible"]:
+        INPUT_GUARD.guarded_sleep(max(0, post_stealth_cooldown_ms), title)
         return {
             "id": action_id,
             "title": title,
@@ -5569,6 +5571,7 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
                 "retryCount": 0,
                 "attempts": attempts,
                 "stealthVisual": exit_state,
+                "postStealthCooldownMs": post_stealth_cooldown_ms,
             },
         }
 
@@ -5585,6 +5588,7 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
         }
         attempts.append(attempt_payload)
         if exit_state["visible"]:
+            INPUT_GUARD.guarded_sleep(max(0, post_stealth_cooldown_ms), title)
             return {
                 "id": action_id,
                 "title": title,
@@ -5595,6 +5599,7 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
                     "retryCount": attempt_index + 1,
                     "attempts": attempts,
                     "stealthVisual": exit_state,
+                    "postStealthCooldownMs": post_stealth_cooldown_ms,
                 },
             }
         if attempt_index < retry_limit - 1:

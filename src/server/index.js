@@ -785,13 +785,104 @@ async function appendGiftProgressCommentary({
   }
 }
 
+function containsChineseText(text) {
+  return /[\u3400-\u9fff]/.test(String(text || ""));
+}
+
+function getReadableStageLabel(stageKey = "") {
+  const rawStageKey = String(stageKey || "").trim();
+  if (containsChineseText(rawStageKey)) {
+    return rawStageKey;
+  }
+
+  const stageLabels = {
+    street_wander: "\u8857\u4e0a\u4e71\u901b",
+    sell_loop: "\u4e70\u8d27\u53eb\u5356",
+    social_warm: "\u5439\u5618\u7c7d\u5c91\u804a\u5929",
+    social_dark: "\u641e\u94b1\u804a\u5929",
+    dark_close: "\u95f7\u68cd\u641c\u522e",
+    dark_miaoqu: "\u5999\u53d6\u8131\u8eab",
+    ending_trade: "\u6536\u5c3e\u5356\u8d27"
+  };
+
+  return stageLabels[rawStageKey] || "\u5f53\u524d\u8fd9\u4e00\u6b65";
+}
+
+function getReadableFailureStepLabel(error, stageKey = "") {
+  const rawTitle = String(
+    error?.workerPayload?.failedStep?.detail
+    || error?.workerPayload?.failedStep?.title
+    || error?.resumeContext?.failedStepTitle
+    || ""
+  ).trim();
+  if (containsChineseText(rawTitle)) {
+    return rawTitle;
+  }
+
+  const normalizedTitle = rawTitle.toLowerCase();
+  const stepLabels = [
+    ["open_named_vendor_purchase", "\u8d27\u5546\u8fdb\u8d27\u5165\u53e3"],
+    ["buy_current_vendor_item", "\u8fdb\u8d27\u8d2d\u4e70\u6309\u94ae"],
+    ["stock_first_hawking_item", "\u53eb\u5356\u4e0a\u67b6"],
+    ["submit_hawking", "\u53eb\u5356\u63d0\u4ea4"],
+    ["inspect_npc_interaction_stage", "NPC \u4ea4\u4e92\u9636\u6bb5\u5224\u65ad"],
+    ["open_npc_action_menu", "\u6253\u5f00 NPC \u4ea4\u4e92\u83dc\u5355"],
+    ["open_npc_gift_screen", "\u6253\u5f00\u8d60\u793c\u9875"],
+    ["send_chat_message", "\u804a\u5929\u53d1\u9001"],
+    ["enter_stealth_with_retry", "\u6f5c\u884c"],
+    ["stealth_front_arc_strike", "\u95f7\u68cd"],
+    ["stealth_pickpocket", "\u5999\u53d6"],
+    ["npc_view_not_visible", "\u653e\u5927\u955c\u6ca1\u6709\u56de\u5230\u53ef\u70b9\u51fb\u8303\u56f4"],
+    ["npc_view_not_opened", "\u653e\u5927\u955c\u70b9\u5f00\u540e\u6ca1\u6709\u62c9\u8d77\u4ea4\u4e92\u83dc\u5355"],
+    ["vendor purchase option did not open purchase screen", "\u8d27\u5546\u9875\u5df2\u7ecf\u62c9\u8d77\uff0c\u4f46\u8d2d\u4e70\u5165\u53e3\u6ca1\u6709\u987a\u5229\u6253\u5f00"],
+    ["current screen is not vendor purchase screen", "\u8fdb\u8d27\u9762\u677f\u6ca1\u6709\u505c\u5728\u8d2d\u4e70\u9875"],
+    ["stealth_entry_blocked", "\u6f5c\u884c\u6ca1\u6709\u6210\u529f\u8fdb\u5165\u7070\u8272\u6f5c\u884c\u72b6\u6001"]
+  ];
+
+  for (const [keyword, label] of stepLabels) {
+    if (normalizedTitle.includes(keyword)) {
+      return label;
+    }
+  }
+
+  return `${getReadableStageLabel(stageKey)}\u8fd9\u4e00\u6b65`;
+}
+
+function getReadableFailureReason(error) {
+  const rawMessage = String(error?.message || "").trim();
+  if (containsChineseText(rawMessage)) {
+    return rawMessage;
+  }
+
+  const normalizedMessage = rawMessage.toLowerCase();
+  const reasonLabels = [
+    ["vendor purchase option did not open purchase screen", "\u6211\u6ca1\u628a\u8d2d\u4e70\u9875\u987a\u5229\u6253\u5f00"],
+    ["current screen is not vendor purchase screen", "\u6211\u6ca1\u8ba4\u51c6\u8fdb\u8d27\u8d2d\u4e70\u9875"],
+    ["npc_view_not_visible", "\u6211\u6ca1\u770b\u5230\u53ef\u70b9\u7684\u653e\u5927\u955c"],
+    ["npc_view_not_opened", "\u6211\u70b9\u4e86\u653e\u5927\u955c\uff0c\u4f46\u4ea4\u4e92\u83dc\u5355\u6ca1\u6253\u5f00"],
+    ["stealth_entry_blocked", "\u6211\u6309\u4e86\u6f5c\u884c\uff0c\u4f46\u8fd8\u6ca1\u6210\u529f\u8fdb\u5165\u6f5c\u884c\u72b6\u6001"],
+    ["timed out", "\u6211\u7b49\u592a\u4e45\u4e86\uff0c\u8fd9\u4e00\u6b65\u8fd8\u662f\u6ca1\u53cd\u5e94"],
+    ["timeout", "\u6211\u7b49\u592a\u4e45\u4e86\uff0c\u8fd9\u4e00\u6b65\u8fd8\u662f\u6ca1\u53cd\u5e94"]
+  ];
+
+  for (const [keyword, label] of reasonLabels) {
+    if (normalizedMessage.includes(keyword)) {
+      return label;
+    }
+  }
+
+  return "\u6211\u6ca1\u628a\u8fd9\u4e00\u6b65\u987a\u5229\u8dd1\u8fc7\u53bb";
+}
+
 async function buildFailureRescueText({
   error,
   stageKey = "",
   perceptionSummary = ""
 }) {
-  const failedStepTitle = String(error?.workerPayload?.failedStep?.title || error?.resumeContext?.failedStepTitle || "").trim();
+  const failedStepTitle = getReadableFailureStepLabel(error, stageKey);
   const errorMessage = String(error?.message || "未知错误").trim();
+  const readableErrorMessage = getReadableFailureReason(error);
+  const readableStageKey = getReadableStageLabel(stageKey);
   const prompt = [
     "你要替籽小刀写一句求救文案，发在内容层里。",
     "要求：搞笑、慌张、明确说出自己卡住了，但不要超过36个字。",
@@ -801,12 +892,21 @@ async function buildFailureRescueText({
     `报错：${errorMessage}`,
     `补充感知：${perceptionSummary || "无"}`
   ].join("\n");
+  const rescuePrompt = [
+    "\u4f60\u8981\u66ff\u7c7d\u5c0f\u5200\u5199\u4e00\u53e5\u6c42\u6551\u6587\u6848\uff0c\u53d1\u5728\u5185\u5bb9\u5c42\u91cc\u3002",
+    "\u8981\u6c42\uff1a\u641e\u7b11\u3001\u6158\u70c8\u3001\u660e\u786e\u8bf4\u51fa\u81ea\u5df1\u5361\u4f4f\u4e86\uff0c\u4f46\u4e0d\u8981\u8d85\u8fc736\u4e2a\u5b57\u3002",
+    "\u53e5\u5f0f\u8981\u50cf\uff1a\u6551\u6551\u6211\u6551\u6551\u6211\uff0c\u6211\u5361\u5728XX\u9875\u9762\u4e86\u3002",
+    `\u5f53\u524d\u9636\u6bb5\uff1a${readableStageKey}`,
+    `\u5931\u8d25\u6b65\u9aa4\uff1a${failedStepTitle}`,
+    `\u62a5\u9519\uff1a${readableErrorMessage}`,
+    `\u8865\u5145\u611f\u77e5\uff1a${perceptionSummary || "\u65e0"}`
+  ].join("\n");
 
   try {
     if (latestCaptureImageDataUrl) {
       const result = await analyzeImageWithHistory({
         imageInput: latestCaptureImageDataUrl,
-        prompt,
+        prompt: rescuePrompt,
         systemPrompt: "你是固定剧本失败时的求救文案助手。只输出一句中文求救文案，不要解释。",
         maxTokens: 100,
         temperature: 0.6
@@ -819,7 +919,7 @@ async function buildFailureRescueText({
 
     const result = await generateText({
       systemPrompt: "你是固定剧本失败时的求救文案助手。只输出一句中文求救文案，不要解释。",
-      userPrompt: prompt,
+      userPrompt: rescuePrompt,
       maxTokens: 100,
       temperature: 0.6
     });

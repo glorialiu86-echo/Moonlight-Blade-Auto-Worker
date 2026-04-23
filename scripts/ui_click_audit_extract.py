@@ -36,10 +36,10 @@ VIDEO_AUDIT_PLAN: dict[str, tuple[AuditFrame, ...]] = {
         AuditFrame("teleport_confirm", 24.0, ("teleport_confirm",)),
     ),
     "货商买货（墨和散酒）.mp4": (
-        AuditFrame("vendor_purchase_option", 6.0, ("vendor_purchase_option",)),
+        AuditFrame("vendor_purchase_option", 8.5, ("vendor_purchase_option",)),
         AuditFrame("vendor_item_moding", 10.0, ("vendor_purchase_item_moding",)),
         AuditFrame("vendor_item_sanjiu", 14.0, ("vendor_purchase_item_sanjiu",)),
-        AuditFrame("vendor_quantity", 18.0, ("vendor_purchase_max_quantity",)),
+        AuditFrame("vendor_quantity", 12.5, ("vendor_purchase_max_quantity",)),
         AuditFrame("vendor_buy", 20.0, ("vendor_purchase_buy",)),
         AuditFrame("vendor_close", 24.0, ("vendor_purchase_close",)),
     ),
@@ -56,7 +56,7 @@ VIDEO_AUDIT_PLAN: dict[str, tuple[AuditFrame, ...]] = {
     ),
     "叫卖.mp4": (
         AuditFrame("hawking_inventory", 8.0, ("hawking_inventory_first_slot",)),
-        AuditFrame("hawking_quantity", 14.0, ("hawking_max_quantity",)),
+        AuditFrame("hawking_quantity", 9.5, ("hawking_max_quantity",)),
     ),
     "潜行-妙取.mp4": (
         AuditFrame("steal_button_1", 4.0, ("steal_button_1",)),

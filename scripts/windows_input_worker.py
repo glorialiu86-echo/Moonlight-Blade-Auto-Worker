@@ -258,13 +258,13 @@ ACTION_POINTS = {
     # keep these two points pinned to the visual centers of the max-quantity
     # arrow and the buy button. Do not adjust other vendor points here.
     "vendor_purchase_buy": (676 / 2538, 935 / 1384),
-    "vendor_purchase_max_quantity": (702 / 2048, 578 / 1390),
+    "vendor_purchase_max_quantity": (870 / 2544, 724 / 1388),
     "vendor_purchase_close": (2478 / 2544, 31 / 1388),
     "vendor_purchase_option": (2051 / 2544, 212 / 1388),
     "vendor_purchase_item_sanjiu": (2051 / 2544, 212 / 1388),
     "vendor_purchase_item_moding": (2051 / 2544, 485 / 1388),
     "hawking_inventory_first_slot": (2072 / 2544, 216 / 1388),
-    "hawking_max_quantity": (1776 / 2544, 706 / 1388),
+    "hawking_max_quantity": (1800 / 2544, 804 / 1388),
     "steal_button_1": (2371 / 2544, 614 / 1388),
     "steal_button_2": (1916 / 2048, 704 / 1360),
     "steal_button_3": (1916 / 2048, 893 / 1360),

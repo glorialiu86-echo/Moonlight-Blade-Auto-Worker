@@ -2107,6 +2107,16 @@ def detect_chat_ready_visual(hwnd: int) -> bool:
     return input_metrics["darkRatio"] >= 0.40 and send_metrics["brightRatio"] >= 0.20
 
 
+def is_chat_reply_text(text: str) -> bool:
+    normalized = str(text or "").strip()
+    input_keywords = ["点击输入聊天", "点击输入", "输入聊天", "鐐瑰嚮杈撳叆鑱婂ぉ"]
+    send_keywords = ["发送", "鍙戦€?"]
+    return (
+        contains_any_keyword(normalized, input_keywords)
+        and contains_any_keyword(normalized, send_keywords)
+    )
+
+
 def read_stage_texts(hwnd: int) -> dict[str, str]:
     return {
         name: ocr_text(capture_window_region(hwnd, roi))
@@ -2185,25 +2195,20 @@ def detect_npc_interaction_stage(hwnd: int) -> dict[str, Any]:
                 "gift_panel": ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["gift_panel"])),
             },
         }
+    chat_panel_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["chat_panel"]))
+    if is_chat_reply_text(chat_panel_text):
+        return {
+            "stage": "chat_ready",
+            "texts": {
+                "chat_panel": chat_panel_text,
+            },
+        }
     confirm_dialog_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["confirm_dialog"]))
     if contains_any_keyword(confirm_dialog_text, CONFIRM_KEYWORDS):
         return {
             "stage": "small_talk_confirm",
             "texts": {
                 "confirm_dialog": confirm_dialog_text,
-            },
-        }
-    if detect_chat_ready_visual(hwnd):
-        return {
-            "stage": "chat_ready",
-            "texts": {},
-        }
-    chat_panel_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["chat_panel"]))
-    if contains_any_keyword(chat_panel_text, CHAT_KEYWORDS):
-        return {
-            "stage": "chat_ready",
-            "texts": {
-                "chat_panel": chat_panel_text,
             },
         }
     if has_selected_target_visual(hwnd):

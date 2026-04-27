@@ -279,7 +279,7 @@ ACTION_POINTS = {
     "close_panel": (2004 / 2048, 32 / 1152),
     "trade_left_item_tab": (49 / 2544, 530 / 1388),
     "trade_left_item_slot": (203 / 2544, 314 / 1388),
-    "trade_item_popup_shelf_button": (1216 / 1904, 845 / 1041),
+    "trade_item_popup_shelf_button": (1216 / 1904, 744 / 1041),
     "trade_sell_money_slot": (2038 / 2544, 120 / 1388),
     "trade_gift_item_tab": (49 / 2544, 530 / 1388),
     "trade_gift_item_slot": (166 / 2544, 388 / 1388),

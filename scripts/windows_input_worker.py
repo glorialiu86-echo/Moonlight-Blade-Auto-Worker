@@ -287,8 +287,8 @@ ACTION_POINTS = {
     "trade_sell_item_tab": (2440 / 2544, 318 / 1388),
     "trade_sell_item_slot": (2068 / 2544, 409 / 1388),
     "trade_right_money_slot": (218 / 1902, 304 / 1040),
-    "trade_scale_button": (756 / 1902, 689 / 1040),
-    "trade_sell_scale_button": (756 / 1902, 689 / 1040),
+    "trade_scale_button": (905 / 1902, 689 / 1040),
+    "trade_sell_scale_button": (905 / 1902, 689 / 1040),
     "trade_right_up_shelf_button": (704 / 1902, 842 / 1040),
     "trade_final_submit_button": (1005 / 1902, 969 / 1040),
     "vendor_purchase_plus": (427 / 2544, 706 / 1388),
@@ -7486,4 +7486,5 @@ def main_v2() -> None:
 
 if __name__ == "__main__":
     main_v2()
+
 

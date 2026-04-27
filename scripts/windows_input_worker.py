@@ -1076,6 +1076,38 @@ def retry_probe_state(
     return last_state, history
 
 
+def probe_state_after_initial_wait(
+    title: str,
+    probe_fn,
+    success_fn,
+    initial_wait_ms: int = 1500,
+    verify_window_ms: int = 4000,
+    verify_interval_ms: int = 600,
+) -> tuple[Any, list[dict[str, Any]]]:
+    INPUT_GUARD.guarded_sleep(max(0, int(initial_wait_ms or 0)), title)
+    history: list[dict[str, Any]] = []
+    last_state = None
+    deadline = time.time() + max(0, int(verify_window_ms or 0)) / 1000.0
+    attempt_index = 0
+
+    while True:
+        attempt_index += 1
+        last_state = probe_fn()
+        success = bool(success_fn(last_state))
+        history.append(
+            {
+                "attempt": attempt_index,
+                "success": success,
+                "state": last_state,
+            }
+        )
+        if success or time.time() >= deadline:
+            break
+        INPUT_GUARD.guarded_sleep(max(0, int(verify_interval_ms or 0)), title)
+
+    return last_state, history
+
+
 def pulse_turn_key(hwnd: int, key: str, duration_ms: int, action_title: str) -> dict[str, Any]:
     bounds = focus_window(hwnd)
     pydirectinput.keyDown(key)
@@ -3912,7 +3944,10 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
     target_name = str(action.get("targetName") or "").strip()
     option_text = str(action.get("optionText") or "进些货物").strip()
     interact_attempts = max(1, int(action.get("interactAttempts") or 3))
-    verify_attempts = max(1, int(action.get("verifyAttempts") or 5))
+    post_interact_initial_wait_ms = int(action.get("postInteractInitialWaitMs") or 1500)
+    post_option_initial_wait_ms = int(action.get("postOptionInitialWaitMs") or 1500)
+    verify_window_ms = int(action.get("verifyWindowMs") or 4000)
+    verify_interval_ms = int(action.get("verifyIntervalMs") or 600)
 
     if not target_name:
         raise RuntimeError("open_named_vendor_purchase action requires targetName")
@@ -3931,7 +3966,7 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
         prompt_state = detect_vendor_interact_prompt(hwnd)
         pydirectinput.press("f")
         INPUT_GUARD.refresh_baseline()
-        INPUT_GUARD.guarded_sleep(1200, title)
+        INPUT_GUARD.guarded_sleep(post_interact_initial_wait_ms, title)
 
         dialog_state = detect_dialog(hwnd)
         quick_menu_state = detect_bottom_right_menu_stage(hwnd)
@@ -3963,23 +3998,23 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
                     int(option_match["screenY"]),
                     "left",
                 )
-                INPUT_GUARD.guarded_sleep(1200, title)
-                purchase_state, purchase_checks = retry_probe_state(
+                purchase_state, purchase_checks = probe_state_after_initial_wait(
                     title,
                     lambda: detect_vendor_purchase_screen(hwnd),
                     lambda state: bool(state["visible"]),
-                    attempts=verify_attempts,
-                    interval_ms=500,
+                    initial_wait_ms=post_option_initial_wait_ms,
+                    verify_window_ms=verify_window_ms,
+                    verify_interval_ms=verify_interval_ms,
                 )
             elif fixed_option_ready or dialog_state["visible"] or quick_menu_state["stage"] in {"npc_action_menu", "small_talk_menu"}:
                 option_click = click_named_point(hwnd, "vendor_purchase_option")
-                INPUT_GUARD.guarded_sleep(1200, title)
-                purchase_state, purchase_checks = retry_probe_state(
+                purchase_state, purchase_checks = probe_state_after_initial_wait(
                     title,
                     lambda: detect_vendor_purchase_screen(hwnd),
                     lambda state: bool(state["visible"]),
-                    attempts=verify_attempts,
-                    interval_ms=500,
+                    initial_wait_ms=post_option_initial_wait_ms,
+                    verify_window_ms=verify_window_ms,
+                    verify_interval_ms=verify_interval_ms,
                 )
 
         interact_attempt_log.append(
@@ -4013,6 +4048,10 @@ def run_open_named_vendor_purchase(hwnd: int, action: dict[str, Any]) -> dict[st
             "mode": "open_named_vendor_purchase",
             "targetName": target_name,
             "optionText": option_text,
+            "postInteractInitialWaitMs": post_interact_initial_wait_ms,
+            "postOptionInitialWaitMs": post_option_initial_wait_ms,
+            "verifyWindowMs": verify_window_ms,
+            "verifyIntervalMs": verify_interval_ms,
             "interactAttempts": interact_attempt_log,
             "optionMatch": option_match,
             "optionClick": option_click,
@@ -4130,7 +4169,7 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
     post_buy_settle_ms = int(action.get("postBuySettleMs") or 1000)
     post_close_initial_wait_ms = int(action.get("postCloseInitialWaitMs") or 1500)
     verify_window_ms = int(action.get("verifyWindowMs") or 4000)
-    verify_interval_ms = int(action.get("verifyIntervalMs") or 500)
+    verify_interval_ms = int(action.get("verifyIntervalMs") or 600)
     post_esc_initial_wait_ms = int(action.get("postEscInitialWaitMs") or 1500)
     item_name = str(action.get("itemName") or "墨锭").strip()
 
@@ -4157,8 +4196,6 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
     def close_success(state: dict[str, Any]) -> bool:
         return (not bool(state["purchaseVisible"])) and bool(state["worldHudVisible"])
 
-    verify_attempts = max(1, math.ceil(max(0, verify_window_ms) / max(1, verify_interval_ms)))
-
     item_click = click_named_point(hwnd, str(item_button["pointName"]))
     INPUT_GUARD.guarded_sleep(1000, title)
 
@@ -4167,13 +4204,13 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
     buy_click = click_named_point(hwnd, "vendor_purchase_buy")
     INPUT_GUARD.guarded_sleep(post_buy_settle_ms, title)
     close_click = click_named_point(hwnd, "vendor_purchase_close")
-    INPUT_GUARD.guarded_sleep(post_close_initial_wait_ms, title)
-    close_state, close_checks = retry_probe_state(
+    close_state, close_checks = probe_state_after_initial_wait(
         title,
         probe_close_state,
         close_success,
-        attempts=verify_attempts,
-        interval_ms=verify_interval_ms,
+        initial_wait_ms=post_close_initial_wait_ms,
+        verify_window_ms=verify_window_ms,
+        verify_interval_ms=verify_interval_ms,
     )
     esc_fallback = None
     esc_checks: list[dict[str, Any]] = []
@@ -4183,13 +4220,13 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
             pydirectinput.press("esc")
             INPUT_GUARD.refresh_baseline()
             esc_fallback = {"key": "esc"}
-            INPUT_GUARD.guarded_sleep(post_esc_initial_wait_ms, title)
-            close_state, esc_checks = retry_probe_state(
+            close_state, esc_checks = probe_state_after_initial_wait(
                 title,
                 probe_close_state,
                 close_success,
-                attempts=verify_attempts,
-                interval_ms=verify_interval_ms,
+                initial_wait_ms=post_esc_initial_wait_ms,
+                verify_window_ms=verify_window_ms,
+                verify_interval_ms=verify_interval_ms,
             )
         else:
             raise RuntimeError(
@@ -4250,6 +4287,9 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "stock_first_hawking_item")
     hawking_state = detect_hawking_screen(hwnd)
+    post_stock_initial_wait_ms = int(action.get("postStockInitialWaitMs") or 1500)
+    verify_window_ms = int(action.get("verifyWindowMs") or 4000)
+    verify_interval_ms = int(action.get("verifyIntervalMs") or 600)
 
     inventory_click = click_named_point(hwnd, "hawking_inventory_first_slot")
     INPUT_GUARD.guarded_sleep(1000, title)
@@ -4257,14 +4297,13 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
     INPUT_GUARD.guarded_sleep(1000, title)
     stock_key = str(action.get("stockKey") or resolve_shortcut_key("hawking"))
     pydirectinput.press(stock_key)
-    settle_ms = int(action.get("postDelayMs") or 1000)
-    INPUT_GUARD.guarded_sleep(settle_ms, title)
-    after_state, after_checks = retry_probe_state(
+    after_state, after_checks = probe_state_after_initial_wait(
         title,
         lambda: detect_hawking_screen(hwnd),
         lambda state: bool(state["visible"]),
-        attempts=max(1, int(action.get("verifyAttempts") or 5)),
-        interval_ms=500,
+        initial_wait_ms=post_stock_initial_wait_ms,
+        verify_window_ms=verify_window_ms,
+        verify_interval_ms=verify_interval_ms,
     )
     after_text = str(after_state["text"] or "")
 
@@ -4281,7 +4320,9 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
             "stockKey": stock_key,
             "afterText": after_text,
             "afterChecks": after_checks,
-            "settleMs": settle_ms,
+            "postStockInitialWaitMs": post_stock_initial_wait_ms,
+            "verifyWindowMs": verify_window_ms,
+            "verifyIntervalMs": verify_interval_ms,
         },
     }
 

@@ -286,7 +286,7 @@ ACTION_POINTS = {
     "trade_gift_item_slot": (166 / 2544, 388 / 1388),
     "trade_sell_item_tab": (2440 / 2544, 318 / 1388),
     "trade_sell_item_slot": (2068 / 2544, 409 / 1388),
-    "trade_right_money_slot": (193 / 2544, 306 / 1388),
+    "trade_right_money_slot": (292 / 2544, 406 / 1388),
     "trade_scale_button": (1657 / 2544, 800 / 1388),
     "trade_sell_scale_button": (1657 / 2544, 800 / 1388),
     "trade_right_up_shelf_button": (1206 / 1904, 771 / 1041),

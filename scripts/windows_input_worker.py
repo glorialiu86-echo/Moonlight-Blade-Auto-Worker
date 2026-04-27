@@ -28,6 +28,10 @@ DEFAULT_SCAN_INTERVAL_MS = 180
 DEFAULT_CAMERA_DRAG_MS = 220
 DEFAULT_VERIFY_SETTLE_MS = 180
 OCR_ENGINE = None
+FIRST_STEALTH_BUFF_STATE = {
+    "date": "",
+    "used": False,
+}
 TMP_DIR = Path(__file__).resolve().parents[1] / "tmp"
 CLICK_TRACE_DIR = TMP_DIR / "click-trace"
 GAME_FIXED_CLIENT_WIDTH = 2560
@@ -4633,11 +4637,44 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
                 "npc_selected" if has_strict_clickable_selected_target(stage_state, moving_view) else "none"
             )
             if resolved_stage in NPC_READY_STAGES or resolved_stage == "npc_selected":
+                stealth_attempts: list[dict[str, Any]] = []
+                shortcut_key = SHORTCUT_KEYS.get("stealth", "2")
+                stealth_state = detect_exit_stealth_button(hwnd)
+                if not stealth_state["visible"]:
+                    for attempt_index in range(5):
+                        INPUT_GUARD.check_or_raise(title)
+                        pydirectinput.press(shortcut_key)
+                        INPUT_GUARD.refresh_baseline()
+                        INPUT_GUARD.guarded_sleep(260, title)
+                        stealth_state = detect_exit_stealth_button(hwnd)
+                        stealth_attempts.append({
+                            "attemptIndex": attempt_index + 1,
+                            "exitStealthVisible": stealth_state["visible"],
+                            "stealthVisual": stealth_state,
+                        })
+                        if stealth_state["visible"]:
+                            break
+                    if not stealth_state["visible"]:
+                        raise RuntimeError("Failed to enter stealth after stable target selection")
+
+                today_key = time.strftime("%Y-%m-%d")
+                if FIRST_STEALTH_BUFF_STATE["date"] != today_key:
+                    FIRST_STEALTH_BUFF_STATE["date"] = today_key
+                    FIRST_STEALTH_BUFF_STATE["used"] = False
+
+                buff_triggered = False
+                if not FIRST_STEALTH_BUFF_STATE["used"]:
+                    pydirectinput.press(shortcut_key)
+                    INPUT_GUARD.refresh_baseline()
+                    INPUT_GUARD.guarded_sleep(300, title)
+                    FIRST_STEALTH_BUFF_STATE["used"] = True
+                    buff_triggered = True
+
                 return {
                     "id": action_id,
                     "title": title,
                     "status": "performed",
-                    "detail": f"Acquired front NPC target {target['text']} after left-turn alignment",
+                    "detail": f"Acquired front NPC target {target['text']} after left-turn alignment and entered stealth",
                     "input": {
                         "mode": "acquire_npc_target",
                         **collect_npc_stage_input(hwnd, {**stage_state, "stage": resolved_stage}, target_info["text"]),
@@ -4651,6 +4688,9 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
                         "lastClick": selection_clicks[-1] if selection_clicks else None,
                         "prepActions": prep_actions,
                         "frontTarget": target,
+                        "stealthAttempts": stealth_attempts,
+                        "stealthVisual": stealth_state,
+                        "buffTriggered": buff_triggered,
                     },
                 }
 
@@ -6852,6 +6892,21 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         key = str(action.get("key") or "").strip().lower()
         if not key:
             raise RuntimeError("press_key action requires key")
+        if action_id in {"fixed-dark-close-2", "fixed-dark-close-2b", "fixed-dark-close-3b"}:
+            stealth_state = detect_exit_stealth_button(hwnd)
+            if stealth_state["visible"]:
+                return {
+                    "id": action_id,
+                    "title": title,
+                    "status": "performed",
+                    "detail": f"Skipped redundant {key} because stealth was already active",
+                    "input": {
+                        "key": key,
+                        "skipped": True,
+                        "reason": "stealth_already_active",
+                        "stealthVisual": stealth_state,
+                    },
+                }
         focus_window(hwnd)
         duration_ms = int(action.get("durationMs") or 0)
         if duration_ms > 0:

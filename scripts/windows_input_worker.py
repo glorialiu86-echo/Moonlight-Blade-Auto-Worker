@@ -198,7 +198,7 @@ NPC_STAGE_ROIS = {
 }
 
 STEALTH_ROIS = {
-    "front_name_band": (0.36, 0.18, 0.64, 0.42),
+    "front_name_band": (0.28, 0.10, 0.72, 0.28),
     "exit_button": (0.86, 0.44, 0.99, 0.58),
     "result_banner": (0.26, 0.22, 0.74, 0.56),
     "steal_button_stack": (0.82, 0.28, 0.99, 0.94),
@@ -4599,12 +4599,22 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_id == "fixed-dark-close-1b":
         front_roi = STEALTH_ROIS["front_name_band"]
-        front_target_timeout_ms = int(action.get("frontTargetTimeoutMs") or timeout_ms or 7000)
-        front_turn_pulse_ms = int(action.get("frontTurnPulseMs") or 220)
-        front_settle_ms = int(action.get("frontSettleMs") or 120)
+        front_target_timeout_ms = int(action.get("frontTargetTimeoutMs") or max(timeout_ms, 18000))
+        front_turn_pulse_ms = int(action.get("frontTurnPulseMs") or 70)
+        front_settle_ms = int(action.get("frontSettleMs") or 180)
         prep_actions: list[dict[str, Any]] = []
         search_attempts: list[dict[str, Any]] = []
         selection_clicks: list[dict[str, Any]] = []
+        front_click_probe_points = [
+            (0.50, 0.28),
+            (0.50, 0.32),
+            (0.56, 0.30),
+            (0.44, 0.30),
+            (0.62, 0.30),
+            (0.38, 0.30),
+            (0.56, 0.34),
+            (0.44, 0.34),
+        ]
 
         pydirectinput.press("1")
         INPUT_GUARD.refresh_baseline()
@@ -4627,9 +4637,66 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
                 "turn": turn_state,
                 "target": target,
             })
+            if target is None:
+                probe_ratio = front_click_probe_points[len(search_attempts) % len(front_click_probe_points)]
+                probe_click = click_npc_candidate(hwnd, probe_ratio[0], probe_ratio[1], "left")
+                INPUT_GUARD.guarded_sleep(front_settle_ms, title)
+                probe_stage_state = detect_npc_interaction_stage(hwnd)
+                probe_target_info = detect_target_threshold(hwnd)
+                probe_moving_view = find_moving_view_button(hwnd)
+                probe_resolved_stage = probe_stage_state["stage"] if probe_stage_state["stage"] != "none" else (
+                    "npc_selected" if has_strict_clickable_selected_target(probe_stage_state, probe_moving_view) else "none"
+                )
+                search_attempts[-1]["probeClick"] = {
+                    "xRatio": probe_ratio[0],
+                    "yRatio": probe_ratio[1],
+                    "click": probe_click,
+                    "resolvedStage": probe_resolved_stage,
+                }
+                if probe_resolved_stage in NPC_READY_STAGES or probe_resolved_stage == "npc_selected":
+                    return {
+                        "id": action_id,
+                        "title": title,
+                        "status": "performed",
+                        "detail": "Acquired front NPC target through left-turn probe clicks",
+                        "input": {
+                            "mode": "acquire_npc_target",
+                            **collect_npc_stage_input(hwnd, {**probe_stage_state, "stage": probe_resolved_stage}, probe_target_info["text"]),
+                            "targetText": probe_target_info["text"],
+                            "stageHistory": [probe_resolved_stage],
+                            "clickAttempts": 1,
+                            "moveAttempts": 0,
+                            "clickPointAttempts": [{"xRatio": probe_ratio[0], "yRatio": probe_ratio[1]}],
+                            "nearbyScanAttempts": search_attempts,
+                            "selectionAttempts": [],
+                            "lastClick": probe_click,
+                            "prepActions": prep_actions,
+                            "frontTarget": None,
+                            "stealthAttempts": [],
+                            "stealthVisual": detect_exit_stealth_button(hwnd),
+                            "buffTriggered": False,
+                        },
+                    }
 
         if target is None:
-            raise RuntimeError("Failed to find a front NPC name after repeated left turns")
+            fallback_result = run_acquire_npc_target(
+                hwnd,
+                {
+                    "id": f"{action_id}-front-fallback",
+                    "title": f"{title}_front_fallback",
+                    "timeoutMs": 4000,
+                    "movePulseMs": 0,
+                    "scanIntervalMs": 120,
+                    "clickPoints": front_click_probe_points,
+                },
+            )
+            fallback_input = dict(fallback_result.get("input", {}))
+            fallback_input["prepActions"] = prep_actions
+            fallback_input["nearbyScanAttempts"] = search_attempts + list(fallback_input.get("nearbyScanAttempts") or [])
+            fallback_input["frontTarget"] = None
+            fallback_result["input"] = fallback_input
+            fallback_result["detail"] = "Acquired front NPC target through left-turn fallback selection"
+            return fallback_result
 
         started_at = time.time()
         stage_state = detect_npc_interaction_stage(hwnd)

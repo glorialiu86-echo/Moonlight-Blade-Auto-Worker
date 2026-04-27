@@ -70,8 +70,9 @@ const INPUT_PROTECTION_DELAY_MS = 2 * 60 * 1000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 10000;
-const NPC_CHAT_MAX_ROUNDS = 10;
+const NPC_CHAT_MAX_ROUNDS = 15;
 const NPC_CHAT_POLL_DELAY_MS = 5000;
+const NPC_CHAT_ROUND_WAIT_TIMEOUT_MS = 90000;
 const FIXED_SCRIPT_COMMENTARY_PAUSE_MS = 1200;
 const WATCH_COMMENTARY_MIN_INTERVAL_MS = 10000;
 const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
@@ -81,7 +82,6 @@ const NPC_DIALOG_TRANSIENT_TEXTS = new Set([
   "正在思考中",
   "此次对话已完结"
 ]);
-const NPC_DIALOG_STALL_RETRY_LIMIT = 2;
 let voiceAutoCaptureHoldActive = false;
 const ZIMIN_ALLOWED_FACT_POOL = [
   "1. 籽岷是多平台都叫得上号的《我的世界》主播。",
@@ -97,6 +97,60 @@ function isTransientNpcDialogText(text) {
     return true;
   }
   return NPC_DIALOG_TRANSIENT_TEXTS.has(normalized);
+}
+
+async function waitForActionableNpcRoundState({
+  instruction,
+  plan,
+  conversationRounds,
+  previousDialogText = ""
+}) {
+  const deadline = Date.now() + NPC_CHAT_ROUND_WAIT_TIMEOUT_MS;
+  const normalizedPreviousDialog = String(previousDialogText || "").trim();
+
+  while (true) {
+    const roundState = await analyzeNpcChatRound({
+      instruction,
+      plan,
+      conversationRounds
+    });
+
+    if (roundState.screenState !== "chat_ready") {
+      return {
+        roundState,
+        status: "chat_closed"
+      };
+    }
+
+    const currentDialogText = String(roundState.dialogText || "").trim();
+    const stillWaiting = !currentDialogText
+      || isTransientNpcDialogText(currentDialogText)
+      || (normalizedPreviousDialog && currentDialogText === normalizedPreviousDialog);
+
+    if (!stillWaiting) {
+      return {
+        roundState: {
+          ...roundState,
+          dialogText: currentDialogText
+        },
+        status: "ready"
+      };
+    }
+
+    if (Date.now() >= deadline) {
+      return {
+        roundState: {
+          ...roundState,
+          dialogText: currentDialogText
+        },
+        status: normalizedPreviousDialog && currentDialogText === normalizedPreviousDialog
+          ? "dialog_not_advanced"
+          : "dialog_missing"
+      };
+    }
+
+    await sleep(NPC_CHAT_POLL_DELAY_MS);
+  }
 }
 
 function pickRoundVariant(variants, roundNumber) {
@@ -2380,45 +2434,25 @@ async function runNpcConversationLoop({
   const executions = [];
   let currentDialogText = "";
   let stopReason = "dialog_exhausted";
-  let stalledDialogCount = 0;
 
   for (let roundIndex = 0; roundIndex < maxRounds; roundIndex += 1) {
-    const roundState = await analyzeNpcChatRound({
+    const previousDialogText = String(rounds[rounds.length - 1]?.dialogText || "").trim();
+    const roundProbe = await waitForActionableNpcRoundState({
       instruction,
       plan,
-      conversationRounds: rounds
+      conversationRounds: rounds,
+      previousDialogText
     });
+    const roundState = roundProbe.roundState;
 
-    if (roundState.screenState !== "chat_ready") {
+    if (roundProbe.status === "chat_closed" || roundState.screenState !== "chat_ready") {
       stopReason = roundIndex === 0 ? "chat_not_ready" : "dialog_closed";
       break;
     }
 
     currentDialogText = String(roundState.dialogText || "").trim();
-    if (!currentDialogText || isTransientNpcDialogText(currentDialogText)) {
-      stalledDialogCount += 1;
-      if (stalledDialogCount >= NPC_DIALOG_STALL_RETRY_LIMIT) {
-        stopReason = "dialog_missing";
-        break;
-      }
-      await sleep(NPC_CHAT_POLL_DELAY_MS);
-      continue;
-    }
-
-    const previousDialogText = String(rounds[rounds.length - 1]?.dialogText || "").trim();
-    if (roundIndex > 0 && currentDialogText === previousDialogText) {
-      stalledDialogCount += 1;
-      if (stalledDialogCount >= NPC_DIALOG_STALL_RETRY_LIMIT) {
-        stopReason = "dialog_not_advanced";
-        break;
-      }
-      await sleep(NPC_CHAT_POLL_DELAY_MS);
-      continue;
-    }
-
-    stalledDialogCount = 0;
-    if (!currentDialogText) {
-      stopReason = "dialog_missing";
+    if (roundProbe.status === "dialog_missing" || roundProbe.status === "dialog_not_advanced") {
+      stopReason = roundProbe.status;
       break;
     }
 

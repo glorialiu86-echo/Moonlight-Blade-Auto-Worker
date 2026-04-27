@@ -11,7 +11,7 @@ export const expectedRounds = {
   ending_trade: 1
 };
 
-export const expectedNpcChatMaxRounds = 10;
+export const expectedNpcChatMaxRounds = 15;
 
 function invariant(condition, message) {
   if (!condition) {
@@ -36,8 +36,8 @@ function verifySocialIntent(serverSource) {
     "social_dark instructionLabel is not aligned with the current money-chain goal"
   );
   invariant(
-    serverSource.includes("const NPC_CHAT_MAX_ROUNDS = 10;"),
-    "NPC_CHAT_MAX_ROUNDS must stay at 10"
+    serverSource.includes("const NPC_CHAT_MAX_ROUNDS = 15;"),
+    "NPC_CHAT_MAX_ROUNDS must stay at 15"
   );
   invariant(
     serverSource.includes("你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？"),

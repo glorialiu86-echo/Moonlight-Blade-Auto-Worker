@@ -290,7 +290,7 @@ ACTION_POINTS = {
     "trade_scale_button": (906 / 1904, 680 / 1041),
     "trade_sell_scale_button": (906 / 1904, 680 / 1041),
     # Payment-coin popup 上架 button (after selecting the left-side coin).
-    "trade_right_up_shelf_button": (690 / 1904, 812 / 1041),
+    "trade_right_up_shelf_button": (690 / 1904, 845 / 1041),
     "trade_final_submit_button": (1006 / 1904, 970 / 1041),
     "vendor_purchase_plus": (427 / 2544, 706 / 1388),
     # User re-marked on April 22, 2026 from the red-circled purchase panel:

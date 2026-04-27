@@ -5167,6 +5167,82 @@ def run_inspect_npc_interaction_stage(hwnd: int, action: dict[str, Any]) -> dict
     }
 
 
+def run_inspect_recovery_anchor_state(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "inspect_recovery_anchor_state")
+    npc_stage_state = detect_npc_interaction_stage(hwnd)
+    vendor_purchase_state = detect_vendor_purchase_screen(hwnd)
+    hawking_screen_state = detect_hawking_screen(hwnd)
+    hawking_runtime_state = detect_hawking_runtime_state(hwnd)
+    world_hud_state = detect_world_hud_state(hwnd)
+    stealth_state = detect_exit_stealth_button(hwnd)
+    knockout_state = detect_knockout_context(hwnd)
+    loot_state = detect_loot_screen(hwnd)
+    steal_state = detect_steal_screen_ready(hwnd)
+    map_state = detect_map_screen(hwnd)
+
+    anchor_id = "unknown"
+    confidence = "unknown"
+
+    npc_stage = str(npc_stage_state.get("stage") or "")
+    if npc_stage in {"chat_ready", "gift_screen", "trade_screen", "npc_action_menu", "small_talk_menu", "small_talk_confirm"}:
+        anchor_id = npc_stage
+        confidence = "confirmed"
+    elif vendor_purchase_state["visible"]:
+        anchor_id = "vendor_purchase_screen"
+        confidence = "confirmed"
+    elif hawking_screen_state["visible"]:
+        anchor_id = "hawking_screen"
+        confidence = "confirmed"
+    elif hawking_runtime_state["active"]:
+        anchor_id = "hawking_runtime_active"
+        confidence = "confirmed"
+    elif hawking_runtime_state["ready"]:
+        anchor_id = "hawking_runtime_ready"
+        confidence = "probable"
+    elif loot_state["visible"]:
+        anchor_id = "loot_screen"
+        confidence = "confirmed"
+    elif steal_state["visible"]:
+        anchor_id = "steal_screen"
+        confidence = "confirmed"
+    elif knockout_state["visible"]:
+        anchor_id = "knockout_context"
+        confidence = "confirmed"
+    elif stealth_state["visible"]:
+        anchor_id = "stealth_ready"
+        confidence = "confirmed"
+    elif map_state["visible"]:
+        anchor_id = "map_screen"
+        confidence = "confirmed"
+    elif world_hud_state["visible"]:
+        anchor_id = "world_hud"
+        confidence = "probable"
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Detected current recovery anchor: {anchor_id}",
+        "input": {
+            "mode": "inspect_recovery_anchor_state",
+            "anchorId": anchor_id,
+            "confidence": confidence,
+            "npcStage": npc_stage,
+            "vendorPurchase": vendor_purchase_state,
+            "hawkingScreen": hawking_screen_state,
+            "hawkingRuntime": hawking_runtime_state,
+            "worldHud": world_hud_state,
+            "stealth": stealth_state,
+            "knockout": knockout_state,
+            "loot": loot_state,
+            "steal": steal_state,
+            "map": map_state,
+            "npcStageState": collect_npc_stage_input(hwnd, npc_stage_state),
+        },
+    }
+
+
 def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "resolve_gift_chat_threshold")
@@ -5672,6 +5748,81 @@ def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
             "activeTimeoutMs": active_timeout_ms,
             "finishTimeoutMs": finish_timeout_ms,
             "activeHistory": active_history,
+            "finishHistory": finish_history,
+            "afterText": runtime_state["text"],
+        },
+    }
+
+
+def run_wait_hawking_runtime_finish(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "wait_hawking_runtime_finish")
+    finish_timeout_ms = max(1000, int(action.get("finishTimeoutMs") or 120000))
+    runtime_state = detect_hawking_runtime_state(hwnd)
+    if not runtime_state["active"] and runtime_state["ready"]:
+        return {
+            "id": action_id,
+            "title": title,
+            "status": "performed",
+            "detail": "Hawking runtime had already finished and returned to the normal world HUD",
+            "input": {
+                "mode": "wait_hawking_runtime_finish",
+                "afterText": runtime_state["text"],
+                "history": [],
+            },
+        }
+
+    if not runtime_state["active"]:
+        raise ActionExecutionError(
+            "Hawking runtime wait requires the active 改货/收摊 state or an already-restored world HUD",
+            failed_step=build_failed_step_payload(
+                action,
+                "Expected an active hawking runtime state before waiting for it to finish",
+                {
+                    "mode": "wait_hawking_runtime_finish",
+                    "beforeText": runtime_state["text"],
+                },
+            ),
+        )
+
+    finish_history: list[dict[str, Any]] = []
+    finish_deadline = time.time() + finish_timeout_ms / 1000.0
+    while time.time() <= finish_deadline:
+        finish_history.append(
+            {
+                "phase": "wait_finish",
+                "active": bool(runtime_state["active"]),
+                "ready": bool(runtime_state["ready"]),
+                "text": runtime_state["text"],
+            }
+        )
+        if runtime_state["ready"]:
+            break
+        INPUT_GUARD.guarded_sleep(1000, title)
+        runtime_state = detect_hawking_runtime_state(hwnd)
+
+    if not runtime_state["ready"]:
+        raise ActionExecutionError(
+            "Hawking runtime did not return to the normal world HUD before timeout",
+            failed_step=build_failed_step_payload(
+                action,
+                "Entered hawking runtime wait but did not return to the normal world HUD in time",
+                {
+                    "mode": "wait_hawking_runtime_finish",
+                    "finishTimeoutMs": finish_timeout_ms,
+                    "finishHistory": finish_history,
+                },
+            ),
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Observed the active hawking runtime state and waited until the normal world HUD returned",
+        "input": {
+            "mode": "wait_hawking_runtime_finish",
+            "finishTimeoutMs": finish_timeout_ms,
             "finishHistory": finish_history,
             "afterText": runtime_state["text"],
         },
@@ -6705,6 +6856,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     if action_type == "inspect_npc_interaction_stage":
         return run_inspect_npc_interaction_stage(hwnd, action)
 
+    if action_type == "inspect_recovery_anchor_state":
+        return run_inspect_recovery_anchor_state(hwnd, action)
+
     if action_type == "select_gift_first_slot":
         return run_select_gift_first_slot(hwnd, action)
 
@@ -6814,6 +6968,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "submit_hawking":
         return run_submit_hawking(hwnd, action)
+
+    if action_type == "wait_hawking_runtime_finish":
+        return run_wait_hawking_runtime_finish(hwnd, action)
 
     if action_type == "trade_select_left_item_tab":
         return run_trade_click_step(hwnd, action, "trade_left_item_tab", "Selected the left trade tab", 180)

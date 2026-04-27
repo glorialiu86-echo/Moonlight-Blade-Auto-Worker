@@ -65,14 +65,23 @@
 ## 恢复逻辑
 
 - 红色三角按钮不再按旧的“从失败步骤原样补跑”
-- 现在会先看当前界面，再决定从哪一步恢复
-- 社交恢复只允许从当前已见页面继续：
+- 仍然保留 `2` 分钟鼠标脱离保护；保护结束后，后台才会静默恢复
+- 恢复入口已改成“先探当前恢复锚点，再映射下一原子动作”，不再默认走 `failedIndex` 切片续跑
+- 当前优先识别的恢复锚点包括：
   - `gift_screen`
   - `npc_action_menu`
   - `small_talk_menu`
   - `small_talk_confirm`
   - `chat_ready`
-- 如果主播手动帮忙把页面推到了后面，恢复逻辑不会再回头重跑已完成步骤
+  - `vendor_purchase_screen`
+  - `hawking_screen`
+  - `hawking_runtime_active`
+  - `stealth_ready`
+  - `knockout_context`
+  - `loot_screen`
+  - `steal_screen`
+- 如果主播手动把链路推进到了更后的稳定锚点，恢复逻辑会直接从该锚点对应的下一步继续，不再回头重跑已完成动作
+- 如果锚点一轮没看清，恢复逻辑会先内部收敛：等待、重判、做低风险探针，再继续映射，不把“恢复失败”当合法终态
 
 ## 保持不变
 

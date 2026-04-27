@@ -1072,6 +1072,47 @@ async function inspectCurrentNpcInteractionStage(externalInputGuardEnabled = tru
   };
 }
 
+async function inspectCurrentRecoveryAnchorState(externalInputGuardEnabled = true) {
+  const execution = await runWindowsActions([
+    {
+      id: "resume-inspect-anchor-1",
+      title: "检查当前恢复锚点",
+      sourceType: "resume_probe",
+      type: "inspect_recovery_anchor_state"
+    }
+  ], {
+    interruptOnExternalInput: externalInputGuardEnabled
+  });
+
+  const probeStep = execution.rawSteps?.[0] || execution.steps?.[0] || {};
+  const input = probeStep.input || {};
+  return {
+    anchorId: String(input.anchorId || "unknown"),
+    confidence: String(input.confidence || "unknown"),
+    npcStage: String(input.npcStage || "none"),
+    evidence: input,
+    execution
+  };
+}
+
+function findActionIndexById(actions, actionId) {
+  if (!actionId || !Array.isArray(actions)) {
+    return -1;
+  }
+  return actions.findIndex((action) => String(action?.id || "").trim() === String(actionId || "").trim());
+}
+
+function sliceActionsFromId(actions, actionId, fallbackIndex = 0) {
+  if (!Array.isArray(actions) || actions.length === 0) {
+    return [];
+  }
+  const actionIndex = findActionIndexById(actions, actionId);
+  const normalizedIndex = actionIndex >= 0
+    ? actionIndex
+    : Math.min(Math.max(fallbackIndex, 0), actions.length - 1);
+  return actions.slice(normalizedIndex);
+}
+
 function buildSocialResumeActionsForCurrentStage(stage, currentStage) {
   switch (currentStage) {
     case "gift_screen":
@@ -1102,6 +1143,232 @@ function buildSocialResumeActionsForCurrentStage(stage, currentStage) {
         ...createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "resume-social-talk" })
       ];
   }
+}
+
+function buildStageStartActions(stageKey, roundNumber) {
+  switch (stageKey) {
+    case "street_wander":
+      return createFixedStreetWanderActions();
+    case "sell_loop":
+      return createFixedSellLoopActions({ roundNumber });
+    case "social_warm":
+    case "social_dark":
+      return createFixedSocialStageActions(stageKey);
+    case "dark_close":
+      return createFixedDarkCloseStageActions({ roundNumber });
+    case "dark_miaoqu":
+      return createFixedDarkMiaoquStageActions();
+    case "ending_trade":
+      return createFixedEndingTradeActions();
+    default:
+      return [];
+  }
+}
+
+function buildRecoveryActionsFromAnchor(context, anchorState) {
+  const stageKey = String(context?.stage?.key || "");
+  const roundNumber = Math.max(1, Number(context?.roundNumber || 1));
+  const anchorId = String(anchorState?.anchorId || "unknown");
+  const failedActionId = String(context?.failedActionId || "");
+
+  if (stageKey === "social_warm" || stageKey === "social_dark") {
+    if (anchorId === "chat_ready") {
+      return { recoveryKind: "npc_reply_loop", workerActions: [], anchorId };
+    }
+    if (["gift_screen", "npc_action_menu", "small_talk_menu", "small_talk_confirm", "trade_screen"].includes(anchorId)) {
+      const workerActions = buildSocialResumeActionsForCurrentStage(context.stage, anchorId);
+      return { recoveryKind: "worker_actions", workerActions, anchorId };
+    }
+    return {
+      recoveryKind: "worker_actions",
+      workerActions: createFixedSocialStageActions(stageKey),
+      anchorId: anchorId || "safe_anchor"
+    };
+  }
+
+  if (stageKey === "sell_loop") {
+    const actions = createFixedSellLoopActions({ roundNumber });
+    if (anchorId === "vendor_purchase_screen") {
+      return {
+        recoveryKind: "worker_actions",
+        workerActions: sliceActionsFromId(actions, "fixed-sale-5"),
+        anchorId
+      };
+    }
+    if (anchorId === "hawking_screen") {
+      return {
+        recoveryKind: "worker_actions",
+        workerActions: sliceActionsFromId(actions, "fixed-sale-10"),
+        anchorId
+      };
+    }
+    if (anchorId === "hawking_runtime_active" || anchorId === "hawking_runtime_ready") {
+      if (anchorId === "hawking_runtime_active") {
+        return {
+          recoveryKind: "worker_actions",
+          workerActions: [{
+            id: "fixed-sale-recovery-runtime-finish",
+            title: "等当前叫卖运行态自然卖完回到正常街道",
+            type: "wait_hawking_runtime_finish",
+            finishTimeoutMs: 120000
+          }],
+          anchorId
+        };
+      }
+      return {
+        recoveryKind: "stage_completed",
+        workerActions: [],
+        anchorId
+      };
+    }
+    if (anchorId === "world_hud") {
+      const postBuyIds = new Set(["fixed-sale-6", "fixed-sale-7", "fixed-sale-8", "fixed-sale-9", "fixed-sale-10", "fixed-sale-11"]);
+      const workerActions = postBuyIds.has(failedActionId)
+        ? sliceActionsFromId(actions, "fixed-sale-9")
+        : sliceActionsFromId(actions, "fixed-sale-3");
+      return { recoveryKind: "worker_actions", workerActions, anchorId };
+    }
+    return {
+      recoveryKind: "worker_actions",
+      workerActions: actions,
+      anchorId: anchorId || "safe_anchor"
+    };
+  }
+
+  if (stageKey === "dark_close") {
+    const actions = createFixedDarkCloseStageActions({ roundNumber });
+    if (anchorId === "stealth_ready") {
+      return {
+        recoveryKind: "worker_actions",
+        workerActions: sliceActionsFromId(actions, "fixed-dark-close-4"),
+        anchorId
+      };
+    }
+    if (anchorId === "knockout_context") {
+      return {
+        recoveryKind: "worker_actions",
+        workerActions: sliceActionsFromId(actions, "fixed-dark-close-5"),
+        anchorId
+      };
+    }
+    if (anchorId === "loot_screen") {
+      return {
+        recoveryKind: "worker_actions",
+        workerActions: sliceActionsFromId(actions, "fixed-dark-close-loot-collect"),
+        anchorId
+      };
+    }
+    if (anchorId === "world_hud") {
+      const workerActions = roundNumber === 1
+        ? sliceActionsFromId(actions, "fixed-dark-close-3")
+        : createFixedDarkCloseStageActions({ roundNumber: 2 });
+      return { recoveryKind: "worker_actions", workerActions, anchorId };
+    }
+    return {
+      recoveryKind: "worker_actions",
+      workerActions: actions,
+      anchorId: anchorId || "safe_anchor"
+    };
+  }
+
+  if (stageKey === "dark_miaoqu") {
+    const actions = createFixedDarkMiaoquStageActions();
+    if (anchorId === "stealth_ready") {
+      return {
+        recoveryKind: "worker_actions",
+        workerActions: sliceActionsFromId(actions, "fixed-dark-miaoqu-2"),
+        anchorId
+      };
+    }
+    if (anchorId === "steal_screen") {
+      return {
+        recoveryKind: "worker_actions",
+        workerActions: sliceActionsFromId(actions, "fixed-dark-miaoqu-3"),
+        anchorId
+      };
+    }
+    if (anchorId === "world_hud") {
+      return {
+        recoveryKind: "worker_actions",
+        workerActions: actions,
+        anchorId
+      };
+    }
+    return {
+      recoveryKind: "worker_actions",
+      workerActions: actions,
+      anchorId: anchorId || "safe_anchor"
+    };
+  }
+
+  if (stageKey === "ending_trade") {
+    if (anchorId === "trade_screen") {
+      return {
+        recoveryKind: "worker_actions",
+        workerActions: createFixedEndingTradeBundleActions({ idPrefix: "fixed-ending-trade-recovery-bundle" }),
+        anchorId
+      };
+    }
+    if (anchorId === "npc_action_menu") {
+      return {
+        recoveryKind: "worker_actions",
+        workerActions: [
+          ...createFixedEndingTradeOpenTradeActions({
+            idPrefix: "fixed-ending-trade-recovery-open",
+            acquireTitle: "沿用当前锁定目标继续拉交易页",
+            menuTitle: "沿用当前交互菜单继续打开交易页",
+            tradeTitle: "从当前菜单继续打开交易页准备收尾卖货"
+          }).slice(2),
+          ...createFixedEndingTradeBundleActions({ idPrefix: "fixed-ending-trade-recovery-bundle" })
+        ],
+        anchorId
+      };
+    }
+    if (anchorId === "world_hud") {
+      return {
+        recoveryKind: "worker_actions",
+        workerActions: [
+          ...createFixedEndingTradeOpenTradeActions({
+            idPrefix: "fixed-ending-trade-recovery-open"
+          }),
+          ...createFixedEndingTradeBundleActions({ idPrefix: "fixed-ending-trade-recovery-bundle" })
+        ],
+        anchorId
+      };
+    }
+    return {
+      recoveryKind: "worker_actions",
+      workerActions: createFixedEndingTradeActions(),
+      anchorId: anchorId || "safe_anchor"
+    };
+  }
+
+  return {
+    recoveryKind: "worker_actions",
+    workerActions: buildStageStartActions(stageKey, roundNumber),
+    anchorId: anchorId || "safe_anchor"
+  };
+}
+
+function buildLowRiskRecoveryProbeActions(context, anchorState) {
+  const anchorId = String(anchorState?.anchorId || "");
+  const stageKey = String(context?.stage?.key || "");
+  if (["trade_screen", "gift_screen", "npc_action_menu", "small_talk_menu", "small_talk_confirm", "chat_ready"].includes(anchorId)) {
+    return [{
+      id: "resume-low-risk-close",
+      title: "先轻关当前面板再重判恢复锚点",
+      type: "close_current_panel"
+    }];
+  }
+  if (stageKey === "dark_miaoqu" && anchorId === "steal_screen") {
+    return [{
+      id: "resume-low-risk-exit-stealth",
+      title: "先退潜行回稳定主界面再重判",
+      type: "exit_stealth",
+      settleMs: 250
+    }];
+  }
+  return [];
 }
 
 function buildFixedScriptOpeningThinkingChain(stageKey, thinkingChain) {
@@ -1606,9 +1873,8 @@ function armAutomationScript(instruction, triggerConfig = null) {
 
 function armResumeFailedStep() {
   const context = pendingResumeContext;
-  const hasWorkerRecovery = Array.isArray(context?.workerActions) && context.workerActions.length > 0;
-  const hasReplyRecovery = context?.recoveryKind === "npc_reply_loop";
-  if (!hasWorkerRecovery && !hasReplyRecovery) {
+  const hasRecoveryContext = Boolean(context?.stage?.key || context?.recoveryKind === "npc_reply_loop");
+  if (!hasRecoveryContext) {
     throw new Error("当前没有可继续的失败步骤。");
   }
 
@@ -1778,70 +2044,6 @@ function buildStageWorkerActions(stageKey) {
   }
 }
 
-function buildRecoveryWorkerActions(baseContext, error, workerActions, failedIndex) {
-  const failureCode = getFailureCode(error);
-  const stageKey = baseContext?.stage?.key || "";
-
-  if (stageKey === "social_warm" || stageKey === "social_dark") {
-    if (["NPC_CHAT_THRESHOLD_REVEALED", "NPC_TARGET_SWITCH_FAILED"].includes(failureCode)) {
-      return createFixedSocialStageActions(stageKey);
-    }
-    if (failureCode === "NPC_VIEW_NOT_OPENED") {
-      return createFixedSocialStageActions(stageKey);
-    }
-  }
-
-  if (failureCode === "ROUTE_STALLED") {
-    return workerActions.slice(failedIndex);
-  }
-
-  if (stageKey === "dark_close") {
-    if (failureCode === "STEALTH_ENTRY_BLOCKED") {
-      return createFixedDarkCloseStageActions();
-    }
-    if (["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(failureCode)) {
-      return createStealthEscapeRecoveryActions();
-    }
-  }
-
-  if (stageKey === "dark_miaoqu") {
-    if (failureCode === "STEALTH_ENTRY_BLOCKED") {
-      return createFixedDarkMiaoquStageActions();
-    }
-    if (["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(failureCode)) {
-      return createFixedDarkMiaoquRecoveryActions();
-    }
-  }
-
-  if (stageKey === "ending_trade" && ["NPC_VIEW_NOT_OPENED", "NPC_TARGET_SWITCH_FAILED"].includes(failureCode)) {
-    return [
-      ...createFixedEndingTradeRelocateActions({ idPrefix: "fixed-ending-trade-recovery-relocate" }),
-      ...createFixedEndingTradeOpenTradeActions({
-        idPrefix: "fixed-ending-trade-recovery-open",
-        acquireTitle: "回到卦摊附近重新锁一个路人目标",
-        menuTitle: "重新拉起路人交互菜单",
-        tradeTitle: "重新打开交易页准备收尾卖货"
-      }),
-      ...createFixedEndingTradeBundleActions({ idPrefix: "fixed-ending-trade-recovery-bundle" })
-    ];
-  }
-
-  if (stageKey === "ending_trade" && failureCode === "NPC_TRADE_NOT_OPENED") {
-    return [
-      ...createFixedEndingTradeRelocateActions({ idPrefix: "fixed-ending-trade-recovery-relocate" }),
-      ...createFixedEndingTradeOpenTradeActions({
-        idPrefix: "fixed-ending-trade-recovery-open",
-        acquireTitle: "回到卦摊附近重新锁一个路人目标",
-        menuTitle: "重新拉起路人交互菜单",
-        tradeTitle: "重新打开交易页准备收尾卖货"
-      }),
-      ...createFixedEndingTradeBundleActions({ idPrefix: "fixed-ending-trade-recovery-bundle" })
-    ];
-  }
-
-  return workerActions.slice(failedIndex);
-}
-
 function getRecoveryBudget(baseContext, error) {
   const failureCode = getFailureCode(error);
   const stageKey = baseContext?.stage?.key || "";
@@ -1902,35 +2104,21 @@ function getFailedStepTitle(error) {
 
 function buildResumeContextFromError(baseContext, error) {
   const workerActions = Array.isArray(error?.workerActions) ? error.workerActions : [];
-  if (workerActions.length === 0) {
-    return null;
-  }
-
   const failedStep = error?.workerPayload?.failedStep || null;
   const completedCount = Array.isArray(error?.workerPayload?.steps) ? error.workerPayload.steps.length : 0;
-  let failedIndex = failedStep?.id
-    ? workerActions.findIndex((action) => action.id === failedStep.id)
-    : -1;
-
-  if (failedIndex < 0) {
-    failedIndex = Math.min(Math.max(completedCount, 0), workerActions.length - 1);
-  }
-
-  const recoveryWorkerActions = buildRecoveryWorkerActions(baseContext, error, workerActions, failedIndex);
-  if (recoveryWorkerActions.length === 0) {
-    return null;
-  }
-
   return {
     ...baseContext,
-    recoveryKind: "worker_action_queue",
+    recoveryKind: "recovery_anchor_resolution",
     failureCode: getFailureCode(error),
     failedStepTitle: getFailedStepTitle(error),
     failureMessageId: null,
     stageKey: baseContext?.stage?.key || null,
+    failedActionId: String(failedStep?.id || ""),
+    completedActionIds: workerActions.slice(0, Math.max(0, completedCount)).map((action) => String(action?.id || "")).filter(Boolean),
+    chunkWorkerActions: workerActions,
     attemptCount: getFailureAttemptCount(error),
     attemptBudget: getRecoveryBudget(baseContext, error),
-    workerActions: recoveryWorkerActions
+    workerActions: []
   };
 }
 
@@ -1946,6 +2134,53 @@ function buildNpcReplyResumeContext(baseContext, error, execution) {
     attemptBudget: 0,
     workerActions: [],
     baseExecution: execution
+  };
+}
+
+async function resolveRecoveryExecutionPlan(context) {
+  const maxProbeRounds = 4;
+  let lastAnchorState = null;
+
+  for (let attemptIndex = 0; attemptIndex < maxProbeRounds; attemptIndex += 1) {
+    const anchorState = await inspectCurrentRecoveryAnchorState(context.externalInputGuardEnabled);
+    lastAnchorState = anchorState;
+    const resolved = buildRecoveryActionsFromAnchor(context, anchorState);
+    const hasExecutableRecovery = resolved.recoveryKind === "npc_reply_loop"
+      || resolved.recoveryKind === "stage_completed"
+      || (Array.isArray(resolved.workerActions) && resolved.workerActions.length > 0);
+    if (hasExecutableRecovery && anchorState.confidence !== "unknown") {
+      return {
+        ...resolved,
+        anchorState,
+        convergenceAttemptCount: attemptIndex + 1
+      };
+    }
+
+    if (attemptIndex === 0) {
+      await sleep(600);
+      continue;
+    }
+
+    const lowRiskProbeActions = buildLowRiskRecoveryProbeActions(context, anchorState);
+    if (lowRiskProbeActions.length > 0) {
+      await runWindowsActions(lowRiskProbeActions, {
+        interruptOnExternalInput: context.externalInputGuardEnabled
+      });
+      await sleep(250);
+      continue;
+    }
+
+    await sleep(500);
+  }
+
+  return {
+    ...buildRecoveryActionsFromAnchor(context, lastAnchorState || { anchorId: "safe_anchor", confidence: "unknown" }),
+    anchorState: lastAnchorState || {
+      anchorId: "safe_anchor",
+      confidence: "unknown",
+      evidence: {}
+    },
+    convergenceAttemptCount: maxProbeRounds
   };
 }
 
@@ -3813,7 +4048,7 @@ function recordAutonomousFailure(error) {
 
 async function resumeFailedAutomationStep() {
   const context = pendingResumeContext;
-  if (!context?.workerActions?.length) {
+  if (!context?.stage?.key && context?.recoveryKind !== "npc_reply_loop") {
     throw new Error("当前没有可继续的失败步骤。");
   }
 
@@ -3839,18 +4074,22 @@ async function resumeFailedAutomationStep() {
   try {
     const latestPerception = getState().latestPerception || context.perception || null;
     const perceptionSummary = perceptionSummaryBySource(latestPerception, "agent");
-    let effectiveRecoveryKind = context.recoveryKind;
-    let effectiveWorkerActions = context.workerActions;
+    const resolvedRecovery = await resolveRecoveryExecutionPlan(context);
+    const effectiveRecoveryKind = resolvedRecovery.recoveryKind;
+    const effectiveWorkerActions = resolvedRecovery.workerActions || [];
 
-    if (context.stage?.key === "social_warm" || context.stage?.key === "social_dark") {
-      const stageProbe = await inspectCurrentNpcInteractionStage(context.externalInputGuardEnabled);
-      if (stageProbe.stage === "chat_ready") {
-        effectiveRecoveryKind = "npc_reply_loop";
-      } else {
-        effectiveRecoveryKind = "worker_actions";
-        effectiveWorkerActions = buildSocialResumeActionsForCurrentStage(context.stage, stageProbe.stage);
-      }
-    }
+    updateAutomation({
+      lastRecoveryKind: `${effectiveRecoveryKind}:${resolvedRecovery.anchorState?.anchorId || "unknown"}`,
+      lastRecoveryAttemptCount: resolvedRecovery.convergenceAttemptCount || 0
+    });
+    appendLog("info", "恢复锚点已收敛", {
+      stageKey: context.stage?.key || null,
+      roundNumber: context.roundNumber || null,
+      anchorId: resolvedRecovery.anchorState?.anchorId || "unknown",
+      confidence: resolvedRecovery.anchorState?.confidence || "unknown",
+      recoveryKind: effectiveRecoveryKind,
+      convergenceAttemptCount: resolvedRecovery.convergenceAttemptCount || 0
+    });
 
     if (effectiveRecoveryKind === "npc_reply_loop") {
       let replyResult;
@@ -3904,6 +4143,28 @@ async function resumeFailedAutomationStep() {
         replyResultOverride: replyResult || null,
         skipExecutionRecording: true
       });
+    } else if (effectiveRecoveryKind === "stage_completed") {
+      await finalizeFixedScriptTurnExecution({
+        stage: context.stage,
+        roundNumber: context.roundNumber,
+        userInstruction: context.userInstruction,
+        scene: context.scene,
+        perception: latestPerception,
+        interactionMode: context.interactionMode,
+        externalInputGuardEnabled: context.externalInputGuardEnabled,
+        perceptionSummary,
+        plan: context.plan,
+        execution: {
+          executor: "RecoveryResolver",
+          steps: [],
+          rawSteps: [],
+          durationMs: 0,
+          outcome: "当前稳定状态已经等价于这一轮完成。",
+          outcomeKind: "completed"
+        },
+        recoveryKind: `${effectiveRecoveryKind}:${resolvedRecovery.anchorState?.anchorId || "unknown"}`,
+        skipExecutionRecording: true
+      });
     } else {
       const execution = await runWindowsActions(effectiveWorkerActions, {
         interruptOnExternalInput: context.externalInputGuardEnabled
@@ -3920,7 +4181,7 @@ async function resumeFailedAutomationStep() {
         perceptionSummary,
         plan: context.plan,
         execution,
-        recoveryKind: effectiveRecoveryKind || "worker_actions"
+        recoveryKind: `${effectiveRecoveryKind || "worker_actions"}:${resolvedRecovery.anchorState?.anchorId || "unknown"}`
       });
     }
 

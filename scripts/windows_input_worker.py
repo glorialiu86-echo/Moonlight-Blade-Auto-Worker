@@ -4975,13 +4975,13 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
         )
 
     confirm_dialog_click = click_named_point(hwnd, "small_talk_confirm_dialog")
-    INPUT_GUARD.guarded_sleep(2000, title)
+    INPUT_GUARD.guarded_sleep(max(200, int(action.get("postConfirmInitialWaitMs") or 350)), title)
 
     after_confirm_state = wait_for_any_npc_stage(
         hwnd,
         {"chat_ready", "small_talk_confirm", "small_talk_menu", "npc_action_menu"},
-        timeout_ms=max(1200, int(action.get("postConfirmTimeoutMs") or 3600)),
-        poll_interval_ms=max(120, int(action.get("postConfirmPollIntervalMs") or 180)),
+        timeout_ms=max(3000, int(action.get("postConfirmTimeoutMs") or 5000)),
+        poll_interval_ms=max(160, int(action.get("postConfirmPollIntervalMs") or 320)),
     )
 
     confirm_dialog_text_after = str(after_confirm_state["texts"].get("confirm_dialog") or "")
@@ -5005,7 +5005,7 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
     next_stage_state = wait_for_any_npc_stage(
         hwnd,
         {"chat_ready", "small_talk_confirm", "small_talk_menu", "npc_action_menu"},
-        timeout_ms=max(2000, int(action.get("settleTimeoutMs") or 2400)),
+        timeout_ms=max(1200, int(action.get("settleTimeoutMs") or 1800)),
         poll_interval_ms=max(120, int(action.get("pollIntervalMs") or 180)),
     )
     next_stage = next_stage_state["stage"]

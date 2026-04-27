@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 import ctypes
 import io
 import json
@@ -280,17 +280,17 @@ ACTION_POINTS = {
     "trade_left_item_tab": (49 / 2544, 530 / 1388),
     "trade_left_item_slot": (203 / 2544, 314 / 1388),
     # Left-side 上架 button on the current left-item trade panel.
-    "trade_left_up_shelf_button": (1206 / 1904, 771 / 1041),
+    "trade_left_up_shelf_button": (704 / 1902, 842 / 1040),
     "trade_sell_money_slot": (2038 / 2544, 120 / 1388),
     "trade_gift_item_tab": (49 / 2544, 530 / 1388),
     "trade_gift_item_slot": (166 / 2544, 388 / 1388),
     "trade_sell_item_tab": (2440 / 2544, 318 / 1388),
     "trade_sell_item_slot": (2068 / 2544, 409 / 1388),
-    "trade_right_money_slot": (292 / 2544, 406 / 1388),
-    "trade_scale_button": (1657 / 2544, 800 / 1388),
-    "trade_sell_scale_button": (1657 / 2544, 800 / 1388),
-    "trade_right_up_shelf_button": (1206 / 1904, 771 / 1041),
-    "trade_final_submit_button": (1345 / 2544, 1296 / 1388),
+    "trade_right_money_slot": (218 / 1902, 304 / 1040),
+    "trade_scale_button": (756 / 1902, 689 / 1040),
+    "trade_sell_scale_button": (756 / 1902, 689 / 1040),
+    "trade_right_up_shelf_button": (704 / 1902, 842 / 1040),
+    "trade_final_submit_button": (1005 / 1902, 969 / 1040),
     "vendor_purchase_plus": (427 / 2544, 706 / 1388),
     # User re-marked on April 22, 2026 from the red-circled purchase panel:
     # keep these two points pinned to the visual centers of the max-quantity
@@ -7486,3 +7486,4 @@ def main_v2() -> None:
 
 if __name__ == "__main__":
     main_v2()
+

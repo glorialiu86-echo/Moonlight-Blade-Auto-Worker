@@ -1672,6 +1672,61 @@ function buildAutomationStageSequence(stageKeys = null) {
 
 function getAutomationTriggerConfig(instruction) {
   const text = String(instruction || "");
+  const exactStageTriggerMap = {
+    street_wander: {
+      triggerWord: "street_wander",
+      stageKeys: ["street_wander"],
+      armedNotice: "",
+      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑闲逛 stage。",
+      silentChatTrigger: true
+    },
+    sell_loop: {
+      triggerWord: "sell_loop",
+      stageKeys: ["sell_loop"],
+      armedNotice: "",
+      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑买货卖货 stage。",
+      silentChatTrigger: true
+    },
+    social_warm: {
+      triggerWord: "social_warm",
+      stageKeys: ["social_warm"],
+      armedNotice: "",
+      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑热聊 stage。",
+      silentChatTrigger: true
+    },
+    social_dark: {
+      triggerWord: "social_dark",
+      stageKeys: ["social_dark"],
+      armedNotice: "",
+      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑搞钱聊天 stage。",
+      silentChatTrigger: true
+    },
+    dark_close: {
+      triggerWord: "dark_close",
+      stageKeys: ["dark_close"],
+      armedNotice: "",
+      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑闷棍搜刮 stage。",
+      silentChatTrigger: true
+    },
+    dark_miaoqu: {
+      triggerWord: "dark_miaoqu",
+      stageKeys: ["dark_miaoqu"],
+      armedNotice: "",
+      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑妙取 stage。",
+      silentChatTrigger: true
+    },
+    ending_trade: {
+      triggerWord: "ending_trade",
+      stageKeys: ["ending_trade"],
+      armedNotice: "",
+      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑收尾交易 stage。",
+      silentChatTrigger: true
+    }
+  };
+  const exactStageTrigger = exactStageTriggerMap[text.trim()];
+  if (exactStageTrigger) {
+    return exactStageTrigger;
+  }
 
   if (text.includes("我想敲他板砖")) {
     return {
@@ -5222,6 +5277,7 @@ async function handleChat(request, response) {
   const instruction = String(body.instruction || "").trim();
   const automationTriggerConfig = getAutomationTriggerConfig(instruction);
   const automationTriggered = hasAutomationTrigger(instruction);
+  const silentAutomationTrigger = Boolean(automationTriggerConfig?.silentChatTrigger);
   const chatAssistTriggered = hasChatAssistTrigger(instruction);
   const requestedInteractionMode = typeof body.interactionMode === "string"
     ? body.interactionMode.trim()
@@ -5261,12 +5317,14 @@ async function handleChat(request, response) {
     setExternalInputGuardEnabled(requestedExternalInputGuardEnabled);
   }
 
-  appendMessage(buildUserMessage({
-    instruction,
-    scene: getState().scene,
-    perception: getState().latestPerception,
-    origin: "user"
-  }));
+  if (!silentAutomationTrigger) {
+    appendMessage(buildUserMessage({
+      instruction,
+      scene: getState().scene,
+      perception: getState().latestPerception,
+      origin: "user"
+    }));
+  }
 
   if (chatAssistTriggered) {
     armChatAssist(instruction);
@@ -5291,6 +5349,7 @@ async function handleChat(request, response) {
       startsAt: getState().automation.startsAt,
       triggerWord: automationTriggerConfig.triggerWord
     });
+    if (!silentAutomationTrigger) {
     appendMessage({
       role: "assistant",
       text: automationTriggerConfig.armedNotice,
@@ -5301,6 +5360,7 @@ async function handleChat(request, response) {
       riskLevel: "low",
       actions: []
     });
+    }
   } else if ((getState().interactionMode || "watch") === "watch") {
     const latestState = getState();
     await runWatchUserReplyTurn({

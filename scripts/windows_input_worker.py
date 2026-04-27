@@ -2348,14 +2348,14 @@ def execute_fixed_trade_flow(hwnd: int, title: str) -> dict[str, Any]:
 
 def execute_trade_gift_bundle_flow(hwnd: int, title: str, repeat_count: int = 10) -> dict[str, Any]:
     repeat_count = max(1, int(repeat_count))
-    category_click = click_named_point(hwnd, "trade_gift_item_tab")
+    category_click = click_named_point(hwnd, "trade_sell_item_tab")
     INPUT_GUARD.guarded_sleep(320, title)
 
     stage_history = ["trade_screen"]
     rounds: list[dict[str, Any]] = []
 
     for round_index in range(repeat_count):
-        item_click = click_named_point(hwnd, "trade_gift_item_slot")
+        item_click = click_named_point(hwnd, "trade_sell_item_slot")
         INPUT_GUARD.guarded_sleep(360, title)
         shelf_click = click_named_point(hwnd, "trade_left_up_shelf_button")
         INPUT_GUARD.guarded_sleep(520, title)
@@ -7021,7 +7021,7 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         return run_trade_prepare_gift_bundle(hwnd, action)
 
     if action_type == "trade_select_right_money_slot":
-        return run_trade_click_step(hwnd, action, "trade_right_money_slot", "Selected the right-side payment item", 400)
+        return run_trade_click_step(hwnd, action, "trade_left_item_slot", "Selected the left-side payment coin", 400)
 
     if action_type == "trade_scale_quantity":
         return run_trade_click_step(hwnd, action, "trade_scale_button", "Adjusted the trade quantity", 450)

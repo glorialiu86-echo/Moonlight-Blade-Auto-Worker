@@ -592,7 +592,7 @@ export function createFixedEndingTradeActions() {
     createOpenNpcActionMenuAction("fixed-ending-trade-2", "拉起路人交互菜单"),
     createWorkerAction("fixed-ending-trade-3", "打开交易页准备收尾卖货", "click_menu_trade"),
     createWorkerAction("fixed-ending-trade-4", "连续上架十个道具", "trade_prepare_gift_bundle", {
-      repeatCount: 10
+      repeatCount: 6
     }),
     createWorkerAction("fixed-ending-trade-5", "选中右侧支付物", "trade_select_right_money_slot"),
     createWorkerAction("fixed-ending-trade-6", "调整支付数量", "trade_scale_quantity"),

@@ -47,7 +47,7 @@ test("fixed-script smoke: runtime flow doc stays synced with startup lines and p
   assert.doesNotThrow(() => verifyStartupAndEndingCopy(serverSource, runtimeFlowDoc));
 });
 
-test("fixed-script smoke: npc chat loop stays on the 15-round vision flow", async () => {
+test("fixed-script smoke: npc chat loop stays on the 8-round vision flow", async () => {
   const { serverSource, runtimeFlowDoc } = await loadFixedScriptArtifacts();
 
   assert.equal(
@@ -58,7 +58,7 @@ test("fixed-script smoke: npc chat loop stays on the 15-round vision flow", asyn
   assert.equal(serverSource.includes("边套话边压低好感"), false);
   assert.equal(serverSource.includes("这是空态首轮。先打招呼，再说自己想搞钱，问对方有没有什么建议"), true);
   assert.equal(serverSource.includes("这是空态首轮。先打招呼，再说自己最近手紧、也想搞钱，问对方有没有什么建议"), true);
-  assert.equal(runtimeFlowDoc.includes("自动追加最多 `15` 轮 NPC 回复"), true);
+  assert.equal(runtimeFlowDoc.includes("自动追加最多 `8` 轮 NPC 回复"), true);
   assert.equal(runtimeFlowDoc.includes("聊天空态首轮"), true);
   assert.equal(runtimeFlowDoc.includes("不走聊天 OCR 轮询"), true);
 });

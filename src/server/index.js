@@ -82,6 +82,10 @@ const NPC_DIALOG_TRANSIENT_TEXTS = new Set([
   "正在思考中",
   "此次对话已完结"
 ]);
+const NPC_DIALOG_TRANSIENT_MARKERS = [
+  "思考中",
+  "深思熟虑"
+];
 let voiceAutoCaptureHoldActive = false;
 const ZIMIN_ALLOWED_FACT_POOL = [
   "1. 籽岷是多平台都叫得上号的《我的世界》主播。",
@@ -96,6 +100,9 @@ function isTransientNpcDialogText(text) {
   if (!normalized) {
     return true;
   }
+  if (NPC_DIALOG_TRANSIENT_MARKERS.some((marker) => normalized.includes(marker))) {
+    return true;
+  }
   return NPC_DIALOG_TRANSIENT_TEXTS.has(normalized);
 }
 
@@ -107,6 +114,7 @@ async function waitForActionableNpcRoundState({
 }) {
   const deadline = Date.now() + NPC_CHAT_ROUND_WAIT_TIMEOUT_MS;
   const normalizedPreviousDialog = String(previousDialogText || "").trim();
+  let lastRoundState = null;
 
   while (true) {
     const roundState = await analyzeNpcChatRound({
@@ -114,6 +122,7 @@ async function waitForActionableNpcRoundState({
       plan,
       conversationRounds
     });
+    lastRoundState = roundState;
 
     if (roundState.screenState !== "chat_ready") {
       return {
@@ -140,12 +149,10 @@ async function waitForActionableNpcRoundState({
     if (Date.now() >= deadline) {
       return {
         roundState: {
-          ...roundState,
+          ...(lastRoundState || roundState),
           dialogText: currentDialogText
         },
-        status: normalizedPreviousDialog && currentDialogText === normalizedPreviousDialog
-          ? "dialog_not_advanced"
-          : "dialog_missing"
+        status: "ready"
       };
     }
 
@@ -2439,10 +2446,6 @@ async function runNpcConversationLoop({
     }
 
     currentDialogText = String(roundState.dialogText || "").trim();
-    if (roundProbe.status === "dialog_missing" || roundProbe.status === "dialog_not_advanced") {
-      stopReason = roundProbe.status;
-      break;
-    }
 
     if (typeof onBeforeRound === "function") {
       await onBeforeRound({

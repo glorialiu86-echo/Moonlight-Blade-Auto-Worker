@@ -1282,6 +1282,14 @@ def detect_vendor_purchase_screen(hwnd: int) -> dict[str, Any]:
     }
 
 
+def detect_world_hud_state(hwnd: int) -> dict[str, Any]:
+    action_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["bottom_right_actions"]))
+    return {
+        "visible": contains_any_keyword(action_text, WORLD_HUD_KEYWORDS),
+        "text": action_text,
+    }
+
+
 def detect_vendor_interact_prompt(hwnd: int) -> dict[str, Any]:
     action_text = ocr_text(capture_window_region(hwnd, NPC_STAGE_ROIS["bottom_right_actions"]))
     normalized_text = normalize_npc_name(action_text)
@@ -4119,6 +4127,11 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "buy_current_vendor_item")
     quantity = max(1, int(action.get("quantity") or 1))
+    post_buy_settle_ms = int(action.get("postBuySettleMs") or 1000)
+    post_close_initial_wait_ms = int(action.get("postCloseInitialWaitMs") or 1500)
+    verify_window_ms = int(action.get("verifyWindowMs") or 4000)
+    verify_interval_ms = int(action.get("verifyIntervalMs") or 500)
+    post_esc_initial_wait_ms = int(action.get("postEscInitialWaitMs") or 1500)
     item_name = str(action.get("itemName") or "墨锭").strip()
 
     purchase_state = detect_vendor_purchase_screen(hwnd)
@@ -4131,29 +4144,68 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
     else:
         raise RuntimeError(f"Unsupported fixed vendor item: {item_name}")
 
+    def probe_close_state() -> dict[str, Any]:
+        current_purchase_state = detect_vendor_purchase_screen(hwnd)
+        current_world_hud_state = detect_world_hud_state(hwnd)
+        return {
+            "purchaseVisible": bool(current_purchase_state["visible"]),
+            "purchaseText": current_purchase_state["text"],
+            "worldHudVisible": bool(current_world_hud_state["visible"]),
+            "worldHudText": current_world_hud_state["text"],
+        }
+
+    def close_success(state: dict[str, Any]) -> bool:
+        return (not bool(state["purchaseVisible"])) and bool(state["worldHudVisible"])
+
+    verify_attempts = max(1, math.ceil(max(0, verify_window_ms) / max(1, verify_interval_ms)))
+
     item_click = click_named_point(hwnd, str(item_button["pointName"]))
     INPUT_GUARD.guarded_sleep(1000, title)
 
     # max_quantity_click = click_named_point(hwnd, "vendor_purchase_max_quantity")
     # INPUT_GUARD.guarded_sleep(1000, title)
     buy_click = click_named_point(hwnd, "vendor_purchase_buy")
-    INPUT_GUARD.guarded_sleep(1000, title)
+    INPUT_GUARD.guarded_sleep(post_buy_settle_ms, title)
     close_click = click_named_point(hwnd, "vendor_purchase_close")
-    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 1000), title)
-    after_state, after_checks = retry_probe_state(
+    INPUT_GUARD.guarded_sleep(post_close_initial_wait_ms, title)
+    close_state, close_checks = retry_probe_state(
         title,
-        lambda: detect_vendor_purchase_screen(hwnd),
-        lambda state: not bool(state["visible"]),
-        attempts=max(1, int(action.get("verifyAttempts") or 5)),
-        interval_ms=500,
+        probe_close_state,
+        close_success,
+        attempts=verify_attempts,
+        interval_ms=verify_interval_ms,
     )
-    after_text = str(after_state["text"] or "")
+    esc_fallback = None
+    esc_checks: list[dict[str, Any]] = []
+    if not close_success(close_state):
+        if bool(close_state["purchaseVisible"]):
+            focus_window(hwnd)
+            pydirectinput.press("esc")
+            INPUT_GUARD.refresh_baseline()
+            esc_fallback = {"key": "esc"}
+            INPUT_GUARD.guarded_sleep(post_esc_initial_wait_ms, title)
+            close_state, esc_checks = retry_probe_state(
+                title,
+                probe_close_state,
+                close_success,
+                attempts=verify_attempts,
+                interval_ms=verify_interval_ms,
+            )
+        else:
+            raise RuntimeError(
+                "Vendor purchase close state remained ambiguous after clicking close; skipped Esc to avoid opening the world menu"
+            )
+
+    if not close_success(close_state):
+        raise RuntimeError(
+            "Vendor purchase did not return to the normal world HUD after close and one guarded Esc fallback"
+        )
 
     return {
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Clicked item, bought it, and closed the purchase panel",
+        "detail": "Clicked item, bought it, closed the purchase panel, and verified the normal world HUD returned",
         "input": {
             "mode": "buy_current_vendor_item",
             "itemName": item_name,
@@ -4162,9 +4214,17 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
             "itemClick": item_click,
             "buyClick": buy_click,
             "closeClick": close_click,
+            "escFallback": esc_fallback,
             "beforeText": purchase_state["text"],
-            "afterText": after_text,
-            "afterChecks": after_checks,
+            "closeChecks": close_checks,
+            "escChecks": esc_checks,
+            "finalPurchaseText": close_state["purchaseText"],
+            "finalWorldHudText": close_state["worldHudText"],
+            "postBuySettleMs": post_buy_settle_ms,
+            "postCloseInitialWaitMs": post_close_initial_wait_ms,
+            "verifyWindowMs": verify_window_ms,
+            "verifyIntervalMs": verify_interval_ms,
+            "postEscInitialWaitMs": post_esc_initial_wait_ms,
         },
     }
 

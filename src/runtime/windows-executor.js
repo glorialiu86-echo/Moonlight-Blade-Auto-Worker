@@ -297,7 +297,7 @@ function getFixedSocialStageConfig(stageKey = "social_warm") {
         approachIdPrefix: "fixed-social-dark-approach",
         travelTitle: "去第二个卦摊",
         xCoordinate: 709,
-        yCoordinate: 483,
+        yCoordinate: 484,
         dismountTitle: "到第二个卦摊前先下马"
       };
     case "social_warm":
@@ -473,8 +473,8 @@ export function createFixedDarkCloseStageActions() {
     createTravelToCoordinateAction({
       id: "fixed-dark-close-1",
       title: "去潜行点",
-      xCoordinate: 405,
-      yCoordinate: 812,
+      xCoordinate: 812,
+      yCoordinate: 405,
       confirmPointName: "teleport_confirm"
     }),
     createAcquireNpcTargetAction("fixed-dark-close-1b", "先点中 stage 4 的目标人", {
@@ -532,8 +532,8 @@ export function createFixedDarkMiaoquStageActions() {
     createTravelToCoordinateAction({
       id: "fixed-dark-miaoqu-1",
       title: "去妙取潜行点",
-      xCoordinate: 405,
-      yCoordinate: 812,
+      xCoordinate: 812,
+      yCoordinate: 405,
       confirmPointName: "teleport_confirm"
     }),
     createPressKeyAction("fixed-dark-miaoqu-2", "下马准备妙取", "1", { postDelayMs: 800 }),

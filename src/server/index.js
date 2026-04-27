@@ -2078,7 +2078,7 @@ function armResumeFailedStep() {
     throw new Error("当前没有可继续的失败步骤。");
   }
   if (!pendingResumeContext && context) {
-    pendingResumeContext = context;
+    setPendingResumeContext(context);
   }
 
   const now = new Date();
@@ -2114,7 +2114,7 @@ function armSkipFailedSegment() {
     throw new Error("当前失败环节没有可跳过的后继入口。");
   }
   if (!pendingResumeContext && context) {
-    pendingResumeContext = context;
+    setPendingResumeContext(context);
   }
 
   const now = new Date();

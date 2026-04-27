@@ -1796,7 +1796,7 @@ function buildFixedStealthSummaryVoiceOverride(stageKey, roundNumber) {
 
   if (totalSuccess === 0 && totalFailure > 0) {
     thinkingChain = [
-      `前头黑活一口没咬下来，${darkCloseSummary}，${darkMiaoquSummary}。`,
+      "前头黑活这一波基本都扑空了。",
       "这会儿别再逞强了，先把手里还能卖的货顺出去，至少别让今天白折腾。",
       "收尾得放低姿态一点，把残存的进账捞回来，比嘴硬重要。"
     ];
@@ -1805,7 +1805,7 @@ function buildFixedStealthSummaryVoiceOverride(stageKey, roundNumber) {
     finishText = "这波黑活几乎全空了，我先把能卖的尾货收住，免得今天只剩一地狼狈。";
   } else if (totalFailure === 0 && totalSuccess > 0) {
     thinkingChain = [
-      `前头这波黑活手感正顺，${darkCloseSummary}，${darkMiaoquSummary}。`,
+      "前头这波黑活手感正顺。",
       "该拿的已经拿到了，最后这笔交易只要收得干净，今天就算连黑带白一起落袋。",
       "这会儿不用慌，按节奏把尾货清掉，整趟活就漂亮收官了。"
     ];
@@ -1814,7 +1814,7 @@ function buildFixedStealthSummaryVoiceOverride(stageKey, roundNumber) {
     finishText = "前头黑活打得很顺，这会儿把尾货一清，今天这趟就算又黑又稳地赚到了。";
   } else {
     thinkingChain = [
-      `前头这波黑活有成有空，${darkCloseSummary}，${darkMiaoquSummary}。`,
+      "前头这波黑活有成有空。",
       "手感不算完美，但也不是白忙一场；最后这笔交易得把能落袋的都落袋。",
       "收尾这一下最重要的是别再失手，把今天这点起伏硬收成账面。"
     ];
@@ -1828,8 +1828,8 @@ function buildFixedStealthSummaryVoiceOverride(stageKey, roundNumber) {
     decide,
     persona,
     progress: {
-      target: `先找个路人把最后这笔交易做完，顺手把战果也收个总账：${darkCloseSummary}，${darkMiaoquSummary}。`,
-      trade: `交易页既然开了，我就一边卖一边记着前头总共打成了多少手：${darkCloseSummary}，${darkMiaoquSummary}。`,
+      target: "先找个路人把最后这笔交易做完，把今天这趟收尾顺过去。",
+      trade: "交易页既然开了，我就按节奏把尾货卖掉，别在最后这一笔上掉链子。",
       finish: finishText
     },
     resultFactory: ({ recovered }) => recovered

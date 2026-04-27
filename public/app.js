@@ -105,10 +105,10 @@ function syncUiState() {
     elements.resumeFailedStepButton.setAttribute(
       "aria-label",
       resumeProtected
-        ? "正在等待两分钟鼠标脱离保护结束"
+        ? "正在等待一分钟鼠标脱离保护结束"
         : state.resumeAvailable && state.resumeFailureCode
         ? "存在失败恢复动作，点击继续"
-        : "从失败步骤继续"
+        : "从当前环节继续"
     );
   }
 
@@ -123,7 +123,7 @@ function syncUiState() {
     elements.skipFailedSegmentButton.setAttribute(
       "aria-label",
       skipProtected
-        ? "正在等待两分钟鼠标脱离保护结束"
+        ? "正在等待一分钟鼠标脱离保护结束"
         : state.skipAvailable
         ? "跳过当前失败环节"
         : "当前没有可跳过的失败环节"

@@ -1269,6 +1269,77 @@ function buildSegmentEntryActions(stageKey, roundNumber, segmentId) {
   return sliceActionsFromId(actions, segment.actionIds[0]);
 }
 
+function buildRuntimePointerResumeContext({
+  failureCode = null,
+  failedStepTitle = null
+} = {}) {
+  const runtimeState = getState();
+  const automation = runtimeState.automation || {};
+  const upcomingTurn = getUpcomingScriptTurn(automation);
+  const stage = upcomingTurn?.stage || null;
+  const roundNumber = Math.max(1, Number(upcomingTurn?.roundNumber || 1));
+
+  if (!stage?.key) {
+    return null;
+  }
+
+  const segments = buildFixedStageSegments(stage.key, roundNumber);
+  const activeSegmentId = String(
+    automation.failedSegmentId
+      || automation.currentSegmentId
+      || segments[0]?.segmentId
+      || ""
+  ).trim();
+
+  if (!activeSegmentId) {
+    return null;
+  }
+
+  const userInstruction = String(
+    automation.instruction
+      || runtimeState.agent?.lastUserInstruction
+      || ""
+  ).trim();
+  const perception = runtimeState.latestPerception || null;
+  const plan = buildFixedScriptPlan({
+    stage,
+    roundNumber,
+    scene: perception,
+    userInstruction
+  });
+  const resolvedFailedStepTitle = String(
+    failedStepTitle
+      || getFixedStageProgressText(stage.key, roundNumber, activeSegmentId)
+      || activeSegmentId
+      || stage.key
+  ).trim();
+
+  return {
+    stage,
+    roundNumber,
+    stageKey: stage.key,
+    failedActionId: "",
+    failedSegmentId: activeSegmentId,
+    failedStepTitle: resolvedFailedStepTitle,
+    failureCode: failureCode || automation.lastFailureCode || null,
+    failureMessageId: null,
+    recoveryKind: "recovery_anchor_resolution",
+    completedActionIds: [],
+    chunkWorkerActions: [],
+    attemptCount: 0,
+    attemptBudget: 0,
+    workerActions: [],
+    skipTarget: resolveSkipToTarget(stage.key, roundNumber, activeSegmentId),
+    userInstruction,
+    scene: perception,
+    perception,
+    interactionMode: runtimeState.interactionMode || "act",
+    externalInputGuardEnabled: runtimeState.externalInputGuardEnabled !== false,
+    perceptionSummary: perceptionSummaryBySource(perception, "agent"),
+    plan
+  };
+}
+
 function buildRecoveryActionsFromAnchor(context, anchorState) {
   const stageKey = String(context?.stage?.key || "");
   const roundNumber = Math.max(1, Number(context?.roundNumber || 1));
@@ -1759,11 +1830,23 @@ function handleExternalInputInterrupted(error, contextLabel) {
     return false;
   }
 
+  const runtimePointerContext = buildRuntimePointerResumeContext({
+    failureCode: error.code,
+    failedStepTitle: String(
+      error?.workerPayload?.failedStep?.title
+        || error?.workerPayload?.failedStep?.type
+        || ""
+    ).trim() || null
+  });
+
   setStatus("paused");
   autoCaptureService.pause();
   updateAutomation({
     status: "paused"
   });
+  if (runtimePointerContext) {
+    setPendingResumeContext(runtimePointerContext);
+  }
   updateAgent({
     phase: "waiting"
   });
@@ -1989,10 +2072,13 @@ function armAutomationScript(instruction, triggerConfig = null) {
 }
 
 function armResumeFailedStep() {
-  const context = pendingResumeContext;
+  const context = pendingResumeContext || buildRuntimePointerResumeContext();
   const hasRecoveryContext = Boolean(context?.stage?.key || context?.recoveryKind === "npc_reply_loop");
   if (!hasRecoveryContext) {
     throw new Error("当前没有可继续的失败步骤。");
+  }
+  if (!pendingResumeContext && context) {
+    pendingResumeContext = context;
   }
 
   const now = new Date();
@@ -2023,9 +2109,12 @@ function hasAutomationTrigger(instruction) {
 }
 
 function armSkipFailedSegment() {
-  const context = pendingResumeContext;
+  const context = pendingResumeContext || buildRuntimePointerResumeContext();
   if (!context?.skipTarget) {
     throw new Error("当前失败环节没有可跳过的后继入口。");
+  }
+  if (!pendingResumeContext && context) {
+    pendingResumeContext = context;
   }
 
   const now = new Date();

@@ -1170,6 +1170,11 @@ def normalize_name_candidate(text: str) -> str:
     return normalized
 
 
+STEALTH_EXCLUDED_NAME_KEYWORDS = [
+    "籽岷团队",
+]
+
+
 def is_excluded_stealth_name(text: str) -> bool:
     normalized = normalize_name_candidate(text)
     if not normalized:
@@ -1183,6 +1188,9 @@ def looks_like_stealth_target_name(text: str) -> bool:
     normalized = normalize_name_candidate(text)
     if not normalized or is_excluded_stealth_name(normalized):
         return False
+    for keyword in STEALTH_EXCLUDED_NAME_KEYWORDS:
+        if keyword in normalized:
+            return False
     return bool(re.fullmatch(r"[\u4e00-\u9fff]{2,6}", normalized))
 
 

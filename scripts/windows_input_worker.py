@@ -4840,10 +4840,11 @@ def run_open_npc_action_menu(hwnd: int, action: dict[str, Any]) -> dict[str, Any
                     "viewAttempts": [],
                     "resetAttempts": reset_attempts,
                 }
-                raise ActionExecutionError(
+                return build_nonfatal_failed_step(
+                    action,
                     "Selected NPC exists but magnifier is not inside the clickable red-box area",
-                    error_code="NPC_VIEW_NOT_VISIBLE",
-                    failed_step=build_failed_step_payload(
+                    "NPC_VIEW_NOT_VISIBLE",
+                    build_failed_step_payload(
                         action,
                         "Fixed social chain keeps the stable view path and will not fall back to scan clicks here",
                         failed_input,
@@ -4902,10 +4903,11 @@ def run_open_npc_action_menu(hwnd: int, action: dict[str, Any]) -> dict[str, Any
             "viewAttempts": [],
             "resetAttempts": reset_attempts,
         }
-        raise ActionExecutionError(
+        return build_nonfatal_failed_step(
+            action,
             "Selected NPC exists but magnifier is not inside the clickable red-box area",
-            error_code="NPC_VIEW_NOT_VISIBLE",
-            failed_step=build_failed_step_payload(
+            "NPC_VIEW_NOT_VISIBLE",
+            build_failed_step_payload(
                 action,
                 "Selected NPC has no clickable magnifier in the expected interaction area",
                 failed_input,
@@ -4919,10 +4921,11 @@ def run_open_npc_action_menu(hwnd: int, action: dict[str, Any]) -> dict[str, Any
             "viewAttempts": [],
             "resetAttempts": reset_attempts,
         }
-        raise ActionExecutionError(
+        return build_nonfatal_failed_step(
+            action,
             "open_npc_action_menu requires an already selected NPC target",
-            error_code="NPC_VIEW_NOT_OPENED",
-            failed_step=build_failed_step_payload(
+            "NPC_VIEW_NOT_OPENED",
+            build_failed_step_payload(
                 action,
                 f"Cannot open menu from stage {current_stage or 'none'}",
                 failed_input,
@@ -4941,10 +4944,11 @@ def run_open_npc_action_menu(hwnd: int, action: dict[str, Any]) -> dict[str, Any
             "retryCount": len(open_view_result["viewAttempts"]),
             "resetAttempts": reset_attempts,
         }
-        raise ActionExecutionError(
+        return build_nonfatal_failed_step(
+            action,
             "Failed to open NPC action menu from the selected target",
-            error_code="NPC_VIEW_NOT_OPENED",
-            failed_step=build_failed_step_payload(
+            "NPC_VIEW_NOT_OPENED",
+            build_failed_step_payload(
                 action,
                 f"Magnifier click did not open menu. Last stage: {next_stage or 'none'}",
                 failed_input,
@@ -5007,10 +5011,11 @@ def run_click_menu_small_talk(hwnd: int, action: dict[str, Any]) -> dict[str, An
     )
     next_stage = next_stage_state["stage"]
     if next_stage != "small_talk_confirm":
-        raise ActionExecutionError(
+        return build_nonfatal_failed_step(
+            action,
             "Small-talk entry did not reach the confirm dialog before confirm click",
-            error_code="NPC_SMALL_TALK_CONFIRM_NOT_REACHED",
-            failed_step=build_failed_step_payload(
+            "NPC_SMALL_TALK_CONFIRM_NOT_REACHED",
+            build_failed_step_payload(
                 action,
                 "After clicking small talk and waiting 1 second, the flow must first reach the confirm dialog",
                 {
@@ -5050,10 +5055,11 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
 
     confirm_dialog_text_after = str(after_confirm_state["texts"].get("confirm_dialog") or "")
     if after_confirm_state["stage"] != "chat_ready" or contains_any_keyword(confirm_dialog_text_after, CONFIRM_KEYWORDS):
-        raise ActionExecutionError(
+        return build_nonfatal_failed_step(
+            action,
             "Small-talk confirm did not advance into the real chat page before input click",
-            error_code="NPC_CHAT_CONFIRM_NOT_REACHED",
-            failed_step=build_failed_step_payload(
+            "NPC_CHAT_CONFIRM_NOT_REACHED",
+            build_failed_step_payload(
                 action,
                 "Chat entry is not complete until the confirm dialog disappears and chat_ready is visible",
                 {
@@ -6066,10 +6072,11 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
         "retryBackstepMs": retry_backstep_ms,
         "retryMoveSettleMs": retry_move_settle_ms,
     }
-    raise ActionExecutionError(
+    return build_nonfatal_failed_step(
+        action,
         "Failed to enter stealth after backstep retry within the configured retry budget",
-        error_code="STEALTH_ENTRY_BLOCKED",
-        failed_step=build_failed_step_payload(
+        "STEALTH_ENTRY_BLOCKED",
+        build_failed_step_payload(
             action,
             "Stealth entry stayed blocked without entering grey stealth state after backstep retries",
             failed_input,
@@ -6105,10 +6112,11 @@ def run_stealth_front_arc_strike(hwnd: int, action: dict[str, Any]) -> dict[str,
             "retryPressMs": retry_press_ms,
             "strikeCount": strike_count,
         }
-        raise ActionExecutionError(
+        return build_nonfatal_failed_step(
+            action,
             "Stealth strike did not reach the knockout context after directly striking nearby targets",
-            error_code="STEALTH_ALERTED",
-            failed_step=build_failed_step_payload(
+            "STEALTH_ALERTED",
+            build_failed_step_payload(
                 action,
                 "Direct stealth strike failed to auto-lock a nearby target into knockout",
                 failed_input,
@@ -6487,10 +6495,11 @@ def run_stealth_open_loot(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         loot_state = detect_loot_screen(hwnd)
 
     if not loot_state["visible"]:
-        raise ActionExecutionError(
+        return build_nonfatal_failed_step(
+            action,
             "Loot panel did not appear after pressing 4",
-            error_code="STEALTH_TARGET_RECOVERED",
-            failed_step=build_failed_step_payload(
+            "STEALTH_TARGET_RECOVERED",
+            build_failed_step_payload(
                 action,
                 "Loot panel failed to open before the target recovered",
                 {
@@ -6570,10 +6579,11 @@ def run_stealth_quick_open_loot_after_knockout(hwnd: int, action: dict[str, Any]
         point_index += 1
 
     if not loot_state["visible"]:
-        raise ActionExecutionError(
+        return build_nonfatal_failed_step(
+            action,
             "Loot panel did not appear after the quick knockout loot handoff",
-            error_code="STEALTH_TARGET_RECOVERED",
-            failed_step=build_failed_step_payload(
+            "STEALTH_TARGET_RECOVERED",
+            build_failed_step_payload(
                 action,
                 "Knocked target recovered before the quick left-step and right-side loot handoff opened the loot panel",
                 {

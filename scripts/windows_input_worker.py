@@ -2374,7 +2374,6 @@ def send_chat_message(
     close_settle_ms: int,
 ) -> dict[str, Any]:
     focus_window(hwnd)
-    INPUT_GUARD.guarded_sleep(2000, "send_chat_message")
     click_named_point(hwnd, "chat_input")
     INPUT_GUARD.guarded_sleep(80, "send_chat_message")
 
@@ -4912,7 +4911,7 @@ def run_click_menu_small_talk(hwnd: int, action: dict[str, Any]) -> dict[str, An
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "click_menu_small_talk")
     small_talk_click = click_named_point(hwnd, "small_talk")
-    INPUT_GUARD.guarded_sleep(2000, title)
+    INPUT_GUARD.guarded_sleep(max(1000, int(action.get("preConfirmWaitMs") or 1000)), title)
     next_stage_state = wait_for_any_npc_stage(
         hwnd,
         {"small_talk_confirm", "chat_ready", "small_talk_menu", "npc_action_menu"},
@@ -4926,7 +4925,7 @@ def run_click_menu_small_talk(hwnd: int, action: dict[str, Any]) -> dict[str, An
             error_code="NPC_SMALL_TALK_CONFIRM_NOT_REACHED",
             failed_step=build_failed_step_payload(
                 action,
-                "After clicking small talk and waiting 2 seconds, the flow must first reach the confirm dialog",
+                "After clicking small talk and waiting 1 second, the flow must first reach the confirm dialog",
                 {
                     "mode": "click_menu_small_talk",
                     **collect_npc_stage_input(hwnd, next_stage_state),
@@ -4953,7 +4952,7 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
     title = str(action.get("title") or "confirm_small_talk_entry")
     stage_before = detect_npc_interaction_stage(hwnd)
     confirm_dialog_click = click_named_point(hwnd, "small_talk_confirm_dialog")
-    INPUT_GUARD.guarded_sleep(max(200, int(action.get("postConfirmInitialWaitMs") or 350)), title)
+    INPUT_GUARD.guarded_sleep(max(200, int(action.get("postConfirmInitialWaitMs") or 300)), title)
 
     after_confirm_state = wait_for_any_npc_stage(
         hwnd,
@@ -4987,6 +4986,10 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
         poll_interval_ms=max(120, int(action.get("pollIntervalMs") or 180)),
     )
     next_stage = next_stage_state["stage"]
+    chat_input_click = None
+    if next_stage == "chat_ready":
+        chat_input_click = click_named_point(hwnd, "chat_input")
+        INPUT_GUARD.guarded_sleep(80, title)
 
     return {
         "id": action_id,
@@ -5002,6 +5005,7 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
             "stageAfterConfirm": after_confirm_state["stage"],
             **collect_npc_stage_input(hwnd, next_stage_state),
             **({"confirmDialogClick": confirm_dialog_click} if confirm_dialog_click else {}),
+            **({"chatInputClick": chat_input_click} if chat_input_click else {}),
         },
     }
 

@@ -2395,6 +2395,56 @@ async function sendNpcChatReply({ replyText, externalInputGuardEnabled = true, c
   });
 }
 
+async function closeCurrentNpcChatPanel({ externalInputGuardEnabled = true }) {
+  return runWindowsActions([
+    {
+      id: "reply-close-1",
+      title: "关闭当前聊天页",
+      sourceType: "talk_reply",
+      type: "close_current_panel",
+      postDelayMs: 300
+    }
+  ], {
+    interruptOnExternalInput: externalInputGuardEnabled
+  });
+}
+
+async function waitForNpcFollowupAfterSend({
+  instruction,
+  plan,
+  conversationRounds,
+  previousDialogText = ""
+}) {
+  const probe = await waitForActionableNpcRoundState({
+    instruction,
+    plan,
+    conversationRounds,
+    previousDialogText
+  });
+  const roundState = probe.roundState || {};
+
+  if (probe.status === "chat_closed" || roundState.screenState !== "chat_ready") {
+    return {
+      status: "chat_closed",
+      roundState
+    };
+  }
+
+  const dialogText = String(roundState.dialogText || "").trim();
+  const normalizedPreviousDialog = String(previousDialogText || "").trim();
+  const hasFreshNpcReply = Boolean(dialogText)
+    && !isTransientNpcDialogText(dialogText)
+    && (!normalizedPreviousDialog || dialogText !== normalizedPreviousDialog);
+
+  return {
+    status: hasFreshNpcReply ? "reply_observed" : "reply_missing",
+    roundState: {
+      ...roundState,
+      dialogText
+    }
+  };
+}
+
 function mergeExecutions(executions, fallbackOutcome) {
   const valid = executions.filter(Boolean);
 
@@ -2468,7 +2518,7 @@ async function runNpcConversationLoop({
     const replyExecution = await sendNpcChatReply({
       replyText,
       externalInputGuardEnabled,
-      closeAfterSend: closeAfterSend && isLastRound
+      closeAfterSend: false
     });
     executions.push(replyExecution);
 
@@ -2484,6 +2534,32 @@ async function runNpcConversationLoop({
     });
 
     if (isLastRound) {
+      if (closeAfterSend) {
+        const followupProbe = await waitForNpcFollowupAfterSend({
+          instruction,
+          plan,
+          conversationRounds: rounds,
+          previousDialogText: currentDialogText
+        });
+
+        if (followupProbe.status !== "reply_observed") {
+          stopReason = followupProbe.status === "chat_closed"
+            ? "dialog_closed"
+            : "final_dialog_missing";
+          currentDialogText = String(followupProbe.roundState?.dialogText || currentDialogText || "").trim();
+          break;
+        }
+
+        currentDialogText = String(followupProbe.roundState?.dialogText || currentDialogText || "").trim();
+        appendLog("info", "NPC 已回复最终一轮对话，准备关闭聊天页", {
+          dialogText: currentDialogText
+        });
+        const closeExecution = await closeCurrentNpcChatPanel({
+          externalInputGuardEnabled
+        });
+        executions.push(closeExecution);
+      }
+
       stopReason = "max_rounds_reached";
       break;
     }

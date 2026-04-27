@@ -1339,6 +1339,14 @@ function buildFixedScriptPlan({ stage, roundNumber, scene, userInstruction }) {
   };
 }
 
+function findFixedScriptStage(stageKey) {
+  const normalized = String(stageKey || "").trim();
+  if (!normalized) {
+    return null;
+  }
+  return FIXED_SCRIPT_STAGES.find((stage) => stage.key === normalized) || null;
+}
+
 function getUpcomingScriptTurn(automationState) {
   const stageSequence = buildAutomationStageSequence(automationState?.stageKeys);
   const stage = stageSequence[automationState.stageIndex];
@@ -4387,6 +4395,8 @@ async function handleNpcChatReply(request, response) {
   const instruction = String(body.instruction || "").trim();
   const maxRounds = Math.max(1, Number(body.maxRounds) || NPC_CHAT_MAX_ROUNDS);
   const closeAfterSend = body.closeAfterSend !== false;
+  const requestedScriptKey = String(body.scriptKey || "").trim();
+  const requestedScriptRoundNumber = Math.max(1, Number(body.scriptRoundNumber) || 1);
   const requestedExternalInputGuardEnabled = typeof body.externalInputGuardEnabled === "boolean"
     ? body.externalInputGuardEnabled
     : null;
@@ -4408,10 +4418,20 @@ async function handleNpcChatReply(request, response) {
   const externalInputGuardEnabled = requestedExternalInputGuardEnabled !== null
     ? requestedExternalInputGuardEnabled
     : getState().externalInputGuardEnabled !== false;
+  const requestedStage = findFixedScriptStage(requestedScriptKey);
+  const plan = requestedStage
+    ? buildFixedScriptPlan({
+      stage: requestedStage,
+      roundNumber: requestedScriptRoundNumber,
+      scene: getState().scene,
+      userInstruction: instruction
+    })
+    : null;
 
   try {
     const replyResult = await maybeReplyFromCurrentChatScreen({
       instruction,
+      plan,
       perceptionSummary: perceptionSummaryBySource(getState().latestPerception, "agent"),
       externalInputGuardEnabled,
       maxRounds,

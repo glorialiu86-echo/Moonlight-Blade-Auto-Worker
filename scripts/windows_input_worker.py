@@ -5460,12 +5460,10 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "click_fixed_steal_button_and_escape")
     button_index = int(action.get("buttonIndex") or 1)
-    escape_delay_ms = int(action.get("escapeDelayMs") or 1200)
-    short_backstep_ms = int(action.get("shortBackstepMs") or 120)
-    between_escape_ms = int(action.get("betweenEscapeMs") or 80)
-    long_backstep_ms = int(action.get("longBackstepMs") or 3000)
+    escape_delay_ms = int(action.get("escapeDelayMs") or 1500)
+    spam_backstep_ms = int(action.get("spamBackstepMs") or action.get("longBackstepMs") or 3000)
+    spam_interval_ms = int(action.get("spamIntervalMs") or action.get("successCheckIntervalMs") or 80)
     move_settle_ms = int(action.get("moveSettleMs") or 80)
-    success_check_interval_ms = int(action.get("successCheckIntervalMs") or 120)
     point_name = f"steal_button_{button_index}"
 
     if point_name not in ACTION_POINTS:
@@ -5497,34 +5495,27 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
     step_click = click_named_point(hwnd, point_name)
     INPUT_GUARD.guarded_sleep(max(0, escape_delay_ms), title)
 
-    pydirectinput.keyDown("s")
-    INPUT_GUARD.refresh_baseline()
-    INPUT_GUARD.guarded_sleep(max(40, short_backstep_ms), title)
-    pydirectinput.keyUp("s")
-    INPUT_GUARD.refresh_baseline()
-    INPUT_GUARD.guarded_sleep(max(0, between_escape_ms), title)
-
-    pydirectinput.keyDown("s")
-    INPUT_GUARD.refresh_baseline()
     success_banner = detect_miaoqu_success_banner(hwnd)
     after_steal_state = detect_steal_screen(hwnd)
     steal_success = success_banner["visible"] or (
         after_steal_state["visible"] and after_steal_state["text"] != steal_state["text"]
     )
-    long_backstep_deadline = time.time() + max(80, long_backstep_ms) / 1000.0
-    while time.time() <= long_backstep_deadline:
+    retreat_deadline = time.time() + max(80, spam_backstep_ms) / 1000.0
+    spam_press_count = 0
+    while time.time() <= retreat_deadline:
+        pydirectinput.press("s")
+        INPUT_GUARD.refresh_baseline()
+        spam_press_count += 1
         if not steal_success:
             success_banner = detect_miaoqu_success_banner(hwnd)
             after_steal_state = detect_steal_screen(hwnd)
             steal_success = success_banner["visible"] or (
                 after_steal_state["visible"] and after_steal_state["text"] != steal_state["text"]
             )
-        remaining_ms = max(0, int((long_backstep_deadline - time.time()) * 1000))
+        remaining_ms = max(0, int((retreat_deadline - time.time()) * 1000))
         if remaining_ms <= 0:
             break
-        INPUT_GUARD.guarded_sleep(min(success_check_interval_ms, remaining_ms), title)
-    pydirectinput.keyUp("s")
-    INPUT_GUARD.refresh_baseline()
+        INPUT_GUARD.guarded_sleep(min(max(20, spam_interval_ms), remaining_ms), title)
     INPUT_GUARD.guarded_sleep(max(0, move_settle_ms), title)
 
     next_stage_state = detect_npc_interaction_stage(hwnd)
@@ -5544,10 +5535,9 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
             "pointName": point_name,
             "click": step_click,
             "escapeDelayMs": escape_delay_ms,
-            "shortBackstepMs": short_backstep_ms,
-            "betweenEscapeMs": between_escape_ms,
-            "longBackstepMs": long_backstep_ms,
-            "successCheckIntervalMs": success_check_interval_ms,
+            "spamBackstepMs": spam_backstep_ms,
+            "spamIntervalMs": spam_interval_ms,
+            "spamPressCount": spam_press_count,
             "panelReadySource": ready_state["source"],
             "panelReadyVisual": ready_state["visual"],
         }
@@ -5576,10 +5566,9 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
             "pointName": point_name,
             "click": step_click,
             "escapeDelayMs": escape_delay_ms,
-            "shortBackstepMs": short_backstep_ms,
-            "betweenEscapeMs": between_escape_ms,
-            "longBackstepMs": long_backstep_ms,
-            "successCheckIntervalMs": success_check_interval_ms,
+            "spamBackstepMs": spam_backstep_ms,
+            "spamIntervalMs": spam_interval_ms,
+            "spamPressCount": spam_press_count,
             "panelReadySource": ready_state["source"],
             "panelReadyVisual": ready_state["visual"],
         },
@@ -6641,6 +6630,38 @@ def run_stealth_escape_backward(hwnd: int, action: dict[str, Any]) -> dict[str, 
     }
 
 
+def run_stealth_spam_escape_backward(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_spam_escape_backward")
+    backstep_ms = int(action.get("backstepMs") or 3000)
+    spam_interval_ms = int(action.get("spamIntervalMs") or 80)
+    move_settle_ms = int(action.get("moveSettleMs") or 40)
+    presses = 0
+    deadline = time.time() + max(80, backstep_ms) / 1000.0
+    while time.time() <= deadline:
+        INPUT_GUARD.check_or_raise(title)
+        pydirectinput.press("s")
+        INPUT_GUARD.refresh_baseline()
+        presses += 1
+        remaining_ms = max(0, int((deadline - time.time()) * 1000))
+        if remaining_ms <= 0:
+            break
+        INPUT_GUARD.guarded_sleep(min(max(20, spam_interval_ms), remaining_ms), title)
+    INPUT_GUARD.guarded_sleep(move_settle_ms, title)
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": f"Spam-pressed S backward for {backstep_ms}ms",
+        "input": {
+            "mode": "stealth_spam_escape_backward",
+            "backstepMs": backstep_ms,
+            "spamIntervalMs": spam_interval_ms,
+            "pressCount": presses,
+        },
+    }
+
+
 
 
 def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
@@ -6737,6 +6758,12 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "stealth_knock_loot_flow":
         return run_stealth_knock_loot_flow(hwnd, action)
+
+    if action_type == "stealth_escape_backward":
+        return run_stealth_escape_backward(hwnd, action)
+
+    if action_type == "stealth_spam_escape_backward":
+        return run_stealth_spam_escape_backward(hwnd, action)
 
     if action_type == "click_fixed_steal_button_and_escape":
         return run_click_fixed_steal_button_and_escape(hwnd, action)

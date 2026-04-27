@@ -1165,7 +1165,7 @@ const FIXED_SCRIPT_STAGES = [
   },
   {
     key: "dark_miaoqu",
-    rounds: 5,
+    rounds: 6,
     instructionLabel: "正面放倒太显眼了，接下来只做独立妙取和脱离。",
     riskLevel: "high",
     actionTypes: ["stealth", "steal"],
@@ -3391,19 +3391,11 @@ async function runFixedDarkMiaoquStageExecution({
       options,
       plan,
       perceptionSummary,
-      commentaryText: getFixedStageActionCommentary("dark_miaoqu", roundNumber, "setup"),
-      executions
-    });
-    await runFixedActionChunk({
-      actions: actions.slice(1, 4),
-      options,
-      plan,
-      perceptionSummary,
       commentaryText: getFixedStageActionCommentary("dark_miaoqu", roundNumber, "stealth"),
       executions
     });
     await runFixedActionChunk({
-      actions: actions.slice(4, 5),
+      actions: actions.slice(1, 2),
       options,
       plan,
       perceptionSummary,
@@ -3411,7 +3403,7 @@ async function runFixedDarkMiaoquStageExecution({
       executions
     });
     await runFixedActionChunk({
-      actions: actions.slice(5),
+      actions: actions.slice(2),
       options,
       plan,
       perceptionSummary,
@@ -3428,24 +3420,22 @@ async function runFixedDarkMiaoquStageExecution({
     }
 
     let lastError = initialError;
-    for (let attemptIndex = 0; attemptIndex < DARK_CLOSE_RESTART_BUDGET; attemptIndex += 1) {
-      try {
-        executions.push(await runWindowsActions(createFixedDarkMiaoquRecoveryActions(), options));
-        return {
-          ...mergeWorkerExecutions(executions),
-          outcomeKind: "recovered"
-        };
-      } catch (retryError) {
-        if (!isRestartableDarkFailure(retryError)) {
-          throw retryError;
-        }
-        lastError = retryError;
+    try {
+      executions.push(await runWindowsActions(createFixedDarkMiaoquRecoveryActions(), options));
+      return {
+        ...mergeWorkerExecutions(executions),
+        outcomeKind: "recovered"
+      };
+    } catch (retryError) {
+      if (!isRestartableDarkFailure(retryError)) {
+        throw retryError;
       }
+      lastError = retryError;
     }
 
     throw annotateFailureAttemptMetadata(lastError, {
-      attemptCount: DARK_CLOSE_RESTART_BUDGET,
-      attemptBudget: DARK_CLOSE_RESTART_BUDGET
+      attemptCount: 1,
+      attemptBudget: 1
     });
   }
 }

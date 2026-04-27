@@ -539,38 +539,31 @@ export function createStealthEscapeRecoveryActions() {
 
 export function createFixedDarkMiaoquStageActions() {
   return [
-    createTravelToCoordinateAction({
-      id: "fixed-dark-miaoqu-1",
-      title: "去妙取潜行点",
-      xCoordinate: 812,
-      yCoordinate: 405,
-      confirmPointName: "teleport_confirm"
-    }),
-    createPressKeyAction("fixed-dark-miaoqu-2", "下马准备妙取", "1", { postDelayMs: 800 }),
-    createPressKeyAction("fixed-dark-miaoqu-2b", "校正视角准备妙取", "v", { postDelayMs: 800 }),
-    createWorkerAction("fixed-dark-miaoqu-3", "进入潜行并在失败时短退一步再重试", "enter_stealth_with_retry", {
+    createWorkerAction("fixed-dark-miaoqu-1", "直接进入潜行并在失败时短退一步再重试", "enter_stealth_with_retry", {
       retryLimit: 5,
       settleMs: 260,
+      postStealthCooldownMs: 1200,
       retryBackstepMs: 180,
-      retryMoveSettleMs: 140
+      retryMoveSettleMs: 140,
+      consumeBuffOnFirstSuccessOnly: false
     }),
-    createWorkerAction("fixed-dark-miaoqu-4", "按 4 拉起妙取面板并自动吃到附近目标", "stealth_trigger_miaoqu", {
+    createWorkerAction("fixed-dark-miaoqu-2", "按 4 拉起妙取面板并自动吃到附近目标", "stealth_trigger_miaoqu", {
       triggerKey: "4",
-      retryLimit: 3,
-      triggerTimeoutMs: 5000,
-      triggerSettleMs: 60,
-      retryForwardMs: 140,
-      retryMoveSettleMs: 80
+      retryLimit: 1,
+      triggerTimeoutMs: 1200,
+      triggerSettleMs: 40,
+      ocrFallbackIntervalMs: 9999,
+      retryForwardMs: 0,
+      retryMoveSettleMs: 0
     }),
-    createWorkerAction("fixed-dark-miaoqu-5", "盲点固定妙取按钮并在 1.2 秒后撤离", "click_fixed_steal_button_and_escape", {
+    createWorkerAction("fixed-dark-miaoqu-3", "盲点固定妙取按钮并在 1.5 秒后狂按 S 撤离", "click_fixed_steal_button_and_escape", {
       buttonIndex: 1,
-      escapeDelayMs: 1200,
-      shortBackstepMs: 120,
-      betweenEscapeMs: 80,
-      longBackstepMs: 3000,
+      escapeDelayMs: 1500,
+      spamBackstepMs: 3000,
+      spamIntervalMs: 80,
       moveSettleMs: 80
     }),
-    createWorkerAction("fixed-dark-miaoqu-6", "退出潜行回到普通场景", "exit_stealth", {
+    createWorkerAction("fixed-dark-miaoqu-4", "退出潜行回到普通场景", "exit_stealth", {
       settleMs: 450
     })
   ];
@@ -578,14 +571,14 @@ export function createFixedDarkMiaoquStageActions() {
 
 export function createFixedDarkMiaoquRecoveryActions() {
   return [
-    createWorkerAction("fixed-dark-miaoqu-recovery-1", "长按 S 先撤离妙取现场", "stealth_escape_backward", {
+    createWorkerAction("fixed-dark-miaoqu-recovery-1", "狂按 S 先撤离妙取现场", "stealth_spam_escape_backward", {
       backstepMs: 3000,
+      spamIntervalMs: 80,
       moveSettleMs: 80
     }),
     createWorkerAction("fixed-dark-miaoqu-recovery-2", "退出潜行回到普通场景", "exit_stealth", {
       settleMs: 450
-    }),
-    ...createFixedDarkMiaoquStageActions()
+    })
   ];
 }
 

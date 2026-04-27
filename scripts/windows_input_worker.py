@@ -4585,6 +4585,77 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     focus_window(hwnd)
 
+    if action_id == "fixed-dark-close-1b":
+        front_roi = STEALTH_ROIS["front_name_band"]
+        front_target_timeout_ms = int(action.get("frontTargetTimeoutMs") or timeout_ms or 7000)
+        front_turn_pulse_ms = int(action.get("frontTurnPulseMs") or 220)
+        front_settle_ms = int(action.get("frontSettleMs") or 120)
+        prep_actions: list[dict[str, Any]] = []
+        search_attempts: list[dict[str, Any]] = []
+        selection_clicks: list[dict[str, Any]] = []
+
+        pydirectinput.press("1")
+        INPUT_GUARD.refresh_baseline()
+        prep_actions.append({"key": "1", "postDelayMs": 800})
+        INPUT_GUARD.guarded_sleep(800, title)
+
+        pydirectinput.press("v")
+        INPUT_GUARD.refresh_baseline()
+        prep_actions.append({"key": "v", "postDelayMs": 800})
+        INPUT_GUARD.guarded_sleep(800, title)
+
+        target = find_stealth_front_target(hwnd, front_roi)
+        deadline = time.time() + front_target_timeout_ms / 1000.0
+        while time.time() <= deadline and target is None:
+            INPUT_GUARD.check_or_raise(title)
+            turn_state = pulse_turn_key(hwnd, "left", front_turn_pulse_ms, title)
+            INPUT_GUARD.guarded_sleep(front_settle_ms, title)
+            target = find_stealth_front_target(hwnd, front_roi)
+            search_attempts.append({
+                "turn": turn_state,
+                "target": target,
+            })
+
+        if target is None:
+            raise RuntimeError("Failed to find a front NPC name after repeated left turns")
+
+        started_at = time.time()
+        stage_state = detect_npc_interaction_stage(hwnd)
+        target_info = detect_target_threshold(hwnd)
+        while (time.time() - started_at) * 1000 < 2200:
+            click = click_screen_point(hwnd, int(target["screenX"]), int(target["screenY"]), "left")
+            selection_clicks.append(click)
+            INPUT_GUARD.guarded_sleep(front_settle_ms, title)
+            stage_state = detect_npc_interaction_stage(hwnd)
+            target_info = detect_target_threshold(hwnd)
+            moving_view = find_moving_view_button(hwnd)
+            resolved_stage = stage_state["stage"] if stage_state["stage"] != "none" else (
+                "npc_selected" if has_strict_clickable_selected_target(stage_state, moving_view) else "none"
+            )
+            if resolved_stage in NPC_READY_STAGES or resolved_stage == "npc_selected":
+                return {
+                    "id": action_id,
+                    "title": title,
+                    "status": "performed",
+                    "detail": f"Acquired front NPC target {target['text']} after left-turn alignment",
+                    "input": {
+                        "mode": "acquire_npc_target",
+                        **collect_npc_stage_input(hwnd, {**stage_state, "stage": resolved_stage}, target_info["text"]),
+                        "targetText": target_info["text"] or target["text"],
+                        "stageHistory": [resolved_stage],
+                        "clickAttempts": len(selection_clicks),
+                        "moveAttempts": 0,
+                        "clickPointAttempts": [],
+                        "nearbyScanAttempts": search_attempts,
+                        "selectionAttempts": [],
+                        "lastClick": selection_clicks[-1] if selection_clicks else None,
+                        "prepActions": prep_actions,
+                        "frontTarget": target,
+                    },
+                }
+
+        raise RuntimeError("Failed to select the front NPC target after left-turn alignment")
+
     current_stage_state = detect_npc_interaction_stage(hwnd)
     current_target_info = detect_target_threshold(hwnd)
     current_moving_view = find_moving_view_button(hwnd)

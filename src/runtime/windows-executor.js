@@ -477,41 +477,35 @@ export function createFixedDarkCloseStageActions() {
       yCoordinate: 405,
       confirmPointName: "teleport_confirm"
     }),
-    createAcquireNpcTargetAction("fixed-dark-close-1b", "先点中 stage 4 的目标人", {
-      timeoutMs: 5000,
-      movePulseMs: 0,
-      scanIntervalMs: 180
-    }),
-    createPressKeyAction("fixed-dark-close-2", "下马准备潜行", "1", { postDelayMs: 800 }),
-    createPressKeyAction("fixed-dark-close-2b", "校正视角准备潜行", "v", { postDelayMs: 800 }),
+    createPressKeyAction("fixed-dark-close-2", "下马准备潜行", "1", { postDelayMs: 500 }),
     createWorkerAction("fixed-dark-close-3", "进入潜行并在失败时短退一步再重试", "enter_stealth_with_retry", {
       retryLimit: 5,
       settleMs: 260,
       retryBackstepMs: 180,
       retryMoveSettleMs: 140
     }),
-    createPressKeyAction("fixed-dark-close-3b", "潜行成功后补一次 2 种蛊稳住黑活节奏", "2", { postDelayMs: 300 }),
     createWorkerAction("fixed-dark-close-4", "潜行后直接按 3 闷棍附近目标", "stealth_front_arc_strike", {
       knockoutTimeoutMs: 2600,
       retryPressMs: 180,
-      postDelayMs: 600
+      postDelayMs: 120
     }),
-    createWorkerAction("fixed-dark-close-5", "扛走被闷倒的目标", "stealth_carry_target", {
-      carrySettleMs: 180
-    }),
-    createWorkerAction("fixed-dark-close-6", "长按 S 把人拖离人堆", "stealth_backstep_target", {
-      backstepMs: 3000,
-      moveSettleMs: 80
-    }),
-    createWorkerAction("fixed-dark-close-7", "放下扛走的目标", "stealth_drop_target", {
-      dropSettleMs: 200
-    }),
-    createWorkerAction("fixed-dark-close-8", "拉起搜刮面板", "stealth_open_loot", {
-      lootOpenTimeoutMs: 1600,
-      lootSettleMs: 80
+    createWorkerAction("fixed-dark-close-5", "闷棍后快速左移一步并点人物右侧直接搜刮", "stealth_quick_open_loot_after_knockout", {
+      leftStepMs: 110,
+      leftSettleMs: 30,
+      clickSettleMs: 35,
+      lootTriggerSettleMs: 50,
+      lootOpenTimeoutMs: 900,
+      targetClickPoints: [
+        [0.57, 0.56],
+        [0.60, 0.56],
+        [0.58, 0.59],
+        [0.62, 0.58],
+        [0.55, 0.58],
+        [0.64, 0.56]
+      ]
     }),
     ...createFixedDarkCloseLootActions(),
-    createWorkerAction("fixed-dark-close-9", "提交这一轮搜刮", "loot_submit_once", {
+    createWorkerAction("fixed-dark-close-6", "提交这一轮搜刮", "loot_submit_once", {
       lootSettleMs: 160
     })
   ];
@@ -523,7 +517,7 @@ export function createStealthEscapeRecoveryActions() {
       backstepMs: 3000,
       moveSettleMs: 80
     }),
-    ...createFixedDarkCloseStageActions().slice(2)
+    ...createFixedDarkCloseStageActions().slice(1)
   ];
 }
 

@@ -28,10 +28,6 @@ DEFAULT_SCAN_INTERVAL_MS = 180
 DEFAULT_CAMERA_DRAG_MS = 220
 DEFAULT_VERIFY_SETTLE_MS = 180
 OCR_ENGINE = None
-FIRST_STEALTH_BUFF_STATE = {
-    "date": "",
-    "used": False,
-}
 TMP_DIR = Path(__file__).resolve().parents[1] / "tmp"
 CLICK_TRACE_DIR = TMP_DIR / "click-trace"
 GAME_FIXED_CLIENT_WIDTH = 2560
@@ -4597,180 +4593,6 @@ def run_acquire_npc_target(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
 
     focus_window(hwnd)
 
-    if action_id == "fixed-dark-close-1b":
-        front_roi = STEALTH_ROIS["front_name_band"]
-        front_target_timeout_ms = int(action.get("frontTargetTimeoutMs") or max(timeout_ms, 18000))
-        front_turn_pulse_ms = int(action.get("frontTurnPulseMs") or 70)
-        front_settle_ms = int(action.get("frontSettleMs") or 180)
-        prep_actions: list[dict[str, Any]] = []
-        search_attempts: list[dict[str, Any]] = []
-        selection_clicks: list[dict[str, Any]] = []
-        front_click_probe_points = [
-            (0.50, 0.28),
-            (0.50, 0.32),
-            (0.56, 0.30),
-            (0.44, 0.30),
-            (0.62, 0.30),
-            (0.38, 0.30),
-            (0.56, 0.34),
-            (0.44, 0.34),
-        ]
-
-        pydirectinput.press("1")
-        INPUT_GUARD.refresh_baseline()
-        prep_actions.append({"key": "1", "postDelayMs": 800})
-        INPUT_GUARD.guarded_sleep(800, title)
-
-        pydirectinput.press("v")
-        INPUT_GUARD.refresh_baseline()
-        prep_actions.append({"key": "v", "postDelayMs": 800})
-        INPUT_GUARD.guarded_sleep(800, title)
-
-        target = find_stealth_front_target(hwnd, front_roi)
-        deadline = time.time() + front_target_timeout_ms / 1000.0
-        while time.time() <= deadline and target is None:
-            INPUT_GUARD.check_or_raise(title)
-            turn_state = pulse_turn_key(hwnd, "left", front_turn_pulse_ms, title)
-            INPUT_GUARD.guarded_sleep(front_settle_ms, title)
-            target = find_stealth_front_target(hwnd, front_roi)
-            search_attempts.append({
-                "turn": turn_state,
-                "target": target,
-            })
-            if target is None:
-                probe_ratio = front_click_probe_points[len(search_attempts) % len(front_click_probe_points)]
-                probe_click = click_npc_candidate(hwnd, probe_ratio[0], probe_ratio[1], "left")
-                INPUT_GUARD.guarded_sleep(front_settle_ms, title)
-                probe_stage_state = detect_npc_interaction_stage(hwnd)
-                probe_target_info = detect_target_threshold(hwnd)
-                probe_moving_view = find_moving_view_button(hwnd)
-                probe_resolved_stage = probe_stage_state["stage"] if probe_stage_state["stage"] != "none" else (
-                    "npc_selected" if has_strict_clickable_selected_target(probe_stage_state, probe_moving_view) else "none"
-                )
-                search_attempts[-1]["probeClick"] = {
-                    "xRatio": probe_ratio[0],
-                    "yRatio": probe_ratio[1],
-                    "click": probe_click,
-                    "resolvedStage": probe_resolved_stage,
-                }
-                if probe_resolved_stage in NPC_READY_STAGES or probe_resolved_stage == "npc_selected":
-                    return {
-                        "id": action_id,
-                        "title": title,
-                        "status": "performed",
-                        "detail": "Acquired front NPC target through left-turn probe clicks",
-                        "input": {
-                            "mode": "acquire_npc_target",
-                            **collect_npc_stage_input(hwnd, {**probe_stage_state, "stage": probe_resolved_stage}, probe_target_info["text"]),
-                            "targetText": probe_target_info["text"],
-                            "stageHistory": [probe_resolved_stage],
-                            "clickAttempts": 1,
-                            "moveAttempts": 0,
-                            "clickPointAttempts": [{"xRatio": probe_ratio[0], "yRatio": probe_ratio[1]}],
-                            "nearbyScanAttempts": search_attempts,
-                            "selectionAttempts": [],
-                            "lastClick": probe_click,
-                            "prepActions": prep_actions,
-                            "frontTarget": None,
-                            "stealthAttempts": [],
-                            "stealthVisual": detect_exit_stealth_button(hwnd),
-                            "buffTriggered": False,
-                        },
-                    }
-
-        if target is None:
-            fallback_result = run_acquire_npc_target(
-                hwnd,
-                {
-                    "id": f"{action_id}-front-fallback",
-                    "title": f"{title}_front_fallback",
-                    "timeoutMs": 4000,
-                    "movePulseMs": 0,
-                    "scanIntervalMs": 120,
-                    "clickPoints": front_click_probe_points,
-                },
-            )
-            fallback_input = dict(fallback_result.get("input", {}))
-            fallback_input["prepActions"] = prep_actions
-            fallback_input["nearbyScanAttempts"] = search_attempts + list(fallback_input.get("nearbyScanAttempts") or [])
-            fallback_input["frontTarget"] = None
-            fallback_result["input"] = fallback_input
-            fallback_result["detail"] = "Acquired front NPC target through left-turn fallback selection"
-            return fallback_result
-
-        started_at = time.time()
-        stage_state = detect_npc_interaction_stage(hwnd)
-        target_info = detect_target_threshold(hwnd)
-        while (time.time() - started_at) * 1000 < 2200:
-            click = click_screen_point(hwnd, int(target["screenX"]), int(target["screenY"]), "left")
-            selection_clicks.append(click)
-            INPUT_GUARD.guarded_sleep(front_settle_ms, title)
-            stage_state = detect_npc_interaction_stage(hwnd)
-            target_info = detect_target_threshold(hwnd)
-            moving_view = find_moving_view_button(hwnd)
-            resolved_stage = stage_state["stage"] if stage_state["stage"] != "none" else (
-                "npc_selected" if has_strict_clickable_selected_target(stage_state, moving_view) else "none"
-            )
-            if resolved_stage in NPC_READY_STAGES or resolved_stage == "npc_selected":
-                stealth_attempts: list[dict[str, Any]] = []
-                shortcut_key = SHORTCUT_KEYS.get("stealth", "2")
-                stealth_state = detect_exit_stealth_button(hwnd)
-                if not stealth_state["visible"]:
-                    for attempt_index in range(5):
-                        INPUT_GUARD.check_or_raise(title)
-                        pydirectinput.press(shortcut_key)
-                        INPUT_GUARD.refresh_baseline()
-                        INPUT_GUARD.guarded_sleep(260, title)
-                        stealth_state = detect_exit_stealth_button(hwnd)
-                        stealth_attempts.append({
-                            "attemptIndex": attempt_index + 1,
-                            "exitStealthVisible": stealth_state["visible"],
-                            "stealthVisual": stealth_state,
-                        })
-                        if stealth_state["visible"]:
-                            break
-                    if not stealth_state["visible"]:
-                        raise RuntimeError("Failed to enter stealth after stable target selection")
-
-                today_key = time.strftime("%Y-%m-%d")
-                if FIRST_STEALTH_BUFF_STATE["date"] != today_key:
-                    FIRST_STEALTH_BUFF_STATE["date"] = today_key
-                    FIRST_STEALTH_BUFF_STATE["used"] = False
-
-                buff_triggered = False
-                if not FIRST_STEALTH_BUFF_STATE["used"]:
-                    pydirectinput.press(shortcut_key)
-                    INPUT_GUARD.refresh_baseline()
-                    INPUT_GUARD.guarded_sleep(300, title)
-                    FIRST_STEALTH_BUFF_STATE["used"] = True
-                    buff_triggered = True
-
-                return {
-                    "id": action_id,
-                    "title": title,
-                    "status": "performed",
-                    "detail": f"Acquired front NPC target {target['text']} after left-turn alignment and entered stealth",
-                    "input": {
-                        "mode": "acquire_npc_target",
-                        **collect_npc_stage_input(hwnd, {**stage_state, "stage": resolved_stage}, target_info["text"]),
-                        "targetText": target_info["text"] or target["text"],
-                        "stageHistory": [resolved_stage],
-                        "clickAttempts": len(selection_clicks),
-                        "moveAttempts": 0,
-                        "clickPointAttempts": [],
-                        "nearbyScanAttempts": search_attempts,
-                        "selectionAttempts": [],
-                        "lastClick": selection_clicks[-1] if selection_clicks else None,
-                        "prepActions": prep_actions,
-                        "frontTarget": target,
-                        "stealthAttempts": stealth_attempts,
-                        "stealthVisual": stealth_state,
-                        "buffTriggered": buff_triggered,
-                    },
-                }
-
-        raise RuntimeError("Failed to select the front NPC target after left-turn alignment")
-
     current_stage_state = detect_npc_interaction_stage(hwnd)
     current_target_info = detect_target_threshold(hwnd)
     current_moving_view = find_moving_view_button(hwnd)
@@ -6473,6 +6295,89 @@ def run_stealth_open_loot(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def run_stealth_quick_open_loot_after_knockout(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
+    action_id = str(action.get("id") or "")
+    title = str(action.get("title") or "stealth_quick_open_loot_after_knockout")
+    left_step_ms = int(action.get("leftStepMs") or 110)
+    left_settle_ms = int(action.get("leftSettleMs") or 30)
+    click_settle_ms = int(action.get("clickSettleMs") or 35)
+    loot_trigger_settle_ms = int(action.get("lootTriggerSettleMs") or 50)
+    loot_open_timeout_ms = int(action.get("lootOpenTimeoutMs") or 900)
+    raw_click_points = action.get("targetClickPoints") or []
+    click_points: list[tuple[float, float]] = []
+    for point in raw_click_points:
+        if isinstance(point, (list, tuple)) and len(point) == 2:
+            click_points.append((float(point[0]), float(point[1])))
+    if not click_points:
+        click_points = [
+            (0.57, 0.56),
+            (0.60, 0.56),
+            (0.58, 0.59),
+            (0.62, 0.58),
+            (0.55, 0.58),
+            (0.64, 0.56),
+        ]
+
+    focus_window(hwnd)
+    pydirectinput.keyDown("a")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(left_step_ms, title)
+    pydirectinput.keyUp("a")
+    INPUT_GUARD.refresh_baseline()
+    INPUT_GUARD.guarded_sleep(left_settle_ms, title)
+
+    click_attempts: list[dict[str, Any]] = []
+    loot_state = detect_loot_screen(hwnd)
+    deadline = time.time() + loot_open_timeout_ms / 1000.0
+    point_index = 0
+    while time.time() <= deadline and not loot_state["visible"]:
+        INPUT_GUARD.check_or_raise(title)
+        x_ratio, y_ratio = click_points[point_index % len(click_points)]
+        target_click = click_npc_candidate(hwnd, x_ratio, y_ratio, "left")
+        click_attempts.append({
+            "xRatio": x_ratio,
+            "yRatio": y_ratio,
+            "targetClick": target_click,
+        })
+        INPUT_GUARD.guarded_sleep(click_settle_ms, title)
+        pydirectinput.press("3")
+        INPUT_GUARD.refresh_baseline()
+        INPUT_GUARD.guarded_sleep(loot_trigger_settle_ms, title)
+        loot_state = detect_loot_screen(hwnd)
+        click_attempts[-1]["lootVisible"] = loot_state["visible"]
+        point_index += 1
+
+    if not loot_state["visible"]:
+        raise ActionExecutionError(
+            "Loot panel did not appear after the quick knockout loot handoff",
+            error_code="STEALTH_TARGET_RECOVERED",
+            failed_step=build_failed_step_payload(
+                action,
+                "Knocked target recovered before the quick left-step and right-side loot handoff opened the loot panel",
+                {
+                    "mode": "stealth_quick_open_loot_after_knockout",
+                    "leftStepMs": left_step_ms,
+                    "targetClickPoints": click_points,
+                    "clickAttempts": click_attempts,
+                    **loot_state,
+                },
+            ),
+        )
+
+    return {
+        "id": action_id,
+        "title": title,
+        "status": "performed",
+        "detail": "Quick-opened the loot panel after knockout without using carry/drop",
+        "input": {
+            "mode": "stealth_quick_open_loot_after_knockout",
+            "leftStepMs": left_step_ms,
+            "clickAttempts": click_attempts,
+            **loot_state,
+        },
+    }
+
+
 def ensure_loot_panel_visible(hwnd: int, title: str) -> dict[str, Any]:
     loot_state = detect_loot_screen(hwnd)
     if not loot_state["visible"]:
@@ -6797,6 +6702,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     if action_type == "stealth_open_loot":
         return run_stealth_open_loot(hwnd, action)
 
+    if action_type == "stealth_quick_open_loot_after_knockout":
+        return run_stealth_quick_open_loot_after_knockout(hwnd, action)
+
     if action_type == "loot_collect_fixed_items":
         return run_loot_collect_fixed_items(hwnd, action)
 
@@ -6967,21 +6875,6 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         key = str(action.get("key") or "").strip().lower()
         if not key:
             raise RuntimeError("press_key action requires key")
-        if action_id in {"fixed-dark-close-2", "fixed-dark-close-2b", "fixed-dark-close-3b"}:
-            stealth_state = detect_exit_stealth_button(hwnd)
-            if stealth_state["visible"]:
-                return {
-                    "id": action_id,
-                    "title": title,
-                    "status": "performed",
-                    "detail": f"Skipped redundant {key} because stealth was already active",
-                    "input": {
-                        "key": key,
-                        "skipped": True,
-                        "reason": "stealth_already_active",
-                        "stealthVisual": stealth_state,
-                    },
-                }
         focus_window(hwnd)
         duration_ms = int(action.get("durationMs") or 0)
         if duration_ms > 0:

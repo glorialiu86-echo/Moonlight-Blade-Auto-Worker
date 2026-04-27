@@ -305,8 +305,8 @@ function getFixedSocialStageConfig(stageKey = "social_warm") {
       return {
         approachIdPrefix: "fixed-social-warm-approach",
         travelTitle: "去第一个卦摊",
-        xCoordinate: 548,
-        yCoordinate: 630,
+        xCoordinate: 630,
+        yCoordinate: 548,
         dismountTitle: "到第一个卦摊前先下马"
       };
   }
@@ -621,8 +621,8 @@ export function createFixedEndingTradeRelocateActions(options = {}) {
     createTravelToCoordinateAction({
       id: `${prefix}-1`,
       title: "重新去第一个卦摊附近找肯交易的路人",
-      xCoordinate: 548,
-      yCoordinate: 630
+      xCoordinate: 630,
+      yCoordinate: 548
     }),
     createPressKeyAction(`${prefix}-2`, "到卦摊附近先下马", "1", {
       postDelayMs: 1000

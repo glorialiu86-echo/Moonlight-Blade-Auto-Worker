@@ -3,6 +3,7 @@ const state = {
   runtimeStatus: "idle",
   interactionMode: "watch",
   resumeAvailable: false,
+  skipAvailable: false,
   resumeFailureCode: "",
   inputProtectionUntil: "",
   inputProtectionButton: "",
@@ -44,6 +45,7 @@ const elements = {
   messageList: document.querySelector("#messageList"),
   submitButton: document.querySelector('#composerForm button[type="submit"]'),
   resumeFailedStepButton: document.querySelector("#resumeFailedStepButton"),
+  skipFailedSegmentButton: document.querySelector("#skipFailedSegmentButton"),
   voiceButton: document.querySelector("#voiceButton"),
   voiceStatus: document.querySelector("#voiceStatus"),
   userMessageTemplate: document.querySelector("#userMessageTemplate"),
@@ -107,6 +109,24 @@ function syncUiState() {
         : state.resumeAvailable && state.resumeFailureCode
         ? "存在失败恢复动作，点击继续"
         : "从失败步骤继续"
+    );
+  }
+
+  if (elements.skipFailedSegmentButton) {
+    const skipProtected = protectionActive && state.inputProtectionButton === "skip";
+    elements.skipFailedSegmentButton.disabled = busy || state.voice.recording || !state.skipAvailable || skipProtected;
+    elements.skipFailedSegmentButton.classList.toggle(
+      "resume-triangle-alert",
+      state.skipAvailable && Boolean(state.resumeFailureCode)
+    );
+    elements.skipFailedSegmentButton.classList.toggle("button-input-protected", skipProtected);
+    elements.skipFailedSegmentButton.setAttribute(
+      "aria-label",
+      skipProtected
+        ? "正在等待两分钟鼠标脱离保护结束"
+        : state.skipAvailable
+        ? "跳过当前失败环节"
+        : "当前没有可跳过的失败环节"
     );
   }
 
@@ -193,6 +213,7 @@ function renderRuntimeState(runtimeState) {
   state.runtimeStatus = runtimeState.status || "idle";
   state.interactionMode = runtimeState.interactionMode || "watch";
   state.resumeAvailable = Boolean(runtimeState.automation?.resumeAvailable);
+  state.skipAvailable = Boolean(runtimeState.automation?.skipAvailable);
   state.resumeFailureCode = String(runtimeState.automation?.lastFailureCode || "");
   state.inputProtectionUntil = String(runtimeState.automation?.inputProtectionUntil || "");
   state.inputProtectionButton = String(runtimeState.automation?.inputProtectionButton || "");
@@ -315,6 +336,33 @@ async function resumeFailedStep() {
   } catch (error) {
     await refresh().catch(() => {});
     console.error("resume_failed_step failed", error);
+  } finally {
+    state.submitting = false;
+    syncUiState();
+  }
+}
+
+async function skipFailedSegment() {
+  if (state.submitting || state.voice.recording || !state.skipAvailable) {
+    return;
+  }
+
+  state.submitting = true;
+  syncUiState();
+
+  try {
+    const payload = await request("/api/control", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "skip_failed_segment"
+      })
+    });
+
+    applyPayload(payload);
+    updateVoiceStatus("");
+  } catch (error) {
+    await refresh().catch(() => {});
+    console.error("skip_failed_segment failed", error);
   } finally {
     state.submitting = false;
     syncUiState();
@@ -861,6 +909,10 @@ elements.instructionInput.addEventListener("keydown", async (event) => {
 
 elements.resumeFailedStepButton?.addEventListener("click", async () => {
   await resumeFailedStep();
+});
+
+elements.skipFailedSegmentButton?.addEventListener("click", async () => {
+  await skipFailedSegment();
 });
 
 elements.voiceButton?.addEventListener("click", async () => {

@@ -1165,6 +1165,109 @@ function buildStageStartActions(stageKey, roundNumber) {
   }
 }
 
+function buildFixedStageSegments(stageKey, roundNumber) {
+  switch (stageKey) {
+    case "street_wander":
+      return [
+        { segmentId: "wander", actionIds: ["fixed-street-wander-1", "fixed-street-wander-2", "fixed-street-wander-3", "fixed-street-wander-4", "fixed-street-wander-5"], skipTo: SKIP_TO_NEXT_STAGE }
+      ];
+    case "sell_loop":
+      return [
+        { segmentId: "buy_phase", actionIds: ["fixed-sale-1", "fixed-sale-2", "fixed-sale-2b", "fixed-sale-3", "fixed-sale-4", "fixed-sale-5"], skipTo: "hawking_phase" },
+        { segmentId: "hawking_phase", actionIds: ["fixed-sale-6", "fixed-sale-7", "fixed-sale-8", "fixed-sale-9", "fixed-sale-10", "fixed-sale-11"], skipTo: SKIP_TO_NEXT_TURN }
+      ];
+    case "social_warm":
+    case "social_dark":
+      return [
+        { segmentId: "stage_flow", actionIds: [`fixed-${stageKey.includes("warm") ? "social-warm" : "social-dark"}-approach-1`, `fixed-${stageKey.includes("warm") ? "social-warm" : "social-dark"}-approach-2`, "fixed-social-gift-1", "fixed-social-gift-2", "fixed-social-gift-3", "fixed-social-gift-4", "fixed-social-gift-5", "fixed-social-talk-1", "fixed-social-talk-2", "fixed-social-talk-3", "fixed-social-talk-4", "fixed-social-talk-5"], skipTo: SKIP_TO_NEXT_STAGE }
+      ];
+    case "dark_close":
+      return [
+        {
+          segmentId: "round_flow",
+          actionIds: roundNumber === 1
+            ? ["fixed-dark-close-1", "fixed-dark-close-2", "fixed-dark-close-3", "fixed-dark-close-4", "fixed-dark-close-5", "fixed-dark-close-loot-collect", "fixed-dark-close-6", "fixed-dark-close-7"]
+            : ["fixed-dark-close-3", "fixed-dark-close-4", "fixed-dark-close-5", "fixed-dark-close-loot-collect", "fixed-dark-close-6", "fixed-dark-close-7"],
+          skipTo: SKIP_TO_NEXT_TURN
+        }
+      ];
+    case "dark_miaoqu":
+      return [
+        { segmentId: "round_flow", actionIds: ["fixed-dark-miaoqu-1", "fixed-dark-miaoqu-2", "fixed-dark-miaoqu-3", "fixed-dark-miaoqu-4"], skipTo: SKIP_TO_NEXT_TURN }
+      ];
+    case "ending_trade":
+      return [
+        { segmentId: "stage_flow", actionIds: ["fixed-ending-trade-1", "fixed-ending-trade-2", "fixed-ending-trade-3", "fixed-ending-trade-4", "fixed-ending-trade-5", "fixed-ending-trade-6", "fixed-ending-trade-7", "fixed-ending-trade-8", "fixed-ending-trade-9"], skipTo: SKIP_TO_NEXT_STAGE }
+      ];
+    default:
+      return [];
+  }
+}
+
+function getStageSequenceForAutomation() {
+  return buildAutomationStageSequence(getState().automation?.stageKeys);
+}
+
+function findStageSequenceIndex(stageKey) {
+  return getStageSequenceForAutomation().findIndex((stage) => stage.key === stageKey);
+}
+
+function buildFirstSegmentTarget(stageKey, roundNumber) {
+  const segments = buildFixedStageSegments(stageKey, roundNumber);
+  const firstSegmentId = segments[0]?.segmentId || null;
+  return firstSegmentId
+    ? { stageKey, roundNumber, segmentId: firstSegmentId }
+    : null;
+}
+
+function buildNextTurnTarget(stageKey, roundNumber) {
+  const stageIndex = findStageSequenceIndex(stageKey);
+  const stageSequence = getStageSequenceForAutomation();
+  const stage = stageIndex >= 0 ? stageSequence[stageIndex] : null;
+  if (!stage) {
+    return null;
+  }
+  if (roundNumber < stage.rounds) {
+    return buildFirstSegmentTarget(stageKey, roundNumber + 1);
+  }
+  const nextStage = stageSequence[stageIndex + 1] || null;
+  if (!nextStage) {
+    return { stageKey: null, roundNumber: null, segmentId: null, terminal: "completed" };
+  }
+  return buildFirstSegmentTarget(nextStage.key, 1);
+}
+
+function resolveSkipToTarget(stageKey, roundNumber, segmentId) {
+  const segments = buildFixedStageSegments(stageKey, roundNumber);
+  const segment = segments.find((item) => item.segmentId === segmentId) || null;
+  if (!segment) {
+    return null;
+  }
+  if (segment.skipTo === SKIP_TO_NEXT_TURN || segment.skipTo === SKIP_TO_NEXT_STAGE) {
+    return buildNextTurnTarget(stageKey, roundNumber);
+  }
+  return {
+    stageKey,
+    roundNumber,
+    segmentId: segment.skipTo
+  };
+}
+
+function findSegmentForAction(stageKey, roundNumber, actionId) {
+  const normalizedActionId = String(actionId || "").trim();
+  const segments = buildFixedStageSegments(stageKey, roundNumber);
+  return segments.find((segment) => segment.actionIds.includes(normalizedActionId)) || segments[0] || null;
+}
+
+function buildSegmentEntryActions(stageKey, roundNumber, segmentId) {
+  const actions = buildStageStartActions(stageKey, roundNumber);
+  const segment = buildFixedStageSegments(stageKey, roundNumber).find((item) => item.segmentId === segmentId) || null;
+  if (!segment) {
+    return actions;
+  }
+  return sliceActionsFromId(actions, segment.actionIds[0]);
+}
+
 function buildRecoveryActionsFromAnchor(context, anchorState) {
   const stageKey = String(context?.stage?.key || "");
   const roundNumber = Math.max(1, Number(context?.roundNumber || 1));
@@ -1459,6 +1562,8 @@ const FIXED_SCRIPT_STAGES = [
 let turnInFlight = false;
 let pendingResumeContext = null;
 let latestCaptureImageDataUrl = null;
+const SKIP_TO_NEXT_TURN = "__NEXT_TURN__";
+const SKIP_TO_NEXT_STAGE = "__NEXT_STAGE__";
 
 function cloneStageWithOverrides(stage, overrides = {}) {
   return {
@@ -1859,7 +1964,14 @@ function armAutomationScript(instruction, triggerConfig = null) {
     stealthStageTallies: {
       dark_close: { success: 0, failure: 0 },
       dark_miaoqu: { success: 0, failure: 0 }
-    }
+    },
+    currentSegmentId: null,
+    failedSegmentId: null,
+    skipAvailable: false,
+    skipTargetStageKey: null,
+    skipTargetSegmentId: null,
+    skipRequestedAt: null,
+    skipSourceSegmentId: null
   });
 
   updateAgent({
@@ -1905,6 +2017,36 @@ function hasAutomationTrigger(instruction) {
   return Boolean(getAutomationTriggerConfig(instruction));
 }
 
+function armSkipFailedSegment() {
+  const context = pendingResumeContext;
+  if (!context?.skipTarget) {
+    throw new Error("当前失败环节没有可跳过的后继入口。");
+  }
+
+  const now = new Date();
+  const startsAt = new Date(now.getTime() + INPUT_PROTECTION_DELAY_MS);
+  setStatus("running");
+  autoCaptureService.stop();
+  setLastError(null);
+  updateAutomation({
+    status: "armed",
+    armedAt: now.toISOString(),
+    armedActionKind: "skip_failed_segment",
+    startsAt: startsAt.toISOString(),
+    inputProtectionUntil: startsAt.toISOString(),
+    inputProtectionButton: "skip",
+    resumeAvailable: false,
+    skipAvailable: false,
+    skipRequestedAt: now.toISOString()
+  });
+  updateAgent({
+    mode: "autonomous",
+    phase: "armed",
+    currentObjective: `先留两分钟鼠标脱离时间，之后跳过「${context.failedSegmentId || context.failedStepTitle || "失败环节"}」`,
+    lastAutonomousInstruction: context.plan?.intent || getState().agent.lastAutonomousInstruction
+  });
+}
+
 function hasChatAssistTrigger(instruction) {
   return String(instruction || "").includes("帮我聊吧");
 }
@@ -1939,6 +2081,13 @@ function stopChatAssist({
       dark_close: { success: 0, failure: 0 },
       dark_miaoqu: { success: 0, failure: 0 }
     },
+    currentSegmentId: null,
+    failedSegmentId: null,
+    skipAvailable: false,
+    skipTargetStageKey: null,
+    skipTargetSegmentId: null,
+    skipRequestedAt: null,
+    skipSourceSegmentId: null,
     chatAssistLastDialogText: null,
     chatAssistRounds: [],
     resumeAvailable: false,
@@ -1986,6 +2135,13 @@ function armChatAssist(instruction) {
     lastFailureCode: null,
     lastRecoveryKind: null,
     lastRecoveryAttemptCount: 0,
+    currentSegmentId: null,
+    failedSegmentId: null,
+    skipAvailable: false,
+    skipTargetStageKey: null,
+    skipTargetSegmentId: null,
+    skipRequestedAt: null,
+    skipSourceSegmentId: null,
     chatAssistLastDialogText: null,
     chatAssistRounds: [],
     resumeAvailable: false,
@@ -2069,6 +2225,12 @@ function clearPendingResumeContext({ preserveFailureMeta = false } = {}) {
   updateAutomation({
     resumeAvailable: false,
     resumeFailedStepTitle: null,
+    skipAvailable: false,
+    failedSegmentId: null,
+    skipTargetStageKey: null,
+    skipTargetSegmentId: null,
+    skipRequestedAt: null,
+    skipSourceSegmentId: null,
     armedActionKind: null,
     inputProtectionUntil: null,
     inputProtectionButton: null,
@@ -2087,6 +2249,11 @@ function setPendingResumeContext(context) {
   updateAutomation({
     resumeAvailable: Boolean(context),
     resumeFailedStepTitle: context?.failedStepTitle || null,
+    skipAvailable: Boolean(context?.skipTarget),
+    failedSegmentId: context?.failedSegmentId || null,
+    skipTargetStageKey: context?.skipTarget?.stageKey || null,
+    skipTargetSegmentId: context?.skipTarget?.segmentId || null,
+    skipSourceSegmentId: context?.failedSegmentId || null,
     lastFailureCode: context?.failureCode || null,
     lastRecoveryKind: context?.recoveryKind || null,
     lastRecoveryAttemptCount: context?.attemptCount || 0
@@ -2105,20 +2272,30 @@ function getFailedStepTitle(error) {
 function buildResumeContextFromError(baseContext, error) {
   const workerActions = Array.isArray(error?.workerActions) ? error.workerActions : [];
   const failedStep = error?.workerPayload?.failedStep || null;
+  const stageKey = String(baseContext?.stage?.key || "");
+  const roundNumber = Math.max(1, Number(baseContext?.roundNumber || 1));
   const completedCount = Array.isArray(error?.workerPayload?.steps) ? error.workerPayload.steps.length : 0;
+  const failedActionId = String(failedStep?.id || "");
+  const failedSegment = findSegmentForAction(stageKey, roundNumber, failedActionId);
+  const failedSegmentId = failedSegment?.segmentId || null;
+  const skipTarget = failedSegmentId
+    ? resolveSkipToTarget(stageKey, roundNumber, failedSegmentId)
+    : null;
   return {
     ...baseContext,
     recoveryKind: "recovery_anchor_resolution",
     failureCode: getFailureCode(error),
     failedStepTitle: getFailedStepTitle(error),
     failureMessageId: null,
-    stageKey: baseContext?.stage?.key || null,
-    failedActionId: String(failedStep?.id || ""),
+    stageKey: stageKey || null,
+    failedActionId,
+    failedSegmentId,
     completedActionIds: workerActions.slice(0, Math.max(0, completedCount)).map((action) => String(action?.id || "")).filter(Boolean),
     chunkWorkerActions: workerActions,
     attemptCount: getFailureAttemptCount(error),
     attemptBudget: getRecoveryBudget(baseContext, error),
-    workerActions: []
+    workerActions: [],
+    skipTarget
   };
 }
 
@@ -2182,6 +2359,67 @@ async function resolveRecoveryExecutionPlan(context) {
     },
     convergenceAttemptCount: maxProbeRounds
   };
+}
+
+function computeAutomationPositionForTarget(target) {
+  if (!target?.stageKey) {
+    return null;
+  }
+  const stageSequence = getStageSequenceForAutomation();
+  const stageIndex = stageSequence.findIndex((stage) => stage.key === target.stageKey);
+  if (stageIndex < 0) {
+    return null;
+  }
+  return {
+    stageIndex,
+    completedRoundsInStage: Math.max(0, Number(target.roundNumber || 1) - 1)
+  };
+}
+
+async function executeSkippedSegment(context) {
+  const skipTarget = context?.skipTarget || null;
+  if (!skipTarget) {
+    throw new Error("当前失败环节没有配置 skipTo。");
+  }
+
+  if (!skipTarget.stageKey || skipTarget.terminal === "completed") {
+    updateAutomation({
+      status: "completed",
+      finishedAt: new Date().toISOString()
+    });
+    updateAgent({
+      phase: "waiting",
+      currentObjective: "等待下一句指令"
+    });
+    return { mode: "completed" };
+  }
+
+  const currentStageKey = String(context?.stage?.key || "");
+  const currentRoundNumber = Math.max(1, Number(context?.roundNumber || 1));
+  if (skipTarget.stageKey === currentStageKey && Number(skipTarget.roundNumber || 1) === currentRoundNumber) {
+    updateAutomation({
+      currentSegmentId: skipTarget.segmentId || null
+    });
+    const actions = buildSegmentEntryActions(skipTarget.stageKey, skipTarget.roundNumber, skipTarget.segmentId);
+    return {
+      mode: "inline_actions",
+      stage: context.stage,
+      roundNumber: currentRoundNumber,
+      actions
+    };
+  }
+
+  const targetPosition = computeAutomationPositionForTarget(skipTarget);
+  if (!targetPosition) {
+    throw new Error("跳过目标没有合法的 stage 位置。");
+  }
+
+  updateAutomation({
+    stageIndex: targetPosition.stageIndex,
+    completedRoundsInStage: targetPosition.completedRoundsInStage,
+    currentSegmentId: skipTarget.segmentId || null
+  });
+  return { mode: "jump_to_turn" };
 }
 
 function sleep(ms) {
@@ -3117,10 +3355,17 @@ async function runFixedActionChunk({
   perceptionSummary,
   commentaryText,
   executions,
-  emitCommentary = true
+  emitCommentary = true,
+  segmentId = null
 }) {
   if (!Array.isArray(actions) || actions.length === 0) {
     return null;
+  }
+
+  if (segmentId) {
+    updateAutomation({
+      currentSegmentId: segmentId
+    });
   }
 
   if (emitCommentary) {
@@ -3435,6 +3680,7 @@ async function runFixedSellLoopStageExecution({
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
+  updateAutomation({ currentSegmentId: "buy_phase" });
 
   await runFixedActionChunk({
     actions: actions.slice(0, 2),
@@ -3460,6 +3706,7 @@ async function runFixedSellLoopStageExecution({
     commentaryText: getFixedStageActionCommentary("sell_loop", roundNumber, "buy"),
     executions
   });
+  updateAutomation({ currentSegmentId: "hawking_phase" });
   await runFixedActionChunk({
     actions: actions.slice(5, 9),
     options,
@@ -3494,6 +3741,7 @@ async function runFixedStreetWanderStageExecution({
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
+  updateAutomation({ currentSegmentId: "wander" });
   const actions = createFixedStreetWanderActions();
   const movementCommentary = [
     ...(Array.isArray(plan.thinkingChain) ? plan.thinkingChain : []),
@@ -3584,6 +3832,7 @@ async function runFixedSocialStageExecution({
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
+  updateAutomation({ currentSegmentId: "stage_flow" });
   const approachActions = createFixedSocialApproachActions(stage.key);
   const talkActions = createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-talk" });
 
@@ -3639,6 +3888,7 @@ async function runFixedDarkCloseStageExecution({
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
+  updateAutomation({ currentSegmentId: "round_flow" });
   const isRestartableDarkFailure = (error) => ["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(getFailureCode(error));
   const travelActionCount = roundNumber === 1 ? 1 : 0;
   const setupActionCount = roundNumber === 1 ? 1 : 0;
@@ -3753,6 +4003,7 @@ async function runFixedDarkMiaoquStageExecution({
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
+  updateAutomation({ currentSegmentId: "round_flow" });
   const isRestartableDarkFailure = (error) => ["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(getFailureCode(error));
 
   try {
@@ -3820,6 +4071,7 @@ async function runFixedEndingTradeStageExecution({
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
+  updateAutomation({ currentSegmentId: "stage_flow" });
   const localOpenTradeActions = createFixedEndingTradeOpenTradeActions({
     idPrefix: "fixed-ending-trade-local"
   });
@@ -4416,6 +4668,74 @@ async function maybeRunAutonomousTurn() {
         await resumeFailedAutomationStep();
         return;
       }
+      if (armedActionKind === "skip_failed_segment") {
+        const context = pendingResumeContext;
+        clearPendingResumeContext({ preserveFailureMeta: true });
+        updateAutomation({
+          status: "running",
+          armedActionKind: null,
+          inputProtectionUntil: null,
+          inputProtectionButton: null
+        });
+        appendLog("info", "失败环节跳过已结束鼠标脱离保护，开始执行 skipTo");
+        const skipExecution = await executeSkippedSegment(context);
+        if (skipExecution?.mode === "inline_actions") {
+          const latestPerception = getState().latestPerception || context?.perception || null;
+          const perceptionSummary = perceptionSummaryBySource(latestPerception, "agent");
+          const execution = await runWindowsActions(skipExecution.actions, {
+            interruptOnExternalInput: context.externalInputGuardEnabled
+          });
+          await finalizeFixedScriptTurnExecution({
+            stage: skipExecution.stage,
+            roundNumber: skipExecution.roundNumber,
+            userInstruction: context.userInstruction,
+            scene: context.scene,
+            perception: latestPerception,
+            interactionMode: context.interactionMode,
+            externalInputGuardEnabled: context.externalInputGuardEnabled,
+            perceptionSummary,
+            plan: context.plan,
+            execution,
+            recoveryKind: `skip:${context.failedSegmentId || "unknown"}->${context.skipTarget?.segmentId || "unknown"}`
+          });
+          const progressedState = getState();
+          updateAutomation({
+            ...advanceAutomationProgress(progressedState.automation),
+            totalTurns: progressedState.automation.totalTurns + 1
+          });
+          return;
+        }
+        const latestState = getState();
+        const upcomingTurn = getUpcomingScriptTurn(latestState.automation);
+        if (!upcomingTurn) {
+          updateAutomation({
+            status: "completed",
+            finishedAt: new Date().toISOString()
+          });
+          updateAgent({
+            phase: "waiting",
+            currentObjective: "等待下一句指令"
+          });
+          return;
+        }
+        const skipTurnResult = await runFixedScriptTurn({
+          stage: upcomingTurn.stage,
+          roundNumber: upcomingTurn.roundNumber,
+          userInstruction: latestState.automation.instruction || latestState.agent.lastUserInstruction || "",
+          scene: latestState.scene,
+          perception: latestState.latestPerception,
+          interactionMode: latestState.interactionMode,
+          externalInputGuardEnabled: latestState.externalInputGuardEnabled
+        });
+        if (skipTurnResult) {
+          const progressedState = getState();
+          updateAutomation({
+            ...advanceAutomationProgress(progressedState.automation),
+            totalTurns: progressedState.automation.totalTurns + 1
+          });
+        }
+        return;
+      }
 
       updateAutomation({
         status: "running",
@@ -4589,6 +4909,9 @@ async function handleControl(request, response) {
     },
     resume_failed_step: async () => {
       armResumeFailedStep();
+    },
+    skip_failed_segment: async () => {
+      armSkipFailedSegment();
     }
   };
 

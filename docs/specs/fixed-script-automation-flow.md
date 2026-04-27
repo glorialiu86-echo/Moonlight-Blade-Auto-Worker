@@ -83,6 +83,25 @@
 - 如果主播手动把链路推进到了更后的稳定锚点，恢复逻辑会直接从该锚点对应的下一步继续，不再回头重跑已完成动作
 - 如果锚点一轮没看清，恢复逻辑会先内部收敛：等待、重判、做低风险探针，再继续映射，不把“恢复失败”当合法终态
 
+## 跳过逻辑
+
+- 新增了一个静默 `skip` 按钮；同样保留 `2` 分钟鼠标脱离保护
+- `skip` 不再尝试救当前失败环节，而是直接走该失败环节编排好的 `skipTo`
+- 当前 `skip` 的 segment 已按“人工先回干净城镇页”收粗，默认从能在城镇页直接起跑的后继入口继续：
+  - `sell_loop`
+    - `buy_phase -> hawking_phase`
+    - `hawking_phase -> 下一轮 / 下一个 stage`
+  - `social_warm / social_dark`
+    - `stage_flow -> 下一个 stage`
+  - `dark_close`
+    - `round_flow -> 下一轮 / 下一个 stage`
+  - `dark_miaoqu`
+    - `round_flow -> 下一轮 / 下一个 stage`
+  - `ending_trade`
+    - `stage_flow -> 结束`
+- 如果 `skipTo` 仍在当前轮当前 stage，后台会直接从该 segment 入口动作队列继续
+- 如果 `skipTo` 已经跨到下一轮或下一个 stage，后台会直接跳到对应 turn，再继续执行
+
 ## 保持不变
 
 - 放大镜/查看链路已经稳定，继续沿用当前固定点与动态识别组合，不额外换 owner

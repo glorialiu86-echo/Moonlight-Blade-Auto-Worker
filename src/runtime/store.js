@@ -40,7 +40,14 @@ function createInitialAutomationState() {
     chatAssistLastDialogText: null,
     chatAssistRounds: [],
     resumeAvailable: false,
-    resumeFailedStepTitle: null
+    resumeFailedStepTitle: null,
+    skipAvailable: false,
+    currentSegmentId: null,
+    failedSegmentId: null,
+    skipTargetStageKey: null,
+    skipTargetSegmentId: null,
+    skipRequestedAt: null,
+    skipSourceSegmentId: null
   };
 }
 

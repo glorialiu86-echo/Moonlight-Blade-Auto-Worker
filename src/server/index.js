@@ -1629,9 +1629,23 @@ const FIXED_SCRIPT_STAGES = [
 ];
 
 let turnInFlight = false;
+let turnInFlightStartedAt = 0;
+let turnInFlightOwner = "";
 let latestCaptureImageDataUrl = null;
 const SKIP_TO_NEXT_TURN = "__NEXT_TURN__";
 const SKIP_TO_NEXT_STAGE = "__NEXT_STAGE__";
+
+function acquireTurnLock(owner = "unknown") {
+  turnInFlight = true;
+  turnInFlightStartedAt = Date.now();
+  turnInFlightOwner = String(owner || "unknown").trim() || "unknown";
+}
+
+function releaseTurnLock() {
+  turnInFlight = false;
+  turnInFlightStartedAt = 0;
+  turnInFlightOwner = "";
+}
 
 function cloneStageWithOverrides(stage, overrides = {}) {
   return {
@@ -2720,7 +2734,9 @@ async function runWatchUserReplyTurn({ instruction, scene, perception, conversat
     return;
   }
 
-  await waitForTurnSlot();
+  await waitForTurnSlot({
+    requester: "watch_user_reply"
+  });
 
   updateAgent({
     mode: "user_priority",
@@ -2767,7 +2783,7 @@ async function runWatchUserReplyTurn({ instruction, scene, perception, conversat
       watchCommentaryCooldownUntil: new Date(Date.now() + WATCH_USER_REPLY_COOLDOWN_MS).toISOString()
     });
   } finally {
-    turnInFlight = false;
+    releaseTurnLock();
   }
 }
 
@@ -4323,14 +4339,20 @@ function recordAutonomousFailure(error) {
   }
 }
 
-async function resumeFailedAutomationStep() {
+async function resumeFailedAutomationStep(options = {}) {
+  const slotOwned = options.slotOwned === true;
   const context = buildRuntimePointerResumeContext();
   if (!context?.stage?.key && context?.recoveryKind !== "npc_reply_loop") {
     clearPendingResumeContext({ preserveFailureMeta: true });
     return false;
   }
 
-  await waitForTurnSlot();
+  if (!slotOwned) {
+    await waitForTurnSlot({
+      requester: "resume_failed_step",
+      allowTakeover: true
+    });
+  }
   clearPendingResumeContext();
 
   setLastError(null);
@@ -4472,7 +4494,7 @@ async function resumeFailedAutomationStep() {
     });
     throw error;
   } finally {
-    turnInFlight = false;
+    releaseTurnLock();
   }
   return true;
 }
@@ -4640,7 +4662,7 @@ async function maybeRunAutonomousTurn() {
     return;
   }
 
-  turnInFlight = true;
+  acquireTurnLock("autonomous_turn");
 
   try {
     if (automation.status === "armed") {
@@ -4659,10 +4681,12 @@ async function maybeRunAutonomousTurn() {
           inputProtectionButton: null
         });
         appendLog("info", "失败恢复动作已结束鼠标脱离保护，开始执行");
-        await resumeFailedAutomationStep();
+        turnInFlightOwner = "resume_failed_step";
+        await resumeFailedAutomationStep({ slotOwned: true });
         return;
       }
       if (armedActionKind === "skip_failed_segment") {
+        turnInFlightOwner = "skip_failed_segment";
         const context = buildRuntimePointerResumeContext();
         clearPendingResumeContext({ preserveFailureMeta: true });
         updateAutomation({
@@ -4816,22 +4840,35 @@ async function maybeRunAutonomousTurn() {
       perceptionSummary: perceptionSummaryBySource(getState().latestPerception, "agent")
     });
   } finally {
-    turnInFlight = false;
+    releaseTurnLock();
   }
 }
 
-async function waitForTurnSlot() {
+async function waitForTurnSlot(options = {}) {
+  const {
+    requester = "unknown",
+    allowTakeover = false
+  } = options;
   const startedAt = Date.now();
 
   while (turnInFlight) {
     if (Date.now() - startedAt >= TURN_SLOT_TIMEOUT_MS) {
+      if (allowTakeover) {
+        appendLog("warning", "恢复/跳过接管了失活执行锁", {
+          requester,
+          previousOwner: turnInFlightOwner || "unknown",
+          lockedForMs: turnInFlightStartedAt ? Date.now() - turnInFlightStartedAt : null
+        });
+        releaseTurnLock();
+        break;
+      }
       throw new Error("当前已有一轮执行在进行中，等待超时。");
     }
 
     await sleep(TURN_SLOT_POLL_MS);
   }
 
-  turnInFlight = true;
+  acquireTurnLock(requester);
 }
 
 async function handleControl(request, response) {
@@ -4990,7 +5027,10 @@ async function handleTurn(request, response) {
   });
 
   try {
-    await waitForTurnSlot();
+    await waitForTurnSlot({
+      requester: "user_fixed_script_turn",
+      allowTakeover: true
+    });
     const nextState = await runUserFixedScriptTurn({
       instruction,
       scene,
@@ -5028,7 +5068,7 @@ async function handleTurn(request, response) {
       state: getState()
     });
   } finally {
-    turnInFlight = false;
+    releaseTurnLock();
   }
 }
 
@@ -5282,7 +5322,10 @@ async function handleNpcChatReply(request, response) {
     });
   }
 
-  await waitForTurnSlot();
+  await waitForTurnSlot({
+    requester: "npc_chat_reply",
+    allowTakeover: true
+  });
 
   const externalInputGuardEnabled = requestedExternalInputGuardEnabled !== null
     ? requestedExternalInputGuardEnabled
@@ -5335,7 +5378,7 @@ async function handleNpcChatReply(request, response) {
     }
     throw error;
   } finally {
-    turnInFlight = false;
+    releaseTurnLock();
   }
 }
 

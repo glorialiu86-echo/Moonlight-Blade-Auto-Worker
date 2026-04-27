@@ -265,6 +265,11 @@ ACTION_POINTS = {
     "vendor_purchase_item_moding": (2051 / 2544, 485 / 1388),
     "hawking_inventory_first_slot": (2072 / 2544, 216 / 1388),
     "hawking_max_quantity": (1800 / 2544, 804 / 1388),
+    # Re-marked on April 27, 2026 from the live hawking page after max quantity:
+    # these are fixed UI buttons on this machine and should be owned by direct
+    # clicks instead of keyboard shortcuts.
+    "hawking_up_shelf_button": (1200 / 1904, 809 / 1041),
+    "hawking_submit": (1778 / 1904, 923 / 1041),
     "steal_button_1": (2371 / 2544, 614 / 1388),
     "steal_button_2": (1916 / 2048, 704 / 1360),
     "steal_button_3": (1916 / 2048, 893 / 1360),
@@ -4295,8 +4300,7 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
     INPUT_GUARD.guarded_sleep(1000, title)
     max_quantity_click = click_named_point(hwnd, "hawking_max_quantity")
     INPUT_GUARD.guarded_sleep(1000, title)
-    stock_key = str(action.get("stockKey") or resolve_shortcut_key("hawking"))
-    pydirectinput.press(stock_key)
+    up_shelf_click = click_named_point(hwnd, "hawking_up_shelf_button")
     after_state, after_checks = probe_state_after_initial_wait(
         title,
         lambda: detect_hawking_screen(hwnd),
@@ -4311,13 +4315,13 @@ def run_stock_first_hawking_item(hwnd: int, action: dict[str, Any]) -> dict[str,
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Selected the first hawking item, maximized quantity, and pressed the hawking shortcut",
+        "detail": "Selected the first hawking item, maximized quantity, and clicked the hawking up-shelf button",
         "input": {
             "mode": "stock_first_hawking_item",
             "beforeText": hawking_state["text"],
             "inventoryClick": inventory_click,
             "maxQuantityClick": max_quantity_click,
-            "stockKey": stock_key,
+            "upShelfClick": up_shelf_click,
             "afterText": after_text,
             "afterChecks": after_checks,
             "postStockInitialWaitMs": post_stock_initial_wait_ms,
@@ -5523,7 +5527,6 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
     }
 
 
-# Stable runtime override: hawking submit should observe state, not hard-block the script.
 def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "submit_hawking")
@@ -5532,27 +5535,97 @@ def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("Current screen is not hawking screen")
 
     submit_ready_delay_ms = max(400, int(action.get("submitReadyDelayMs") or 1000))
-    submit_key = str(action.get("submitKey") or "3")
-    pydirectinput.press(submit_key)
+    active_timeout_ms = max(1000, int(action.get("activeTimeoutMs") or 8000))
+    finish_timeout_ms = max(1000, int(action.get("finishTimeoutMs") or 120000))
+    submit_click = click_named_point(hwnd, "hawking_submit")
     INPUT_GUARD.guarded_sleep(submit_ready_delay_ms, title)
     runtime_state = detect_hawking_runtime_state(hwnd)
+    active_history: list[dict[str, Any]] = []
+    active_deadline = time.time() + active_timeout_ms / 1000.0
+
+    while time.time() <= active_deadline:
+        active_history.append(
+            {
+                "phase": "wait_active",
+                "active": bool(runtime_state["active"]),
+                "ready": bool(runtime_state["ready"]),
+                "text": runtime_state["text"],
+            }
+        )
+        if runtime_state["active"]:
+            break
+        INPUT_GUARD.guarded_sleep(600, title)
+        runtime_state = detect_hawking_runtime_state(hwnd)
+
+    if not runtime_state["active"]:
+        raise ActionExecutionError(
+            "Hawking state did not switch into 改货/收摊 after submit",
+            failed_step=build_failed_step_payload(
+                action,
+                "Clicked 出摊 but the bottom-right actions did not switch into the hawking runtime state",
+                {
+                    "mode": "submit_hawking",
+                    "beforeText": hawking_state["text"],
+                    "submitClick": submit_click,
+                    "submitReadyDelayMs": submit_ready_delay_ms,
+                    "activeTimeoutMs": active_timeout_ms,
+                    "finishTimeoutMs": finish_timeout_ms,
+                    "activeHistory": active_history,
+                },
+            ),
+        )
+
+    finish_history: list[dict[str, Any]] = []
+    finish_deadline = time.time() + finish_timeout_ms / 1000.0
+
+    while time.time() <= finish_deadline:
+        finish_history.append(
+            {
+                "phase": "wait_finish",
+                "active": bool(runtime_state["active"]),
+                "ready": bool(runtime_state["ready"]),
+                "text": runtime_state["text"],
+            }
+        )
+        if runtime_state["ready"]:
+            break
+        INPUT_GUARD.guarded_sleep(1000, title)
+        runtime_state = detect_hawking_runtime_state(hwnd)
+
+    if not runtime_state["ready"]:
+        raise ActionExecutionError(
+            "Hawking state did not return to the normal world HUD before timeout",
+            failed_step=build_failed_step_payload(
+                action,
+                "Entered the hawking runtime state but did not return to the normal world HUD in time",
+                {
+                    "mode": "submit_hawking",
+                    "beforeText": hawking_state["text"],
+                    "submitClick": submit_click,
+                    "submitReadyDelayMs": submit_ready_delay_ms,
+                    "activeTimeoutMs": active_timeout_ms,
+                    "finishTimeoutMs": finish_timeout_ms,
+                    "activeHistory": active_history,
+                    "finishHistory": finish_history,
+                },
+            ),
+        )
 
     return {
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": (
-            f"Pressed hawking runtime shortcut and observed "
-            f"{'active' if runtime_state['active'] else 'ready' if runtime_state['ready'] else 'unknown'} runtime state"
-        ),
+        "detail": "Clicked hawking submit, observed 改货/收摊, and waited until the normal world HUD returned",
         "input": {
             "mode": "submit_hawking",
             "beforeText": hawking_state["text"],
-            "submitKey": submit_key,
+            "submitClick": submit_click,
             "submitReadyDelayMs": submit_ready_delay_ms,
+            "activeTimeoutMs": active_timeout_ms,
+            "finishTimeoutMs": finish_timeout_ms,
+            "activeHistory": active_history,
+            "finishHistory": finish_history,
             "afterText": runtime_state["text"],
-            "active": bool(runtime_state["active"]),
-            "ready": bool(runtime_state["ready"]),
         },
     }
 

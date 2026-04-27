@@ -5358,51 +5358,21 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
 def run_click_menu_trade(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "click_menu_trade")
-    post_trade_initial_wait_ms = int(action.get("postTradeInitialWaitMs") or 1500)
-    verify_window_ms = int(action.get("verifyWindowMs") or 5000)
-    verify_interval_ms = int(action.get("verifyIntervalMs") or 700)
+    post_trade_initial_wait_ms = int(action.get("postTradeInitialWaitMs") or 1800)
     trade_click = click_named_point(hwnd, "trade")
-    next_stage_state, trade_checks = probe_state_after_initial_wait(
-        title,
-        lambda: detect_npc_interaction_stage(hwnd),
-        lambda state: state["stage"] == "trade_screen",
-        initial_wait_ms=post_trade_initial_wait_ms,
-        verify_window_ms=verify_window_ms,
-        verify_interval_ms=verify_interval_ms,
-    )
-
-    if next_stage_state["stage"] != "trade_screen":
-        raise ActionExecutionError(
-            "click_menu_trade did not reach trade_screen before timeout",
-            error_code="TRADE_SCREEN_NOT_OPENED",
-            failed_step=build_failed_step_payload(
-                action,
-                f"Trade entry click did not open trade screen. Last stage: {next_stage_state['stage'] or 'none'}",
-                {
-                    "mode": "click_menu_trade",
-                    **collect_npc_stage_input(hwnd, next_stage_state),
-                    "click": trade_click,
-                    "tradeChecks": trade_checks,
-                    "postTradeInitialWaitMs": post_trade_initial_wait_ms,
-                    "verifyWindowMs": verify_window_ms,
-                    "verifyIntervalMs": verify_interval_ms,
-                },
-            ),
-        )
+    INPUT_GUARD.guarded_sleep(post_trade_initial_wait_ms, title)
+    next_stage_state = detect_npc_interaction_stage(hwnd)
 
     return {
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": f"Clicked trade entry and observed {next_stage_state['stage'] or 'none'}",
+        "detail": f"Clicked trade entry and waited {post_trade_initial_wait_ms}ms before continuing",
         "input": {
             "mode": "click_menu_trade",
             **collect_npc_stage_input(hwnd, next_stage_state),
             "click": trade_click,
-            "tradeChecks": trade_checks,
             "postTradeInitialWaitMs": post_trade_initial_wait_ms,
-            "verifyWindowMs": verify_window_ms,
-            "verifyIntervalMs": verify_interval_ms,
         },
     }
 

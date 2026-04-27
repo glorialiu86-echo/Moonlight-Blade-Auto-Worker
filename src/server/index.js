@@ -76,15 +76,28 @@ const FIXED_SCRIPT_COMMENTARY_PAUSE_MS = 1200;
 const WATCH_COMMENTARY_MIN_INTERVAL_MS = 10000;
 const WATCH_USER_REPLY_COOLDOWN_MS = WATCH_COMMENTARY_MIN_INTERVAL_MS;
 const DARK_CLOSE_RESTART_BUDGET = 2;
+const NPC_DIALOG_TRANSIENT_TEXTS = new Set([
+  "正在思考中...",
+  "正在思考中",
+  "此次对话已完结"
+]);
+const NPC_DIALOG_STALL_RETRY_LIMIT = 2;
 let voiceAutoCaptureHoldActive = false;
-const ZIMIN_PROFILE_FACTS = [
-  "籽岷天下第一帅，往人堆里一站就像自带高光。",
-  "籽岷是多平台都叫得上号的《我的世界》主播，名气大得离谱。",
-  "籽岷是籽岷团队创始人，自己就是一块活招牌。",
-  "籽岷在哔哩哔哩有好几百万粉丝。",
-  "籽岷在2022到2025年连续四年拿过哔哩哔哩百大UP主。",
-  "籽岷人脉广、见过世面，真要办事，多半能找出门路。"
+const ZIMIN_ALLOWED_FACT_POOL = [
+  "1. 籽岷是多平台都叫得上号的《我的世界》主播。",
+  "2. 籽岷是籽岷团队创始人。",
+  "3. 籽岷在哔哩哔哩有好几百万粉丝。",
+  "4. 籽岷在2022到2025年连续四年拿过哔哩哔哩百大UP主。",
+  "5. 籽岷人脉广、见过世面、影响力强。"
 ].join("\n");
+
+function isTransientNpcDialogText(text) {
+  const normalized = String(text || "").replace(/\s+/g, "").trim();
+  if (!normalized) {
+    return true;
+  }
+  return NPC_DIALOG_TRANSIENT_TEXTS.has(normalized);
+}
 
 function pickRoundVariant(variants, roundNumber) {
   if (!Array.isArray(variants) || variants.length === 0) {
@@ -2158,9 +2171,19 @@ function hasNpcConversationHistory(conversationRounds = []) {
 function buildNpcReplyStylePrompt(plan, hasHistory = false, currentRoundNumber = 1) {
   if (plan?.scriptKey === "social_warm") {
     if (!hasHistory) {
-      return "这是第一轮开场。第一句固定说：你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？从第二句开始，再根据上下文继续自然吹籽岷，不要像念资料。";
+      return [
+        "这是第一轮开场。第一句固定说：你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？",
+        "从第二句开始，每轮换一个角度夸籽岷，不要连续两轮用同一个卖点。",
+        "只许使用允许的事实池，不要自己编新身份、新经历、新头衔。",
+        "禁止提到“灵枢绘世专栏”“常驻”“专栏”这类不在事实池里的说法。"
+      ].join("");
     }
-    return "你的回复要持续吹籽岷，目标是让NPC牢牢记住籽岷；对方烦了也没关系，可以继续缠着说、继续抬籽岷的牌面。";
+    return [
+      "你的回复要持续吹籽岷，目标是让NPC牢牢记住籽岷；对方烦了也没关系，可以继续缠着说。",
+      "每轮换一个角度夸，例如名气、粉丝、百大UP主、创始人、人脉和影响力，不要连续两轮重复同一卖点。",
+      "只许使用允许的事实池，不要编造事实。",
+      "禁止提到“灵枢绘世专栏”“常驻”“专栏”这类错误说法。"
+    ].join("");
   }
 
   if (plan?.scriptKey === "social_dark") {
@@ -2184,12 +2207,19 @@ function buildNpcConversationGoal({ instruction, plan, hasHistory = false, curre
         "这轮目标是吹籽岷，让NPC一定记住籽岷。",
         "第一句固定说：你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？",
         "从第二句起，围绕下面这些资料自然发挥，不要逐条背资料，而是像真人炫耀。",
-        ZIMIN_PROFILE_FACTS
+        "每轮换一个角度夸，连续两轮不能重复同一个卖点。",
+        "只许使用下面的允许事实池，不要编造。",
+        ZIMIN_ALLOWED_FACT_POOL,
+        "禁止使用“灵枢绘世专栏”“常驻”“专栏”等不在事实池的说法。"
       ].join("\n");
     }
     return [
       "继续围绕籽岷聊下去，目标不是套情报，而是让对方牢牢记住籽岷。",
-      "可以持续吹籽岷的身份、名气、粉丝量和百大UP主经历。",
+      "可以持续吹籽岷的身份、名气、粉丝量、百大UP主、创始人和人脉影响力。",
+      "每轮换一个角度夸，连续两轮不能重复同一个卖点。",
+      "只许使用下面的允许事实池，不要编造。",
+      ZIMIN_ALLOWED_FACT_POOL,
+      "禁止使用“灵枢绘世专栏”“常驻”“专栏”等不在事实池的说法。",
       "就算NPC开始不耐烦，也不要轻易收口。"
     ].join("\n");
   }
@@ -2254,6 +2284,9 @@ async function analyzeNpcChatRound({
     hasHistory,
     currentRoundNumber
   });
+  const socialWarmFactPoolLine = plan?.scriptKey === "social_warm"
+    ? `允许事实池：\n${ZIMIN_ALLOWED_FACT_POOL}\n禁止输出“灵枢绘世专栏”“常驻”“专栏”这类不在事实池的内容。`
+    : "";
   const lingshuContextLine = buildLingshuGameplayContextLine({
     scriptKey: plan?.scriptKey || "",
     instruction
@@ -2263,6 +2296,7 @@ async function analyzeNpcChatRound({
     "当前任务：如果已经不是聊天状态，返回 not_chat；如果还是聊天状态，先读出NPC刚说的话，再替籽小刀回一句。",
     `当前聊天目标：${conversationGoal}`,
     lingshuContextLine,
+    socialWarmFactPoolLine,
     "特别规则：只要画面里还能看到“点击输入聊天”和“发送”，就还是可继续聊天的 chat_ready，不能因为“此次对话已完结”这句话就返回 not_chat。",
     `当前上下文：${buildNpcReplyStylePrompt(plan, hasHistory, currentRoundNumber)}`,
     `当前上下文：最近2到3轮历史对话如下\n${historyText}`,
@@ -2346,6 +2380,7 @@ async function runNpcConversationLoop({
   const executions = [];
   let currentDialogText = "";
   let stopReason = "dialog_exhausted";
+  let stalledDialogCount = 0;
 
   for (let roundIndex = 0; roundIndex < maxRounds; roundIndex += 1) {
     const roundState = await analyzeNpcChatRound({
@@ -2360,13 +2395,30 @@ async function runNpcConversationLoop({
     }
 
     currentDialogText = String(roundState.dialogText || "").trim();
-    if (!currentDialogText) {
-      stopReason = "dialog_missing";
-      break;
+    if (!currentDialogText || isTransientNpcDialogText(currentDialogText)) {
+      stalledDialogCount += 1;
+      if (stalledDialogCount >= NPC_DIALOG_STALL_RETRY_LIMIT) {
+        stopReason = "dialog_missing";
+        break;
+      }
+      await sleep(NPC_CHAT_POLL_DELAY_MS);
+      continue;
     }
 
-    if (roundIndex > 0 && currentDialogText === rounds[rounds.length - 1]?.dialogText) {
-      stopReason = "dialog_not_advanced";
+    const previousDialogText = String(rounds[rounds.length - 1]?.dialogText || "").trim();
+    if (roundIndex > 0 && currentDialogText === previousDialogText) {
+      stalledDialogCount += 1;
+      if (stalledDialogCount >= NPC_DIALOG_STALL_RETRY_LIMIT) {
+        stopReason = "dialog_not_advanced";
+        break;
+      }
+      await sleep(NPC_CHAT_POLL_DELAY_MS);
+      continue;
+    }
+
+    stalledDialogCount = 0;
+    if (!currentDialogText) {
+      stopReason = "dialog_missing";
       break;
     }
 

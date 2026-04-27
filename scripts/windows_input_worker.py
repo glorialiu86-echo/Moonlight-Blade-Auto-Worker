@@ -1620,22 +1620,23 @@ def ensure_map_screen_closed(hwnd: int, title: str, toggle_key: str = "m", timeo
     if not current_state["visible"]:
         return current_state
 
+    teleport_dialog = detect_teleport_confirm_dialog(hwnd)
+    if teleport_dialog["visible"]:
+        click_named_point(hwnd, "teleport_confirm")
+        INPUT_GUARD.guarded_sleep(220, title)
+    else:
+        focus_window(hwnd)
+        pydirectinput.press(toggle_key)
+        INPUT_GUARD.refresh_baseline()
+        INPUT_GUARD.guarded_sleep(220, title)
+
     deadline = time.time() + timeout_ms / 1000.0
 
     while time.time() <= deadline:
-        teleport_dialog = detect_teleport_confirm_dialog(hwnd)
-        if teleport_dialog["visible"]:
-            click_named_point(hwnd, "teleport_confirm")
-            INPUT_GUARD.guarded_sleep(220, title)
-        else:
-            # Stable fixed UI owner: map close now uses the top-right close button
-            # instead of keyboard toggle, so transient overlays on top of the map
-            # do not leave the route flow hanging at the map-close step.
-            click_named_point(hwnd, "close_panel")
-            INPUT_GUARD.guarded_sleep(220, title)
         current_state = detect_map_screen(hwnd)
         if not current_state["visible"]:
             return current_state
+        INPUT_GUARD.guarded_sleep(120, title)
 
     raise RuntimeError("Failed to close map screen before timeout")
 

@@ -231,7 +231,7 @@ ACTION_POINTS = {
     # the provided red-circle screenshot on April 20, 2026. Do not adjust
     # casually unless re-validated against a fresh capture on this machine.
     "small_talk": (1697 / 2544, 1089 / 1388),
-    "confirm_small_talk": (1456 / 2544, 1046 / 1388),
+    "confirm_small_talk": (1090 / 1904, 781 / 1041),
     "trade": (1988 / 2544, 1085 / 1388),
     # Stable fixed UI point: this gift button center was re-marked on the
     # current 2538x1384 client capture and verified in the real
@@ -283,8 +283,9 @@ ACTION_POINTS = {
     "gift_first_slot": (1719 / 2544, 632 / 1388),
     "gift_plus": (2027 / 2544, 1190 / 1388),
     "gift_submit": (2210 / 2544, 1172 / 1388),
-    "small_talk_confirm_dialog": (1456 / 2544, 1046 / 1388),
-    "small_talk_cancel_dialog": (1090 / 2544, 1046 / 1388),
+    # Re-marked on April 27, 2026 from the live small-talk confirm dialog.
+    "small_talk_confirm_dialog": (1090 / 1904, 781 / 1041),
+    "small_talk_cancel_dialog": (815 / 1904, 781 / 1041),
     "chat_input": (278 / 2048, 1040 / 1152),
     # User re-marked on April 22, 2026 from the red-circled chat send button
     # and re-validated by drawing the expected mouse point back onto the latest
@@ -2368,6 +2369,7 @@ def send_chat_message(
     close_settle_ms: int,
 ) -> dict[str, Any]:
     focus_window(hwnd)
+    INPUT_GUARD.guarded_sleep(2000, "send_chat_message")
     click_named_point(hwnd, "chat_input")
     INPUT_GUARD.guarded_sleep(80, "send_chat_message")
 
@@ -4909,8 +4911,8 @@ def run_click_menu_small_talk(hwnd: int, action: dict[str, Any]) -> dict[str, An
     next_stage_state = wait_for_any_npc_stage(
         hwnd,
         {"small_talk_confirm", "chat_ready", "small_talk_menu", "npc_action_menu"},
-        timeout_ms=max(400, int(action.get("settleTimeoutMs") or 900)),
-        poll_interval_ms=max(80, int(action.get("pollIntervalMs") or 120)),
+        timeout_ms=max(2000, int(action.get("settleTimeoutMs") or 3200)),
+        poll_interval_ms=max(120, int(action.get("pollIntervalMs") or 180)),
     )
     next_stage = next_stage_state["stage"]
 
@@ -4937,7 +4939,8 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
         poll_interval_ms=max(120, int(action.get("entryPollIntervalMs") or 180)),
     )
     confirm_dialog_click = None
-    if stage_before["stage"] == "small_talk_confirm":
+    confirm_dialog_text_before = str(stage_before["texts"].get("confirm_dialog") or "")
+    if stage_before["stage"] == "small_talk_confirm" or contains_any_keyword(confirm_dialog_text_before, CONFIRM_KEYWORDS):
         confirm_dialog_click = click_named_point(hwnd, "small_talk_confirm_dialog")
         INPUT_GUARD.guarded_sleep(2000, title)
 
@@ -4948,17 +4951,14 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
         poll_interval_ms=max(120, int(action.get("postConfirmPollIntervalMs") or 180)),
     )
 
-    confirm_click = None
-    if after_confirm_state["stage"] == "chat_ready":
-        confirm_click = click_named_point(hwnd, "chat_input")
-        INPUT_GUARD.guarded_sleep(320, title)
-    else:
+    confirm_dialog_text_after = str(after_confirm_state["texts"].get("confirm_dialog") or "")
+    if after_confirm_state["stage"] != "chat_ready" or contains_any_keyword(confirm_dialog_text_after, CONFIRM_KEYWORDS):
         raise ActionExecutionError(
             "Small-talk confirm did not advance into the real chat page before input click",
             error_code="NPC_CHAT_CONFIRM_NOT_REACHED",
             failed_step=build_failed_step_payload(
                 action,
-                "Chat input is blocked until the confirm dialog is clicked and chat_ready is visible",
+                "Chat entry is not complete until the confirm dialog disappears and chat_ready is visible",
                 {
                     "mode": "confirm_small_talk_entry",
                     "stageBefore": stage_before["stage"],
@@ -4972,8 +4972,8 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
     next_stage_state = wait_for_any_npc_stage(
         hwnd,
         {"chat_ready", "small_talk_confirm", "small_talk_menu", "npc_action_menu"},
-        timeout_ms=max(500, int(action.get("settleTimeoutMs") or 1200)),
-        poll_interval_ms=max(80, int(action.get("pollIntervalMs") or 120)),
+        timeout_ms=max(2000, int(action.get("settleTimeoutMs") or 2400)),
+        poll_interval_ms=max(120, int(action.get("pollIntervalMs") or 180)),
     )
     next_stage = next_stage_state["stage"]
 
@@ -4991,7 +4991,6 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
             "stageAfterConfirm": after_confirm_state["stage"],
             **collect_npc_stage_input(hwnd, next_stage_state),
             **({"confirmDialogClick": confirm_dialog_click} if confirm_dialog_click else {}),
-            **({"click": confirm_click} if confirm_click else {}),
         },
     }
 

@@ -1154,6 +1154,24 @@ def probe_state_after_initial_wait(
     return last_state, history
 
 
+def probe_until_timeout(
+    title: str,
+    probe_fn,
+    success_fn,
+    timeout_ms: int,
+    interval_ms: int = 120,
+    initial_wait_ms: int = 0,
+) -> tuple[Any, list[dict[str, Any]]]:
+    return probe_state_after_initial_wait(
+        title,
+        probe_fn,
+        success_fn,
+        initial_wait_ms=max(0, int(initial_wait_ms or 0)),
+        verify_window_ms=max(0, int(timeout_ms or 0)),
+        verify_interval_ms=max(0, int(interval_ms or 0)),
+    )
+
+
 def pulse_turn_key(hwnd: int, key: str, duration_ms: int, action_title: str) -> dict[str, Any]:
     bounds = focus_window(hwnd)
     pydirectinput.keyDown(key)
@@ -1638,13 +1656,16 @@ def ensure_map_screen_open(hwnd: int, title: str, toggle_key: str = "m", timeout
 
     pydirectinput.press(toggle_key)
     INPUT_GUARD.refresh_baseline()
-    deadline = time.time() + timeout_ms / 1000.0
-
-    while time.time() <= deadline:
-        INPUT_GUARD.guarded_sleep(120, title)
-        current_state = detect_map_screen(hwnd)
-        if current_state["visible"]:
-            return current_state
+    current_state, _ = probe_until_timeout(
+        title,
+        lambda: detect_map_screen(hwnd),
+        lambda state: bool(state["visible"]),
+        timeout_ms=timeout_ms,
+        interval_ms=120,
+        initial_wait_ms=180,
+    )
+    if current_state["visible"]:
+        return current_state
 
     raise RuntimeError("Failed to open map screen before timeout")
 
@@ -1664,13 +1685,16 @@ def ensure_map_screen_closed(hwnd: int, title: str, toggle_key: str = "m", timeo
         INPUT_GUARD.refresh_baseline()
         INPUT_GUARD.guarded_sleep(220, title)
 
-    deadline = time.time() + timeout_ms / 1000.0
-
-    while time.time() <= deadline:
-        current_state = detect_map_screen(hwnd)
-        if not current_state["visible"]:
-            return current_state
-        INPUT_GUARD.guarded_sleep(120, title)
+    current_state, _ = probe_until_timeout(
+        title,
+        lambda: detect_map_screen(hwnd),
+        lambda state: not bool(state["visible"]),
+        timeout_ms=timeout_ms,
+        interval_ms=120,
+        initial_wait_ms=180,
+    )
+    if not current_state["visible"]:
+        return current_state
 
     raise RuntimeError("Failed to close map screen before timeout")
 
@@ -2471,14 +2495,28 @@ def send_chat_message(
 
 
 def read_current_chat(hwnd: int) -> dict[str, Any]:
-    stage_state = detect_npc_interaction_stage(hwnd)
+    stage_state, stage_checks = probe_until_timeout(
+        "read_current_chat",
+        lambda: detect_npc_interaction_stage(hwnd),
+        lambda state: str(state.get("stage") or "") == "chat_ready",
+        timeout_ms=1800,
+        interval_ms=180,
+        initial_wait_ms=220,
+    )
     if stage_state["stage"] != "chat_ready":
         raise RuntimeError(
             "Current screen is not chat_ready. "
             f"Detected stage: {stage_state['stage'] or 'none'}"
         )
 
-    dialog_state = detect_dialog(hwnd)
+    dialog_state, dialog_checks = probe_until_timeout(
+        "read_current_chat",
+        lambda: detect_dialog(hwnd),
+        lambda state: bool(str(state.get("text") or "").strip()),
+        timeout_ms=2200,
+        interval_ms=220,
+        initial_wait_ms=260,
+    )
     dialog_text = str(dialog_state.get("text") or "").strip()
     if not dialog_text:
         raise RuntimeError("Current chat screen has no readable dialog text")
@@ -2487,6 +2525,8 @@ def read_current_chat(hwnd: int) -> dict[str, Any]:
         "stage": "chat_ready",
         "dialogText": dialog_text,
         "stageTexts": stage_state["texts"],
+        "stageChecks": stage_checks,
+        "dialogChecks": dialog_checks,
     }
 
 
@@ -4319,9 +4359,29 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
                 verify_interval_ms=verify_interval_ms,
             )
         else:
-            raise RuntimeError(
-                "Vendor purchase close state remained ambiguous after clicking close; skipped Esc to avoid opening the world menu"
+            ambiguous_state, ambiguous_checks = probe_state_after_initial_wait(
+                title,
+                probe_close_state,
+                close_success,
+                initial_wait_ms=max(300, int(action.get("ambiguousInitialWaitMs") or 700)),
+                verify_window_ms=max(1000, int(action.get("ambiguousVerifyWindowMs") or 2200)),
+                verify_interval_ms=max(120, int(action.get("ambiguousVerifyIntervalMs") or 260)),
             )
+            close_checks.extend(ambiguous_checks)
+            close_state = ambiguous_state
+            if not close_success(close_state) and bool(close_state["purchaseVisible"]):
+                focus_window(hwnd)
+                pydirectinput.press("esc")
+                INPUT_GUARD.refresh_baseline()
+                esc_fallback = {"key": "esc"}
+                close_state, esc_checks = probe_state_after_initial_wait(
+                    title,
+                    probe_close_state,
+                    close_success,
+                    initial_wait_ms=post_esc_initial_wait_ms,
+                    verify_window_ms=verify_window_ms,
+                    verify_interval_ms=verify_interval_ms,
+                )
 
     if not close_success(close_state):
         raise RuntimeError(
@@ -4360,7 +4420,15 @@ def run_close_vendor_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "close_vendor_panel")
     click_state = click_named_point(hwnd, "close_panel")
-    INPUT_GUARD.guarded_sleep(int(action.get("postDelayMs") or 1000), title)
+    post_delay_ms = int(action.get("postDelayMs") or 1000)
+    after_state, close_checks = probe_until_timeout(
+        title,
+        lambda: detect_npc_interaction_stage(hwnd),
+        lambda state: str(state.get("stage") or "none") in {"none", "chat_ready", "npc_action_menu", "small_talk_menu"},
+        timeout_ms=max(1200, int(action.get("verifyWindowMs") or 2200)),
+        interval_ms=max(120, int(action.get("verifyIntervalMs") or 220)),
+        initial_wait_ms=post_delay_ms,
+    )
     return {
         "id": action_id,
         "title": title,
@@ -4369,6 +4437,8 @@ def run_close_vendor_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         "input": {
             "mode": "close_vendor_panel",
             "click": click_state,
+            "afterStage": after_state["stage"],
+            "closeChecks": close_checks,
         },
     }
 
@@ -5725,23 +5795,14 @@ def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     finish_timeout_ms = max(1000, int(action.get("finishTimeoutMs") or 120000))
     submit_click = click_named_point(hwnd, "hawking_submit")
     INPUT_GUARD.guarded_sleep(submit_ready_delay_ms, title)
-    runtime_state = detect_hawking_runtime_state(hwnd)
-    active_history: list[dict[str, Any]] = []
-    active_deadline = time.time() + active_timeout_ms / 1000.0
-
-    while time.time() <= active_deadline:
-        active_history.append(
-            {
-                "phase": "wait_active",
-                "active": bool(runtime_state["active"]),
-                "ready": bool(runtime_state["ready"]),
-                "text": runtime_state["text"],
-            }
-        )
-        if runtime_state["active"]:
-            break
-        INPUT_GUARD.guarded_sleep(600, title)
-        runtime_state = detect_hawking_runtime_state(hwnd)
+    runtime_state, active_history = probe_until_timeout(
+        title,
+        lambda: detect_hawking_runtime_state(hwnd),
+        lambda state: bool(state["active"]),
+        timeout_ms=active_timeout_ms,
+        interval_ms=max(220, int(action.get("activeVerifyIntervalMs") or 600)),
+        initial_wait_ms=max(240, int(action.get("activeInitialWaitMs") or 500)),
+    )
 
     if not runtime_state["active"]:
         raise ActionExecutionError(
@@ -5761,22 +5822,14 @@ def run_submit_hawking(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
             ),
         )
 
-    finish_history: list[dict[str, Any]] = []
-    finish_deadline = time.time() + finish_timeout_ms / 1000.0
-
-    while time.time() <= finish_deadline:
-        finish_history.append(
-            {
-                "phase": "wait_finish",
-                "active": bool(runtime_state["active"]),
-                "ready": bool(runtime_state["ready"]),
-                "text": runtime_state["text"],
-            }
-        )
-        if runtime_state["ready"]:
-            break
-        INPUT_GUARD.guarded_sleep(1000, title)
-        runtime_state = detect_hawking_runtime_state(hwnd)
+    runtime_state, finish_history = probe_until_timeout(
+        title,
+        lambda: detect_hawking_runtime_state(hwnd),
+        lambda state: bool(state["ready"]),
+        timeout_ms=finish_timeout_ms,
+        interval_ms=max(400, int(action.get("finishVerifyIntervalMs") or 1000)),
+        initial_wait_ms=max(600, int(action.get("finishInitialWaitMs") or 1000)),
+    )
 
     if not runtime_state["ready"]:
         raise ActionExecutionError(
@@ -5834,7 +5887,16 @@ def run_wait_hawking_runtime_finish(hwnd: int, action: dict[str, Any]) -> dict[s
             },
         }
 
-    if not runtime_state["active"]:
+    runtime_state, active_probe_history = probe_until_timeout(
+        title,
+        lambda: detect_hawking_runtime_state(hwnd),
+        lambda state: bool(state["active"] or state["ready"]),
+        timeout_ms=max(1600, int(action.get("activeProbeWindowMs") or 2600)),
+        interval_ms=max(220, int(action.get("activeProbeIntervalMs") or 500)),
+        initial_wait_ms=max(220, int(action.get("activeProbeInitialWaitMs") or 400)),
+    )
+
+    if not runtime_state["active"] and not runtime_state["ready"]:
         raise ActionExecutionError(
             "Hawking runtime wait requires the active 改货/收摊 state or an already-restored world HUD",
             failed_step=build_failed_step_payload(
@@ -5843,25 +5905,19 @@ def run_wait_hawking_runtime_finish(hwnd: int, action: dict[str, Any]) -> dict[s
                 {
                     "mode": "wait_hawking_runtime_finish",
                     "beforeText": runtime_state["text"],
+                    "activeProbeHistory": active_probe_history,
                 },
             ),
         )
 
-    finish_history: list[dict[str, Any]] = []
-    finish_deadline = time.time() + finish_timeout_ms / 1000.0
-    while time.time() <= finish_deadline:
-        finish_history.append(
-            {
-                "phase": "wait_finish",
-                "active": bool(runtime_state["active"]),
-                "ready": bool(runtime_state["ready"]),
-                "text": runtime_state["text"],
-            }
-        )
-        if runtime_state["ready"]:
-            break
-        INPUT_GUARD.guarded_sleep(1000, title)
-        runtime_state = detect_hawking_runtime_state(hwnd)
+    runtime_state, finish_history = probe_until_timeout(
+        title,
+        lambda: detect_hawking_runtime_state(hwnd),
+        lambda state: bool(state["ready"]),
+        timeout_ms=finish_timeout_ms,
+        interval_ms=max(400, int(action.get("finishVerifyIntervalMs") or 1000)),
+        initial_wait_ms=max(600, int(action.get("finishInitialWaitMs") or 1000)),
+    )
 
     if not runtime_state["ready"]:
         raise ActionExecutionError(
@@ -5914,13 +5970,21 @@ def run_close_current_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]
 
     if before_stage == "small_talk_confirm":
         close_click = click_named_point(hwnd, "small_talk_cancel_dialog")
-        INPUT_GUARD.guarded_sleep(300, title)
+        post_close_wait_ms = 300
     elif before_stage == "chat_ready":
         close_click = click_named_point(hwnd, "chat_exit")
-        INPUT_GUARD.guarded_sleep(300, title)
+        post_close_wait_ms = 300
     else:
         close_click = exit_panel(hwnd)
-    after_stage_state = detect_npc_interaction_stage(hwnd)
+        post_close_wait_ms = int(action.get("postDelayMs") or 300)
+    after_stage_state, close_checks = probe_until_timeout(
+        title,
+        lambda: detect_npc_interaction_stage(hwnd),
+        lambda state: str(state.get("stage") or "none") != before_stage or str(state.get("stage") or "none") not in closable_stages,
+        timeout_ms=max(1200, int(action.get("verifyWindowMs") or 2200)),
+        interval_ms=max(120, int(action.get("verifyIntervalMs") or 220)),
+        initial_wait_ms=post_close_wait_ms,
+    )
     after_stage = after_stage_state["stage"]
     if after_stage == before_stage and after_stage in closable_stages:
         raise RuntimeError(
@@ -5939,6 +6003,7 @@ def run_close_current_panel(hwnd: int, action: dict[str, Any]) -> dict[str, Any]
             "beforeStage": before_stage,
             "closeTriggered": True,
             "click": close_click,
+            "closeChecks": close_checks,
         },
     }
 

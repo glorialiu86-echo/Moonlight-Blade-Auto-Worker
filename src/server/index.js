@@ -1432,8 +1432,12 @@ function buildRecoveryActionsFromAnchor(context, anchorState) {
       return {
         recoveryKind: "worker_actions",
         workerActions: [
+          ...createFixedEndingTradeRelocateActions({ idPrefix: "fixed-ending-trade-recovery-relocate" }),
           ...createFixedEndingTradeOpenTradeActions({
-            idPrefix: "fixed-ending-trade-recovery-open"
+            idPrefix: "fixed-ending-trade-recovery-open",
+            acquireTitle: "回到卦摊附近重新锁一个路人目标",
+            menuTitle: "回到卦摊附近重新拉起路人交互菜单",
+            tradeTitle: "回到卦摊附近重新打开交易页准备收尾卖货"
           }),
           ...createFixedEndingTradeBundleActions({ idPrefix: "fixed-ending-trade-recovery-bundle" })
         ],
@@ -4073,9 +4077,6 @@ async function runFixedEndingTradeStageExecution({
     interruptOnExternalInput: externalInputGuardEnabled
   };
   updateAutomation({ currentSegmentId: "stage_flow" });
-  const localOpenTradeActions = createFixedEndingTradeOpenTradeActions({
-    idPrefix: "fixed-ending-trade-local"
-  });
   const relocatedOpenTradeActions = [
     ...createFixedEndingTradeRelocateActions({ idPrefix: "fixed-ending-trade-relocate" }),
     ...createFixedEndingTradeOpenTradeActions({
@@ -4094,25 +4095,8 @@ async function runFixedEndingTradeStageExecution({
     plan,
     perceptionSummary
   });
-  let openTradeExecution = null;
-  for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
-    try {
-      openTradeExecution = await runWindowsActions(localOpenTradeActions, options);
-      executions.push(openTradeExecution);
-      break;
-    } catch (error) {
-      // Keep the local retry silent; only after two misses do we reroute to the safer street spot.
-    }
-  }
-
-  if (!openTradeExecution) {
-    try {
-      openTradeExecution = await runWindowsActions(relocatedOpenTradeActions, options);
-      executions.push(openTradeExecution);
-    } catch (error) {
-      throw error;
-    }
-  }
+  const openTradeExecution = await runWindowsActions(relocatedOpenTradeActions, options);
+  executions.push(openTradeExecution);
 
   await runFixedActionChunk({
     actions: tradeBundleActions.slice(0, 5),

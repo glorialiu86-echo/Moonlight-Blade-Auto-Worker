@@ -3265,49 +3265,51 @@ async function runFixedDarkCloseStageExecution({
   externalInputGuardEnabled = true
 }) {
   const executions = [];
-  const actions = createFixedDarkCloseStageActions();
+  const actions = createFixedDarkCloseStageActions({ roundNumber });
   const options = {
     interruptOnExternalInput: externalInputGuardEnabled
   };
   const isRestartableDarkFailure = (error) => ["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(getFailureCode(error));
+  const travelActionCount = roundNumber === 1 ? 1 : 0;
+  const setupActionCount = roundNumber === 1 ? 1 : 0;
+  const stealthStartIndex = travelActionCount + setupActionCount;
+  const stealthEndIndex = stealthStartIndex + 3;
+  const lootStartIndex = stealthEndIndex;
+  const lootEndIndex = actions.length;
 
   try {
+    if (travelActionCount > 0) {
+      await runFixedActionChunk({
+        actions: actions.slice(0, travelActionCount),
+        options,
+        plan,
+        perceptionSummary,
+        commentaryText: getFixedStageActionCommentary("dark_close", roundNumber, "travel"),
+        executions
+      });
+    }
+    if (setupActionCount > 0) {
+      await runFixedActionChunk({
+        actions: actions.slice(travelActionCount, stealthStartIndex),
+        options,
+        plan,
+        perceptionSummary,
+        commentaryText: getFixedStageActionCommentary("dark_close", roundNumber, "target"),
+        executions
+      });
+    }
     await runFixedActionChunk({
-      actions: actions.slice(0, 1),
-      options,
-      plan,
-      perceptionSummary,
-      commentaryText: getFixedStageActionCommentary("dark_close", roundNumber, "travel"),
-      executions
-    });
-    await runFixedActionChunk({
-      actions: actions.slice(1, 2),
-      options,
-      plan,
-      perceptionSummary,
-      commentaryText: getFixedStageActionCommentary("dark_close", roundNumber, "target"),
-      executions
-    });
-    await runFixedActionChunk({
-      actions: actions.slice(2, 5),
+      actions: actions.slice(stealthStartIndex, stealthEndIndex),
       options,
       plan,
       perceptionSummary,
       commentaryText: getFixedStageActionCommentary("dark_close", roundNumber, "stealth"),
       executions
     });
-    await runFixedActionChunk({
-      actions: actions.slice(5, 7),
-      options,
-      plan,
-      perceptionSummary,
-      commentaryText: getFixedStageActionCommentary("dark_close", roundNumber, "drag"),
-      executions
-    });
     let lootFailure = null;
     try {
       await runFixedActionChunk({
-        actions: actions.slice(7),
+        actions: actions.slice(lootStartIndex, lootEndIndex),
         options,
         plan,
         perceptionSummary,

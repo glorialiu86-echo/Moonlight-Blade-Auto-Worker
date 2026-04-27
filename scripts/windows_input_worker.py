@@ -28,6 +28,10 @@ DEFAULT_SCAN_INTERVAL_MS = 180
 DEFAULT_CAMERA_DRAG_MS = 220
 DEFAULT_VERIFY_SETTLE_MS = 180
 OCR_ENGINE = None
+FIRST_STEALTH_BUFF_STATE = {
+    "date": "",
+    "used": False,
+}
 TMP_DIR = Path(__file__).resolve().parents[1] / "tmp"
 CLICK_TRACE_DIR = TMP_DIR / "click-trace"
 GAME_FIXED_CLIENT_WIDTH = 2560
@@ -5784,6 +5788,8 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
     post_stealth_cooldown_ms = int(action.get("postStealthCooldownMs") or 5000)
     retry_backstep_ms = int(action.get("retryBackstepMs") or action.get("waitBetweenMs") or 180)
     retry_move_settle_ms = int(action.get("retryMoveSettleMs") or 140)
+    consume_buff_once = bool(action.get("consumeBuffOnFirstSuccessOnly", False))
+    buff_settle_ms = int(action.get("buffSettleMs") or 300)
     shortcut_key = SHORTCUT_KEYS.get("stealth", "2")
     attempts: list[dict[str, Any]] = []
 
@@ -5818,6 +5824,18 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
         }
         attempts.append(attempt_payload)
         if exit_state["visible"]:
+            buff_triggered = False
+            if consume_buff_once:
+                today_key = time.strftime("%Y-%m-%d")
+                if FIRST_STEALTH_BUFF_STATE["date"] != today_key:
+                    FIRST_STEALTH_BUFF_STATE["date"] = today_key
+                    FIRST_STEALTH_BUFF_STATE["used"] = False
+                if not FIRST_STEALTH_BUFF_STATE["used"]:
+                    pydirectinput.press(shortcut_key)
+                    INPUT_GUARD.refresh_baseline()
+                    INPUT_GUARD.guarded_sleep(max(0, buff_settle_ms), title)
+                    FIRST_STEALTH_BUFF_STATE["used"] = True
+                    buff_triggered = True
             INPUT_GUARD.guarded_sleep(max(0, post_stealth_cooldown_ms), title)
             return {
                 "id": action_id,
@@ -5830,6 +5848,8 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
                     "attempts": attempts,
                     "stealthVisual": exit_state,
                     "postStealthCooldownMs": post_stealth_cooldown_ms,
+                    "buffTriggered": buff_triggered,
+                    "consumeBuffOnFirstSuccessOnly": consume_buff_once,
                 },
             }
         if attempt_index < retry_limit - 1:
@@ -6303,6 +6323,8 @@ def run_stealth_quick_open_loot_after_knockout(hwnd: int, action: dict[str, Any]
     click_settle_ms = int(action.get("clickSettleMs") or 35)
     loot_trigger_settle_ms = int(action.get("lootTriggerSettleMs") or 50)
     loot_open_timeout_ms = int(action.get("lootOpenTimeoutMs") or 900)
+    loot_observe_window_ms = int(action.get("lootObserveWindowMs") or 220)
+    loot_observe_interval_ms = int(action.get("lootObserveIntervalMs") or 40)
     raw_click_points = action.get("targetClickPoints") or []
     click_points: list[tuple[float, float]] = []
     for point in raw_click_points:
@@ -6343,7 +6365,11 @@ def run_stealth_quick_open_loot_after_knockout(hwnd: int, action: dict[str, Any]
         pydirectinput.press("3")
         INPUT_GUARD.refresh_baseline()
         INPUT_GUARD.guarded_sleep(loot_trigger_settle_ms, title)
+        observe_deadline = time.time() + max(0, loot_observe_window_ms) / 1000.0
         loot_state = detect_loot_screen(hwnd)
+        while time.time() <= observe_deadline and not loot_state["visible"]:
+            INPUT_GUARD.guarded_sleep(max(0, loot_observe_interval_ms), title)
+            loot_state = detect_loot_screen(hwnd)
         click_attempts[-1]["lootVisible"] = loot_state["visible"]
         point_index += 1
 
@@ -6406,8 +6432,6 @@ def run_loot_collect_fixed_items(hwnd: int, action: dict[str, Any]) -> dict[str,
     put_in_settle_ms = int(action.get("putInSettleMs") or 200)
     clicks: list[dict[str, Any]] = []
 
-    ensure_loot_panel_visible(hwnd, title)
-
     for click_index in range(click_count):
         item_click = click_named_point(hwnd, "loot_transfer_item")
         INPUT_GUARD.guarded_sleep(item_settle_ms, title)
@@ -6418,8 +6442,6 @@ def run_loot_collect_fixed_items(hwnd: int, action: dict[str, Any]) -> dict[str,
             "putInClick": put_in_click,
         })
         INPUT_GUARD.guarded_sleep(put_in_settle_ms, title)
-
-    ensure_loot_panel_visible(hwnd, title)
     return {
         "id": action_id,
         "title": title,
@@ -6439,7 +6461,6 @@ def run_loot_submit_once(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "loot_submit_once")
     loot_settle_ms = int(action.get("lootSettleMs") or 40)
-    ensure_loot_panel_visible(hwnd, title)
     click = click_named_point(hwnd, "loot_submit")
     INPUT_GUARD.guarded_sleep(loot_settle_ms, title)
     return {

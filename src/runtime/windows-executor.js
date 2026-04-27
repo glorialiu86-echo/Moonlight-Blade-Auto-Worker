@@ -468,21 +468,30 @@ function createFixedDarkCloseLootActions(options = {}) {
   ];
 }
 
-export function createFixedDarkCloseStageActions() {
-  return [
-    createTravelToCoordinateAction({
-      id: "fixed-dark-close-1",
-      title: "去潜行点",
-      xCoordinate: 812,
-      yCoordinate: 405,
-      confirmPointName: "teleport_confirm"
-    }),
-    createPressKeyAction("fixed-dark-close-2", "下马准备潜行", "1", { postDelayMs: 500 }),
+export function createFixedDarkCloseStageActions(options = {}) {
+  const roundNumber = Math.max(1, Number(options.roundNumber) || 1);
+  const actions = [];
+  if (roundNumber === 1) {
+    actions.push(
+      createTravelToCoordinateAction({
+        id: "fixed-dark-close-1",
+        title: "去潜行点",
+        xCoordinate: 812,
+        yCoordinate: 405,
+        confirmPointName: "teleport_confirm"
+      }),
+      createPressKeyAction("fixed-dark-close-2", "下马准备潜行", "1", { postDelayMs: 500 }),
+    );
+  }
+  actions.push(
     createWorkerAction("fixed-dark-close-3", "进入潜行并在失败时短退一步再重试", "enter_stealth_with_retry", {
       retryLimit: 5,
       settleMs: 260,
       retryBackstepMs: 180,
-      retryMoveSettleMs: 140
+      retryMoveSettleMs: 140,
+      postStealthCooldownMs: 0,
+      consumeBuffOnFirstSuccessOnly: roundNumber === 1,
+      buffSettleMs: 300
     }),
     createWorkerAction("fixed-dark-close-4", "潜行后直接按 3 闷棍附近目标", "stealth_front_arc_strike", {
       knockoutTimeoutMs: 2600,
@@ -495,6 +504,8 @@ export function createFixedDarkCloseStageActions() {
       clickSettleMs: 35,
       lootTriggerSettleMs: 50,
       lootOpenTimeoutMs: 900,
+      lootObserveWindowMs: 220,
+      lootObserveIntervalMs: 40,
       targetClickPoints: [
         [0.57, 0.56],
         [0.60, 0.56],
@@ -507,8 +518,13 @@ export function createFixedDarkCloseStageActions() {
     ...createFixedDarkCloseLootActions(),
     createWorkerAction("fixed-dark-close-6", "提交这一轮搜刮", "loot_submit_once", {
       lootSettleMs: 160
+    }),
+    createWorkerAction("fixed-dark-close-7", "提交后立刻长按 S 后退 4 秒", "stealth_escape_backward", {
+      backstepMs: 4000,
+      moveSettleMs: 0
     })
-  ];
+  );
+  return actions;
 }
 
 export function createStealthEscapeRecoveryActions() {

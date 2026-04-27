@@ -3013,7 +3013,7 @@ async function runFixedSocialGiftSequence({
     executions,
     emitCommentary
   });
-  const giftPolicy = getGiftPolicyFromExecution(giftEntryExecution) || "gift_ten";
+  const giftPolicy = getGiftPolicyFromExecution(giftEntryExecution) || "gift_fixed";
   const favorLimit = getGiftFavorLimitFromExecution(giftEntryExecution);
   if (emitCommentary) {
     await appendFixedScriptCommentaryWithPause({

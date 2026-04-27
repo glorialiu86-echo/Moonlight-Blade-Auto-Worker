@@ -259,7 +259,9 @@ ACTION_POINTS = {
     # arrow and the buy button. Do not adjust other vendor points here.
     "vendor_purchase_buy": (676 / 2538, 935 / 1384),
     "vendor_purchase_max_quantity": (870 / 2544, 724 / 1388),
-    "vendor_purchase_close": (2478 / 2544, 31 / 1388),
+    # Re-marked on April 27, 2026 from the live vendor purchase page:
+    # click the visual center of the round top-right close button.
+    "vendor_purchase_close": (1824 / 1904, 28 / 1041),
     "vendor_purchase_option": (2051 / 2544, 212 / 1388),
     "vendor_purchase_item_sanjiu": (2051 / 2544, 212 / 1388),
     "vendor_purchase_item_moding": (2051 / 2544, 485 / 1388),
@@ -3447,13 +3449,22 @@ def inspect_gift_chat_threshold(stage_state: dict[str, Any]) -> dict[str, Any]:
     favor_limit = parse_favor_limit(gift_panel_text)
     if favor_limit == 99:
         gift_policy = "chat_direct"
+        gift_count = 0
+    elif favor_limit == 199:
+        gift_policy = "gift_fixed"
+        gift_count = 2
+    elif favor_limit == 299:
+        gift_policy = "gift_fixed"
+        gift_count = 4
     else:
-        gift_policy = "gift_ten"
+        gift_policy = "gift_fixed"
+        gift_count = 4
     return {
         "favorBefore": favor_before,
         "favorLimit": favor_limit,
         "favorLimitDetected": favor_limit is not None,
         "giftPolicy": gift_policy,
+        "giftCount": gift_count,
         "giftPanelText": gift_panel_text,
     }
 
@@ -5141,13 +5152,14 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
             },
         }
 
-    if gift_policy == "gift_ten":
+    if gift_policy == "gift_fixed":
         gift_rounds: list[dict[str, Any]] = []
         current_stage_state = stage_state
         initial_select_click = click_named_point(hwnd, "gift_first_slot")
         INPUT_GUARD.guarded_sleep(select_detail_delay_ms, title)
         current_stage_state = detect_npc_interaction_stage(hwnd)
-        for round_index in range(10):
+        gift_count = max(0, int(threshold_info.get("giftCount") or 0))
+        for round_index in range(gift_count):
             before_panel_text = str(current_stage_state["texts"].get("gift_panel") or "")
             favor_before = parse_favor_value(before_panel_text)
             dismiss_detail_click = None
@@ -5169,7 +5181,7 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
                     "postSubmitDelayMs": second_submit_delay_ms,
                 }
             )
-            if round_index < 9 and repeat_submit_cd_ms > 0:
+            if round_index + 1 < gift_count and repeat_submit_cd_ms > 0:
                 INPUT_GUARD.guarded_sleep(repeat_submit_cd_ms, title)
 
         close_click = click_named_point(hwnd, "close_panel")
@@ -5179,7 +5191,7 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
             "id": action_id,
             "title": title,
             "status": "performed",
-            "detail": "Selected the first gift once, used the first submit to dismiss the detail popup, then submitted ten gifts and closed the gift screen",
+            "detail": f"Selected the first gift once, used the first submit to dismiss the detail popup, then submitted {gift_count} gifts and closed the gift screen",
             "input": {
                 "mode": "resolve_gift_chat_threshold",
                 **collect_npc_stage_input(hwnd, next_stage_state),

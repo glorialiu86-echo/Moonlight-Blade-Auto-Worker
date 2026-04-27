@@ -47,20 +47,20 @@ function verifySocialIntent(serverSource) {
 
 function verifyGiftPolicy(serverSource, workerSource) {
   invariant(
-    serverSource.includes('const giftPolicy = getGiftPolicyFromExecution(giftEntryExecution) || "gift_ten";'),
-    "Server fallback gift policy must default to gift_ten"
+    serverSource.includes('const giftPolicy = getGiftPolicyFromExecution(giftEntryExecution) || "gift_fixed";'),
+    "Server fallback gift policy must default to gift_fixed"
   );
   invariant(
     workerSource.includes('if favor_limit == 99:') && workerSource.includes('gift_policy = "chat_direct"'),
     "Worker must route 99 favor limit to chat_direct"
   );
   invariant(
-    workerSource.includes('gift_policy = "gift_ten"'),
-    "Worker must route non-99 favor limit to gift_ten"
+    workerSource.includes('elif favor_limit == 199:') && workerSource.includes('gift_count = 2'),
+    "Worker must route 199 favor limit to two gifts"
   );
   invariant(
-    workerSource.includes("for round_index in range(10):"),
-    "Worker gift_ten flow must send ten times"
+    workerSource.includes('elif favor_limit == 299:') && workerSource.includes('gift_count = 4'),
+    "Worker must route 299 favor limit to four gifts"
   );
 }
 

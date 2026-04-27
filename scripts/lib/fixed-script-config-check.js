@@ -11,7 +11,7 @@ export const expectedRounds = {
   ending_trade: 1
 };
 
-export const expectedNpcChatMaxRounds = 15;
+export const expectedNpcChatMaxRounds = 8;
 
 function invariant(condition, message) {
   if (!condition) {
@@ -32,12 +32,12 @@ function verifySocialIntent(serverSource) {
     "social_warm instructionLabel is not aligned with the current brag-about-籽岷 goal"
   );
   invariant(
-    serverSource.includes('instructionLabel: "再去第二个卦摊只聊一个人，围绕搞钱先正常追问五轮，再黑化追问五轮。"'),
+    serverSource.includes('instructionLabel: "再去第二个卦摊只聊一个人，围绕搞钱先正常追问四轮，再黑化追问四轮。"'),
     "social_dark instructionLabel is not aligned with the current money-chain goal"
   );
   invariant(
-    serverSource.includes("const NPC_CHAT_MAX_ROUNDS = 15;"),
-    "NPC_CHAT_MAX_ROUNDS must stay at 15"
+    serverSource.includes("const NPC_CHAT_MAX_ROUNDS = 8;"),
+    "NPC_CHAT_MAX_ROUNDS must stay at 8"
   );
   invariant(
     serverSource.includes("你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？"),
@@ -105,8 +105,8 @@ function verifyRuntimeDoc(runtimeDoc) {
     "social_dark",
     "第一轮固定开场白",
     "你好呀！我是籽小刀，我爸爸叫籽岷。他超级无敌有名的！你认识他吗？",
-    "前 `5` 轮按“正常搞钱”目标聊",
-    "后 `5` 轮按“黑化搞钱”目标聊",
+    "前 `4` 轮按“正常搞钱”目标聊",
+    "后 `4` 轮按“黑化搞钱”目标聊",
     "`99`：不送礼，直接聊",
     "其余所有上限（含 `199 / 299 / 499 / 599`）：连续送 `10` 个礼物再聊",
     "失败时只显示 LLM 生成的“救救我”类内容"

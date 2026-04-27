@@ -70,7 +70,7 @@ const INPUT_PROTECTION_DELAY_MS = 2 * 60 * 1000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 10000;
-const NPC_CHAT_MAX_ROUNDS = 15;
+const NPC_CHAT_MAX_ROUNDS = 8;
 const NPC_CHAT_POLL_DELAY_MS = 5000;
 const NPC_CHAT_ROUND_WAIT_TIMEOUT_MS = 90000;
 const FIXED_SCRIPT_COMMENTARY_PAUSE_MS = 1200;
@@ -1139,7 +1139,7 @@ const FIXED_SCRIPT_STAGES = [
   {
     key: "social_dark",
     rounds: 1,
-    instructionLabel: "再去第二个卦摊只聊一个人，围绕搞钱先正常追问五轮，再黑化追问五轮。",
+    instructionLabel: "再去第二个卦摊只聊一个人，围绕搞钱先正常追问四轮，再黑化追问四轮。",
     riskLevel: "medium",
     actionTypes: ["gift", "talk"],
     thinkingFactory: ({ roundNumber }) => getFixedStageVoice("social_dark", roundNumber).thinkingChain,
@@ -1930,17 +1930,6 @@ function buildLingshuGameplayContextLine(context = {}) {
   return `灵枢玩法资料：${LINGSHU_GAMEPLAY_CONTEXT}`;
 }
 
-function buildNpcConversationHistoryContext(conversationRounds = [], maxRounds = 3) {
-  if (!Array.isArray(conversationRounds) || conversationRounds.length === 0) {
-    return "最近还没有历史对话。";
-  }
-
-  return conversationRounds
-    .slice(-maxRounds)
-    .map((round) => `第${round.round}轮 NPC：${round.dialogText}\n第${round.round}轮 籽小刀：${round.replyText}`)
-    .join("\n");
-}
-
 async function buildWatchCommentary({ imageInput, conversationMessages = [] }) {
   const historyMessages = buildWatchHistoryMessages(conversationMessages, 5);
   const lingshuContextLine = buildLingshuGameplayContextLine({ interactionMode: "watch" });
@@ -2241,7 +2230,7 @@ function buildNpcReplyStylePrompt(plan, hasHistory = false, currentRoundNumber =
   }
 
   if (plan?.scriptKey === "social_dark") {
-    if (currentRoundNumber <= 5) {
+    if (currentRoundNumber <= 4) {
       return "先像正常聊天那样请教怎么搞钱，别一上来就太黑；语气像在认真请教，但可以稍微透出一点急着赚钱的焦躁。";
     }
     return "你的回复要先正常追问赚钱门路，再逐渐黑化，允许直接问闷棍、妙取能不能赚钱，也可以讥讽对方别装不懂，但不要把话直接聊死。";
@@ -2279,7 +2268,7 @@ function buildNpcConversationGoal({ instruction, plan, hasHistory = false, curre
   }
 
   if (plan?.scriptKey === "social_dark") {
-    if (currentRoundNumber <= 5) {
+    if (currentRoundNumber <= 4) {
       return "先正常请教搞钱的门路，问对方有没有来钱快一点的办法，别一上来就把话题聊成纯犯罪咨询。";
     }
     return "继续聊怎么搞钱，先正常后黑化，开始直接问闷棍、妙取能不能赚钱，也要追问人、货、地点、时机这些细节。";
@@ -2329,7 +2318,6 @@ async function analyzeNpcChatRound({
   const capture = await captureGameWindow();
   latestCaptureImageDataUrl = capture.imageDataUrl;
 
-  const historyText = buildNpcConversationHistoryContext(conversationRounds, 3);
   const hasHistory = hasNpcConversationHistory(conversationRounds);
   const currentRoundNumber = conversationRounds.length + 1;
   const conversationGoal = buildNpcConversationGoal({
@@ -2352,8 +2340,8 @@ async function analyzeNpcChatRound({
     lingshuContextLine,
     socialWarmFactPoolLine,
     "特别规则：只要画面里还能看到“点击输入聊天”和“发送”，就还是可继续聊天的 chat_ready，不能因为“此次对话已完结”这句话就返回 not_chat。",
+    "特别规则：对话上下文以当前截图为准，不要依赖额外文字版历史对话。",
     `当前上下文：${buildNpcReplyStylePrompt(plan, hasHistory, currentRoundNumber)}`,
-    `当前上下文：最近2到3轮历史对话如下\n${historyText}`,
     "输出要求：如果看不出当前还在聊什么，就保守返回 not_chat，不要编造。",
     "输出要求：replyText 只用中文一句话，8到24字，像真人接话，不要提系统、截图、OCR、AI、模型、好感度数值。",
     "输出要求：严格只输出 JSON，不要带代码块，不要加解释。",

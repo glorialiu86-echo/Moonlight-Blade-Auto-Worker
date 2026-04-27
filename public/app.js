@@ -96,7 +96,7 @@ function syncUiState() {
 
   if (elements.resumeFailedStepButton) {
     const resumeProtected = protectionActive && state.inputProtectionButton === "resume";
-    elements.resumeFailedStepButton.disabled = busy || state.voice.recording || !state.resumeAvailable || resumeProtected;
+    elements.resumeFailedStepButton.disabled = busy || state.voice.recording || resumeProtected;
     elements.resumeFailedStepButton.classList.toggle(
       "resume-triangle-alert",
       state.resumeAvailable && Boolean(state.resumeFailureCode)
@@ -114,7 +114,7 @@ function syncUiState() {
 
   if (elements.skipFailedSegmentButton) {
     const skipProtected = protectionActive && state.inputProtectionButton === "skip";
-    elements.skipFailedSegmentButton.disabled = busy || state.voice.recording || !state.skipAvailable || skipProtected;
+    elements.skipFailedSegmentButton.disabled = busy || state.voice.recording || skipProtected;
     elements.skipFailedSegmentButton.classList.toggle(
       "resume-triangle-alert",
       state.skipAvailable && Boolean(state.resumeFailureCode)
@@ -316,7 +316,7 @@ async function updateVoiceCaptureGate({ active, reason }) {
 }
 
 async function resumeFailedStep() {
-  if (state.submitting || state.voice.recording || !state.resumeAvailable) {
+  if (state.submitting || state.voice.recording) {
     return;
   }
 
@@ -343,7 +343,7 @@ async function resumeFailedStep() {
 }
 
 async function skipFailedSegment() {
-  if (state.submitting || state.voice.recording || !state.skipAvailable) {
+  if (state.submitting || state.voice.recording) {
     return;
   }
 

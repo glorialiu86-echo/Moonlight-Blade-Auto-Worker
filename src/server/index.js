@@ -2263,6 +2263,7 @@ async function analyzeNpcChatRound({
     "当前任务：如果已经不是聊天状态，返回 not_chat；如果还是聊天状态，先读出NPC刚说的话，再替籽小刀回一句。",
     `当前聊天目标：${conversationGoal}`,
     lingshuContextLine,
+    "特别规则：只要画面里还能看到“点击输入聊天”和“发送”，就还是可继续聊天的 chat_ready，不能因为“此次对话已完结”这句话就返回 not_chat。",
     `当前上下文：${buildNpcReplyStylePrompt(plan, hasHistory, currentRoundNumber)}`,
     `当前上下文：最近2到3轮历史对话如下\n${historyText}`,
     "输出要求：如果看不出当前还在聊什么，就保守返回 not_chat，不要编造。",

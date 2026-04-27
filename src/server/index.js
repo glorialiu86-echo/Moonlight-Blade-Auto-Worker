@@ -66,7 +66,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../../public");
 const port = Number(process.env.PORT || 3000);
 const AUTONOMOUS_INTERVAL_MS = 10000;
-const INPUT_PROTECTION_DELAY_MS = 2 * 60 * 1000;
+const SCRIPT_START_PROTECTION_DELAY_MS = 2 * 60 * 1000;
+const FOLLOWUP_PROTECTION_DELAY_MS = 60 * 1000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 10000;
@@ -1939,7 +1940,7 @@ function advanceAutomationProgress(automationState) {
 function armAutomationScript(instruction, triggerConfig = null) {
   clearPendingResumeContext();
   const now = new Date();
-  const startsAt = new Date(now.getTime() + INPUT_PROTECTION_DELAY_MS);
+  const startsAt = new Date(now.getTime() + SCRIPT_START_PROTECTION_DELAY_MS);
   autoCaptureService.stop();
 
   updateAutomation({
@@ -1991,7 +1992,7 @@ function armResumeFailedStep() {
   }
 
   const now = new Date();
-  const startsAt = new Date(now.getTime() + INPUT_PROTECTION_DELAY_MS);
+  const startsAt = new Date(now.getTime() + FOLLOWUP_PROTECTION_DELAY_MS);
   setStatus("running");
   autoCaptureService.stop();
   setLastError(null);
@@ -2024,7 +2025,7 @@ function armSkipFailedSegment() {
   }
 
   const now = new Date();
-  const startsAt = new Date(now.getTime() + INPUT_PROTECTION_DELAY_MS);
+  const startsAt = new Date(now.getTime() + FOLLOWUP_PROTECTION_DELAY_MS);
   setStatus("running");
   autoCaptureService.stop();
   setLastError(null);

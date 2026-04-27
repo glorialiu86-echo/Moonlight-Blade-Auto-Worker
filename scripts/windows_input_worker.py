@@ -1845,8 +1845,15 @@ def start_map_route_to_coordinate(
     y_input = input_map_coordinate_field(hwnd, "map_coord_y_input", "vertical", y_coordinate, "vertical", title)
     x_input = input_map_coordinate_field(hwnd, "map_coord_x_input", "horizontal", x_coordinate, "horizontal", title)
     go_click = click_map_route_control(hwnd, "go", "map_go")
-    INPUT_GUARD.guarded_sleep(max(1000, wait_after_go_ms), title)
-    teleport_confirm = maybe_confirm_teleport_dialog(hwnd, title, "teleport_confirm")
+    INPUT_GUARD.guarded_sleep(max(180, wait_after_go_ms), title)
+    teleport_confirm = maybe_confirm_teleport_dialog(
+        hwnd,
+        title,
+        "teleport_confirm",
+        initial_wait_ms=0,
+        verify_window_ms=900,
+        verify_interval_ms=180,
+    )
     return {
         "toggleKey": toggle_key,
         "mapTexts": map_state["texts"],
@@ -1921,17 +1928,34 @@ def detect_teleport_confirm_dialog(hwnd: int) -> dict[str, Any]:
     }
 
 
-def maybe_confirm_teleport_dialog(hwnd: int, title: str, confirm_point_name: str) -> dict[str, Any] | None:
-    dialog_state = detect_teleport_confirm_dialog(hwnd)
-    if not dialog_state["visible"]:
-        return None
+def maybe_confirm_teleport_dialog(
+    hwnd: int,
+    title: str,
+    confirm_point_name: str,
+    initial_wait_ms: int = 220,
+    verify_window_ms: int = 900,
+    verify_interval_ms: int = 180,
+) -> dict[str, Any] | None:
+    INPUT_GUARD.guarded_sleep(max(0, initial_wait_ms), title)
+    deadline = time.time() + max(0, verify_window_ms) / 1000.0
 
-    confirm_click = click_named_point(hwnd, confirm_point_name)
-    INPUT_GUARD.guarded_sleep(220, title)
-    return {
-        "dialog": dialog_state,
-        "click": confirm_click,
-    }
+    while True:
+        dialog_state = detect_teleport_confirm_dialog(hwnd)
+        if dialog_state["visible"]:
+            confirm_click = click_named_point(hwnd, confirm_point_name)
+            INPUT_GUARD.guarded_sleep(220, title)
+            return {
+                "dialog": dialog_state,
+                "click": confirm_click,
+                "initialWaitMs": initial_wait_ms,
+                "verifyWindowMs": verify_window_ms,
+                "verifyIntervalMs": verify_interval_ms,
+            }
+
+        if time.time() >= deadline:
+            return None
+
+        INPUT_GUARD.guarded_sleep(max(0, verify_interval_ms), title)
 
 
 def crop_client_roi(image: np.ndarray, roi: tuple[float, float, float, float]) -> np.ndarray:
@@ -2633,10 +2657,7 @@ def run_travel_to_coordinate(hwnd: int, action: dict[str, Any]) -> dict[str, Any
             toggle_key=toggle_key,
             wait_after_go_ms=wait_after_go_ms,
         )
-        confirm_click = None
-        if confirm_point_name:
-            confirm_click = click_named_point(hwnd, confirm_point_name)
-            INPUT_GUARD.guarded_sleep(220, title)
+        confirm_click = route_start.get("teleportConfirm")
         ensure_map_screen_closed(hwnd, title, toggle_key=toggle_key)
 
         started_at = time.time()

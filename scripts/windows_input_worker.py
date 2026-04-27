@@ -236,7 +236,9 @@ ACTION_POINTS = {
     # casually unless re-validated against a fresh capture on this machine.
     "small_talk": (1697 / 2544, 1089 / 1388),
     "confirm_small_talk": (1090 / 1904, 781 / 1041),
-    "trade": (1988 / 2544, 1085 / 1388),
+    # Re-marked on April 27, 2026 from the live NPC action menu after the
+    # ending-trade handoff. The old point sat between 详情 and 交易.
+    "trade": (1602 / 1904, 840 / 1041),
     # Stable fixed UI point: this gift button center was re-marked on the
     # current 2538x1384 client capture and verified in the real
     # gift -> close -> retarget loop. Do not adjust casually unless it is
@@ -246,7 +248,8 @@ ACTION_POINTS = {
     "close_panel": (2004 / 2048, 32 / 1152),
     "trade_left_item_tab": (49 / 2544, 530 / 1388),
     "trade_left_item_slot": (166 / 2544, 388 / 1388),
-    "trade_left_up_shelf_button": (938 / 2544, 1121 / 1388),
+    # Left-side 上架 button on the current left-item trade panel.
+    "trade_left_up_shelf_button": (702 / 1904, 841 / 1041),
     "trade_sell_money_slot": (2038 / 2544, 120 / 1388),
     "trade_gift_item_tab": (49 / 2544, 530 / 1388),
     "trade_gift_item_slot": (166 / 2544, 388 / 1388),
@@ -2346,16 +2349,16 @@ def execute_fixed_trade_flow(hwnd: int, title: str) -> dict[str, Any]:
 def execute_trade_gift_bundle_flow(hwnd: int, title: str, repeat_count: int = 10) -> dict[str, Any]:
     repeat_count = max(1, int(repeat_count))
     category_click = click_named_point(hwnd, "trade_gift_item_tab")
-    INPUT_GUARD.guarded_sleep(220, title)
+    INPUT_GUARD.guarded_sleep(320, title)
 
     stage_history = ["trade_screen"]
     rounds: list[dict[str, Any]] = []
 
     for round_index in range(repeat_count):
         item_click = click_named_point(hwnd, "trade_gift_item_slot")
-        INPUT_GUARD.guarded_sleep(220, title)
+        INPUT_GUARD.guarded_sleep(360, title)
         shelf_click = click_named_point(hwnd, "trade_left_up_shelf_button")
-        INPUT_GUARD.guarded_sleep(320, title)
+        INPUT_GUARD.guarded_sleep(520, title)
         stage_history.append("observed")
         rounds.append({
             "round": round_index + 1,
@@ -5355,9 +5358,37 @@ def run_resolve_gift_chat_threshold(hwnd: int, action: dict[str, Any]) -> dict[s
 def run_click_menu_trade(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "click_menu_trade")
+    post_trade_initial_wait_ms = int(action.get("postTradeInitialWaitMs") or 1500)
+    verify_window_ms = int(action.get("verifyWindowMs") or 5000)
+    verify_interval_ms = int(action.get("verifyIntervalMs") or 700)
     trade_click = click_named_point(hwnd, "trade")
-    INPUT_GUARD.guarded_sleep(350, title)
-    next_stage_state = detect_npc_interaction_stage(hwnd)
+    next_stage_state, trade_checks = probe_state_after_initial_wait(
+        title,
+        lambda: detect_npc_interaction_stage(hwnd),
+        lambda state: state["stage"] == "trade_screen",
+        initial_wait_ms=post_trade_initial_wait_ms,
+        verify_window_ms=verify_window_ms,
+        verify_interval_ms=verify_interval_ms,
+    )
+
+    if next_stage_state["stage"] != "trade_screen":
+        raise ActionExecutionError(
+            "click_menu_trade did not reach trade_screen before timeout",
+            error_code="TRADE_SCREEN_NOT_OPENED",
+            failed_step=build_failed_step_payload(
+                action,
+                f"Trade entry click did not open trade screen. Last stage: {next_stage_state['stage'] or 'none'}",
+                {
+                    "mode": "click_menu_trade",
+                    **collect_npc_stage_input(hwnd, next_stage_state),
+                    "click": trade_click,
+                    "tradeChecks": trade_checks,
+                    "postTradeInitialWaitMs": post_trade_initial_wait_ms,
+                    "verifyWindowMs": verify_window_ms,
+                    "verifyIntervalMs": verify_interval_ms,
+                },
+            ),
+        )
 
     return {
         "id": action_id,
@@ -5368,6 +5399,10 @@ def run_click_menu_trade(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
             "mode": "click_menu_trade",
             **collect_npc_stage_input(hwnd, next_stage_state),
             "click": trade_click,
+            "tradeChecks": trade_checks,
+            "postTradeInitialWaitMs": post_trade_initial_wait_ms,
+            "verifyWindowMs": verify_window_ms,
+            "verifyIntervalMs": verify_interval_ms,
         },
     }
 
@@ -6977,25 +7012,25 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         return run_trade_click_step(hwnd, action, "trade_left_item_tab", "Selected the left trade tab", 180)
 
     if action_type == "trade_select_left_item":
-        return run_trade_click_step(hwnd, action, "trade_left_item_slot", "Selected the left trade item", 260)
+        return run_trade_click_step(hwnd, action, "trade_left_item_slot", "Selected the left trade item", 360)
 
     if action_type == "trade_left_item_up_shelf":
-        return run_trade_click_step(hwnd, action, "trade_left_up_shelf_button", "Placed the left trade item on shelf", 320)
+        return run_trade_click_step(hwnd, action, "trade_left_up_shelf_button", "Placed the left trade item on shelf", 520)
 
     if action_type == "trade_prepare_gift_bundle":
         return run_trade_prepare_gift_bundle(hwnd, action)
 
     if action_type == "trade_select_right_money_slot":
-        return run_trade_click_step(hwnd, action, "trade_right_money_slot", "Selected the right-side payment item", 220)
+        return run_trade_click_step(hwnd, action, "trade_right_money_slot", "Selected the right-side payment item", 400)
 
     if action_type == "trade_scale_quantity":
-        return run_trade_click_step(hwnd, action, "trade_scale_button", "Adjusted the trade quantity", 220)
+        return run_trade_click_step(hwnd, action, "trade_scale_button", "Adjusted the trade quantity", 450)
 
     if action_type == "trade_right_item_up_shelf":
-        return run_trade_click_step(hwnd, action, "trade_right_up_shelf_button", "Placed the right-side payment item on shelf", 320)
+        return run_trade_click_step(hwnd, action, "trade_right_up_shelf_button", "Placed the right-side payment item on shelf", 520)
 
     if action_type == "trade_submit":
-        return run_trade_click_step(hwnd, action, "trade_final_submit_button", "Submitted the current trade", 380, True)
+        return run_trade_click_step(hwnd, action, "trade_final_submit_button", "Submitted the current trade", 650, True)
 
     if action_type == "click_steal_button":
         return run_click_steal_button(hwnd, action)

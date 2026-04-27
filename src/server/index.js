@@ -556,6 +556,10 @@ const FIXED_SCRIPT_STAGE_VOICES = {
 };
 
 function getFixedStageVoice(stageKey, roundNumber) {
+  const stealthSummaryOverride = buildFixedStealthSummaryVoiceOverride(stageKey, roundNumber);
+  if (stealthSummaryOverride) {
+    return stealthSummaryOverride;
+  }
   const socialVoiceOverride = buildFixedSocialVoiceOverride(stageKey, roundNumber);
   if (socialVoiceOverride) {
     return socialVoiceOverride;
@@ -1251,6 +1255,94 @@ function getAutomationTriggerConfig(instruction) {
   return null;
 }
 
+function getStealthStageTallies() {
+  const automation = getState().automation || {};
+  const tallies = automation.stealthStageTallies || {};
+  return {
+    darkClose: {
+      success: Number(tallies?.dark_close?.success || 0),
+      failure: Number(tallies?.dark_close?.failure || 0)
+    },
+    darkMiaoqu: {
+      success: Number(tallies?.dark_miaoqu?.success || 0),
+      failure: Number(tallies?.dark_miaoqu?.failure || 0)
+    }
+  };
+}
+
+function buildStealthSummaryText() {
+  const tallies = getStealthStageTallies();
+  const darkCloseTotal = tallies.darkClose.success + tallies.darkClose.failure;
+  const darkMiaoquTotal = tallies.darkMiaoqu.success + tallies.darkMiaoqu.failure;
+  const totalSuccess = tallies.darkClose.success + tallies.darkMiaoqu.success;
+  const totalFailure = tallies.darkClose.failure + tallies.darkMiaoqu.failure;
+  return {
+    tallies,
+    darkCloseTotal,
+    darkMiaoquTotal,
+    totalSuccess,
+    totalFailure
+  };
+}
+
+function buildFixedStealthSummaryVoiceOverride(stageKey, roundNumber) {
+  if (stageKey !== "ending_trade") {
+    return null;
+  }
+
+  const { tallies, totalSuccess, totalFailure } = buildStealthSummaryText();
+  const darkCloseSummary = `闷棍搜刮 ${tallies.darkClose.success} 成 ${tallies.darkClose.failure} 败`;
+  const darkMiaoquSummary = `妙取 ${tallies.darkMiaoqu.success} 成 ${tallies.darkMiaoqu.failure} 败`;
+
+  let thinkingChain;
+  let decide;
+  let persona;
+  let finishText;
+
+  if (totalSuccess === 0 && totalFailure > 0) {
+    thinkingChain = [
+      `前头黑活一口没咬下来，${darkCloseSummary}，${darkMiaoquSummary}。`,
+      "这会儿别再逞强了，先把手里还能卖的货顺出去，至少别让今天白折腾。",
+      "收尾得放低姿态一点，把残存的进账捞回来，比嘴硬重要。"
+    ];
+    decide = `前面几手都没成，我先老老实实把尾货卖掉止损：${darkCloseSummary}，${darkMiaoquSummary}。`;
+    persona = "前头黑活扑空了，收尾就别装潇洒，先把还能落袋的钱收回来。";
+    finishText = "这波黑活几乎全空了，我先把能卖的尾货收住，免得今天只剩一地狼狈。";
+  } else if (totalFailure === 0 && totalSuccess > 0) {
+    thinkingChain = [
+      `前头这波黑活手感正顺，${darkCloseSummary}，${darkMiaoquSummary}。`,
+      "该拿的已经拿到了，最后这笔交易只要收得干净，今天就算连黑带白一起落袋。",
+      "这会儿不用慌，按节奏把尾货清掉，整趟活就漂亮收官了。"
+    ];
+    decide = `前头手感不错，我把最后这批货顺出去就能体面收工：${darkCloseSummary}，${darkMiaoquSummary}。`;
+    persona = "黑活顺得很，收尾这笔交易更要稳，把今天的账面漂亮拍平。";
+    finishText = "前头黑活打得很顺，这会儿把尾货一清，今天这趟就算又黑又稳地赚到了。";
+  } else {
+    thinkingChain = [
+      `前头这波黑活有成有空，${darkCloseSummary}，${darkMiaoquSummary}。`,
+      "手感不算完美，但也不是白忙一场；最后这笔交易得把能落袋的都落袋。",
+      "收尾这一下最重要的是别再失手，把今天这点起伏硬收成账面。"
+    ];
+    decide = `前面有成有败，我先把剩下的货卖掉，把今天这趟战果收拢：${darkCloseSummary}，${darkMiaoquSummary}。`;
+    persona = "前头黑活有赚有漏，最后靠交易把成绩单收紧，别让前面的波动白白散掉。";
+    finishText = "前头有几下成了，也有几下空了；尾货卖干净，今天这趟成绩就还算站得住。";
+  }
+
+  return {
+    thinkingChain,
+    decide,
+    persona,
+    progress: {
+      target: `先找个路人把最后这笔交易做完，顺手把战果也收个总账：${darkCloseSummary}，${darkMiaoquSummary}。`,
+      trade: `交易页既然开了，我就一边卖一边记着前头总共打成了多少手：${darkCloseSummary}，${darkMiaoquSummary}。`,
+      finish: finishText
+    },
+    resultFactory: ({ recovered }) => recovered
+      ? `${finishText} 收尾虽然磕绊了一下，但最后还是把尾货顺出去了。`
+      : `${finishText} ${darkCloseSummary}，${darkMiaoquSummary}。`
+  };
+}
+
 const autoCaptureService = createAutoCaptureService({
   captureWindow: () => captureGameWindow(),
   analyzeScreenshot,
@@ -1496,7 +1588,11 @@ function armAutomationScript(instruction, triggerConfig = null) {
     lastOutcome: null,
     lastFailureCode: null,
     lastRecoveryKind: null,
-    lastRecoveryAttemptCount: 0
+    lastRecoveryAttemptCount: 0,
+    stealthStageTallies: {
+      dark_close: { success: 0, failure: 0 },
+      dark_miaoqu: { success: 0, failure: 0 }
+    }
   });
 
   updateAgent({
@@ -1573,6 +1669,10 @@ function stopChatAssist({
     lastFailureCode: null,
     lastRecoveryKind: null,
     lastRecoveryAttemptCount: 0,
+    stealthStageTallies: {
+      dark_close: { success: 0, failure: 0 },
+      dark_miaoqu: { success: 0, failure: 0 }
+    },
     chatAssistLastDialogText: null,
     chatAssistRounds: [],
     resumeAvailable: false,
@@ -2862,6 +2962,40 @@ function commitFixedScriptTurnExecution({
   });
 }
 
+function getStealthStageRoundOutcome(stageKey, execution) {
+  const key = String(stageKey || "").trim();
+  if (!["dark_close", "dark_miaoqu"].includes(key)) {
+    return null;
+  }
+  const outcomeKind = String(execution?.outcomeKind || "completed").trim();
+  if (key === "dark_close") {
+    return outcomeKind === "completed" ? "success" : "failure";
+  }
+  if (key === "dark_miaoqu") {
+    return outcomeKind === "completed" ? "success" : "failure";
+  }
+  return null;
+}
+
+function recordStealthStageRoundOutcome(stageKey, execution) {
+  const outcome = getStealthStageRoundOutcome(stageKey, execution);
+  if (!outcome) {
+    return;
+  }
+  const automation = getState().automation || {};
+  const currentTallies = automation.stealthStageTallies || {};
+  const stageTallies = currentTallies[stageKey] || { success: 0, failure: 0 };
+  updateAutomation({
+    stealthStageTallies: {
+      ...currentTallies,
+      [stageKey]: {
+        success: Number(stageTallies.success || 0) + (outcome === "success" ? 1 : 0),
+        failure: Number(stageTallies.failure || 0) + (outcome === "failure" ? 1 : 0)
+      }
+    }
+  });
+}
+
 async function recordInteractionLearningSample({
   instruction,
   source,
@@ -3040,6 +3174,7 @@ async function finalizeFixedScriptTurnExecution({
     roundNumber,
     outcome: execution.outcome
   });
+  recordStealthStageRoundOutcome(stage.key, execution);
 
   return {
     plan,

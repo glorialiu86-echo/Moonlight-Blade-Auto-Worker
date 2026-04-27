@@ -297,13 +297,13 @@ def attempt_full_flow(hwnd: int, attempt_index: int) -> dict:
         if step["afterStage"]["stage"] != "trade_screen":
             raise RuntimeError(f"TRADE_STEP_LEFT_SCREEN: {point_name} -> {step['afterStage']['stage']}")
 
-    left_up_shelf_base = build_named_point(hwnd, "trade_left_up_shelf_button")
+    left_up_shelf_base = build_named_point(hwnd, "trade_item_popup_shelf_button")
     left_offset = LEFT_UP_SHELF_OFFSETS[(attempt_index - 1) % len(LEFT_UP_SHELF_OFFSETS)]
     left_up_shelf_point = with_offset(left_up_shelf_base, left_offset[0], left_offset[1])
     left_up_shelf_step = click_and_verify(
         hwnd,
         output_dir,
-        f"trade_left_up_shelf_button_offset_{left_offset[0]}_{left_offset[1]}",
+        f"trade_item_popup_shelf_button_offset_{left_offset[0]}_{left_offset[1]}",
         left_up_shelf_point,
     )
     result["steps"].append(left_up_shelf_step)
@@ -357,13 +357,13 @@ def attempt_full_flow(hwnd: int, attempt_index: int) -> dict:
     if not scale_popup_state["visible"]:
         raise RuntimeError(f"TRADE_SCALE_LEFT_POPUP: {scale_popup_state['text']}")
 
-    right_up_shelf_base = build_named_point(hwnd, "trade_right_up_shelf_button")
+    right_up_shelf_base = build_named_point(hwnd, "trade_coin_popup_shelf_button")
     right_offset = RIGHT_UP_SHELF_OFFSETS[(attempt_index - 1) % len(RIGHT_UP_SHELF_OFFSETS)]
     right_up_shelf_point = with_offset(right_up_shelf_base, right_offset[0], right_offset[1])
     right_up_shelf_step = click_and_verify(
         hwnd,
         output_dir,
-        f"trade_right_up_shelf_button_offset_{right_offset[0]}_{right_offset[1]}",
+        f"trade_coin_popup_shelf_button_offset_{right_offset[0]}_{right_offset[1]}",
         right_up_shelf_point,
     )
     result["steps"].append(right_up_shelf_step)

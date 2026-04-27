@@ -280,7 +280,7 @@ ACTION_POINTS = {
     "trade_left_item_tab": (49 / 2544, 530 / 1388),
     "trade_left_item_slot": (203 / 2544, 314 / 1388),
     # Bundle-item popup 上架 button (after selecting the right-side sale item).
-    "trade_left_up_shelf_button": (1216 / 1904, 845 / 1041),
+    "trade_item_popup_shelf_button": (1216 / 1904, 845 / 1041),
     "trade_sell_money_slot": (2038 / 2544, 120 / 1388),
     "trade_gift_item_tab": (49 / 2544, 530 / 1388),
     "trade_gift_item_slot": (166 / 2544, 388 / 1388),
@@ -290,7 +290,7 @@ ACTION_POINTS = {
     "trade_scale_button": (906 / 1904, 680 / 1041),
     "trade_sell_scale_button": (906 / 1904, 680 / 1041),
     # Payment-coin popup 上架 button (after selecting the left-side coin).
-    "trade_right_up_shelf_button": (690 / 1904, 845 / 1041),
+    "trade_coin_popup_shelf_button": (690 / 1904, 845 / 1041),
     "trade_final_submit_button": (1006 / 1904, 970 / 1041),
     "vendor_purchase_plus": (427 / 2544, 706 / 1388),
     # User re-marked on April 22, 2026 from the red-circled purchase panel:
@@ -2379,10 +2379,10 @@ def execute_fixed_trade_flow(hwnd: int, title: str) -> dict[str, Any]:
     fixed_clicks = [
         ("trade_left_item_tab", 700),
         ("trade_left_item_slot", 900),
-        ("trade_left_up_shelf_button", 1200),
+        ("trade_item_popup_shelf_button", 1200),
         ("trade_right_money_slot", 1000),
         ("trade_scale_button", 1200),
-        ("trade_right_up_shelf_button", 1200),
+        ("trade_coin_popup_shelf_button", 1200),
         ("trade_final_submit_button", 1600),
     ]
     click_results: list[dict[str, Any]] = []
@@ -2413,7 +2413,7 @@ def execute_trade_gift_bundle_flow(hwnd: int, title: str, repeat_count: int = 10
     for round_index in range(repeat_count):
         item_click = click_named_point(hwnd, "trade_sell_item_slot")
         INPUT_GUARD.guarded_sleep(1000, title)
-        shelf_click = click_named_point(hwnd, "trade_left_up_shelf_button")
+        shelf_click = click_named_point(hwnd, "trade_item_popup_shelf_button")
         INPUT_GUARD.guarded_sleep(1200, title)
         stage_history.append("observed")
         rounds.append({
@@ -7111,7 +7111,7 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         return run_trade_click_step(hwnd, action, "trade_left_item_slot", "Selected the left trade item", 1000)
 
     if action_type == "trade_left_item_up_shelf":
-        return run_trade_click_step(hwnd, action, "trade_left_up_shelf_button", "Placed the left trade item on shelf", 1200)
+        return run_trade_click_step(hwnd, action, "trade_item_popup_shelf_button", "Placed the item popup trade good on shelf", 1200)
 
     if action_type == "trade_prepare_gift_bundle":
         return run_trade_prepare_gift_bundle(hwnd, action)
@@ -7123,7 +7123,7 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
         return run_trade_click_step(hwnd, action, "trade_scale_button", "Adjusted the trade quantity", 1200)
 
     if action_type == "trade_right_item_up_shelf":
-        return run_trade_click_step(hwnd, action, "trade_right_up_shelf_button", "Placed the right-side payment item on shelf", 1200)
+        return run_trade_click_step(hwnd, action, "trade_coin_popup_shelf_button", "Placed the coin popup payment item on shelf", 1200)
 
     if action_type == "trade_submit":
         return run_trade_click_step(hwnd, action, "trade_final_submit_button", "Submitted the current trade", 1600, True)

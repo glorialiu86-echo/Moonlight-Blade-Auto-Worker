@@ -45,8 +45,8 @@ VIDEO_AUDIT_PLAN: dict[str, tuple[AuditFrame, ...]] = {
     ),
     "选人-点查看放大镜-拉起右下角UI-交易买一次卖一次-赠礼-聊天.mp4": (
         AuditFrame("trade_entry", 13.0, ("trade",)),
-        AuditFrame("trade_flow_left", 18.0, ("trade_left_item_tab", "trade_left_item_slot", "trade_left_up_shelf_button")),
-        AuditFrame("trade_flow_right", 24.0, ("trade_right_money_slot", "trade_scale_button", "trade_right_up_shelf_button")),
+        AuditFrame("trade_flow_left", 18.0, ("trade_left_item_tab", "trade_left_item_slot", "trade_item_popup_shelf_button")),
+        AuditFrame("trade_flow_right", 24.0, ("trade_right_money_slot", "trade_scale_button", "trade_coin_popup_shelf_button")),
         AuditFrame("trade_submit", 29.0, ("trade_final_submit_button",)),
         AuditFrame("gift_entry", 36.0, ("gift",)),
         AuditFrame("gift_panel", 43.0, ("gift_first_slot", "gift_submit", "close_panel")),

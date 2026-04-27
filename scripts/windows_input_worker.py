@@ -261,7 +261,7 @@ NPC_CAPTURE_SCAN_POINTS = [
 ]
 
 ACTION_POINTS = {
-    "talk": (1830 / 2544, 1217 / 1388),
+    "talk": (1416 / 1904, 954 / 1041),
     # User-pinned fixed UI point: small-talk entry center was re-marked from
     # the provided red-circle screenshot on April 20, 2026. Do not adjust
     # casually unless re-validated against a fresh capture on this machine.
@@ -269,28 +269,28 @@ ACTION_POINTS = {
     "confirm_small_talk": (1090 / 1904, 781 / 1041),
     # Re-marked on April 27, 2026 from the live NPC action menu after the
     # ending-trade handoff. The old point sat between 详情 and 交易.
-    "trade": (1602 / 1904, 840 / 1041),
+    "trade": (1608 / 1904, 852 / 1041),
     # Stable fixed UI point: this gift button center was re-marked on the
     # current 2538x1384 client capture and verified in the real
     # gift -> close -> retarget loop. Do not adjust casually unless it is
     # re-validated against fresh screenshots on this machine.
-    "gift": (2328 / 2544, 1134 / 1388),
+    "gift": (1802 / 1904, 853 / 1041),
     "target_close": (958 / 2544, 203 / 1388),
     "close_panel": (2004 / 2048, 32 / 1152),
     "trade_left_item_tab": (49 / 2544, 530 / 1388),
     "trade_left_item_slot": (203 / 2544, 314 / 1388),
     # Left-side 上架 button on the current left-item trade panel.
-    "trade_left_up_shelf_button": (704 / 1902, 842 / 1040),
+    "trade_left_up_shelf_button": (704 / 1904, 842 / 1041),
     "trade_sell_money_slot": (2038 / 2544, 120 / 1388),
     "trade_gift_item_tab": (49 / 2544, 530 / 1388),
     "trade_gift_item_slot": (166 / 2544, 388 / 1388),
-    "trade_sell_item_tab": (2440 / 2544, 318 / 1388),
-    "trade_sell_item_slot": (2068 / 2544, 409 / 1388),
-    "trade_right_money_slot": (218 / 1902, 304 / 1040),
-    "trade_scale_button": (905 / 1902, 689 / 1040),
-    "trade_sell_scale_button": (905 / 1902, 689 / 1040),
-    "trade_right_up_shelf_button": (704 / 1902, 842 / 1040),
-    "trade_final_submit_button": (1005 / 1902, 969 / 1040),
+    "trade_sell_item_tab": (1826 / 1904, 239 / 1041),
+    "trade_sell_item_slot": (1548 / 1904, 307 / 1041),
+    "trade_right_money_slot": (218 / 1904, 304 / 1041),
+    "trade_scale_button": (906 / 1904, 690 / 1041),
+    "trade_sell_scale_button": (906 / 1904, 690 / 1041),
+    "trade_right_up_shelf_button": (1206 / 1904, 744 / 1041),
+    "trade_final_submit_button": (1006 / 1904, 970 / 1041),
     "vendor_purchase_plus": (427 / 2544, 706 / 1388),
     # User re-marked on April 22, 2026 from the red-circled purchase panel:
     # keep these two points pinned to the visual centers of the max-quantity

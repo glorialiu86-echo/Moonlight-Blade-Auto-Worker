@@ -637,7 +637,7 @@ export function createFixedEndingTradeBundleActions(options = {}) {
   const prefix = options.idPrefix || "fixed-ending-trade-bundle";
   return [
     createWorkerAction(`${prefix}-1`, "连续上架十个道具", "trade_prepare_gift_bundle", {
-      repeatCount: 10
+      repeatCount: 6
     }),
     createWorkerAction(`${prefix}-2`, "选中右侧支付物", "trade_select_right_money_slot"),
     createWorkerAction(`${prefix}-3`, "调整支付数量", "trade_scale_quantity"),

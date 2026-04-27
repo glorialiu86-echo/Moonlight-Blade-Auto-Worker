@@ -280,7 +280,7 @@ ACTION_POINTS = {
     "trade_left_item_tab": (49 / 2544, 530 / 1388),
     "trade_left_item_slot": (203 / 2544, 314 / 1388),
     # Left-side 上架 button on the current left-item trade panel.
-    "trade_left_up_shelf_button": (702 / 1904, 841 / 1041),
+    "trade_left_up_shelf_button": (1206 / 1904, 771 / 1041),
     "trade_sell_money_slot": (2038 / 2544, 120 / 1388),
     "trade_gift_item_tab": (49 / 2544, 530 / 1388),
     "trade_gift_item_slot": (166 / 2544, 388 / 1388),
@@ -289,7 +289,7 @@ ACTION_POINTS = {
     "trade_right_money_slot": (193 / 2544, 306 / 1388),
     "trade_scale_button": (1657 / 2544, 800 / 1388),
     "trade_sell_scale_button": (1657 / 2544, 800 / 1388),
-    "trade_right_up_shelf_button": (1606 / 2544, 1090 / 1388),
+    "trade_right_up_shelf_button": (1206 / 1904, 771 / 1041),
     "trade_final_submit_button": (1345 / 2544, 1296 / 1388),
     "vendor_purchase_plus": (427 / 2544, 706 / 1388),
     # User re-marked on April 22, 2026 from the red-circled purchase panel:

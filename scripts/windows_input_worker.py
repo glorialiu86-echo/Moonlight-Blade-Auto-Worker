@@ -4951,29 +4951,7 @@ def run_click_menu_small_talk(hwnd: int, action: dict[str, Any]) -> dict[str, An
 def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "confirm_small_talk_entry")
-    stage_before = wait_for_any_npc_stage(
-        hwnd,
-        {"small_talk_confirm", "chat_ready", "small_talk_menu", "npc_action_menu"},
-        timeout_ms=max(1200, int(action.get("entryTimeoutMs") or 3200)),
-        poll_interval_ms=max(120, int(action.get("entryPollIntervalMs") or 180)),
-    )
-    confirm_dialog_click = None
-    confirm_dialog_text_before = str(stage_before["texts"].get("confirm_dialog") or "")
-    if stage_before["stage"] != "small_talk_confirm" and not contains_any_keyword(confirm_dialog_text_before, CONFIRM_KEYWORDS):
-        raise ActionExecutionError(
-            "Small-talk confirm dialog is required before entering the chat reply page",
-            error_code="NPC_SMALL_TALK_CONFIRM_MISSING",
-            failed_step=build_failed_step_payload(
-                action,
-                "This step only proceeds after the confirm dialog is clearly visible",
-                {
-                    "mode": "confirm_small_talk_entry",
-                    "stageBefore": stage_before["stage"],
-                    **collect_npc_stage_input(hwnd, stage_before),
-                },
-            ),
-        )
-
+    stage_before = detect_npc_interaction_stage(hwnd)
     confirm_dialog_click = click_named_point(hwnd, "small_talk_confirm_dialog")
     INPUT_GUARD.guarded_sleep(max(200, int(action.get("postConfirmInitialWaitMs") or 350)), title)
 

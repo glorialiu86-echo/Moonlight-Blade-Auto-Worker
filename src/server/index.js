@@ -892,7 +892,6 @@ function getReadableFailureStepLabel(error, stageKey = "") {
   const rawTitle = String(
     error?.workerPayload?.failedStep?.detail
     || error?.workerPayload?.failedStep?.title
-    || error?.resumeContext?.failedStepTitle
     || ""
   ).trim();
   if (containsChineseText(rawTitle)) {
@@ -1004,7 +1003,7 @@ function buildFallbackFailureRescueText({
   error,
   stageKey = ""
 }) {
-  const failedStepTitle = String(error?.workerPayload?.failedStep?.title || error?.resumeContext?.failedStepTitle || "").trim();
+  const failedStepTitle = String(error?.workerPayload?.failedStep?.title || "").trim();
   const errorMessage = String(error?.message || "未知错误").trim();
   return `救救我救救我，我卡在${failedStepTitle || stageKey || "奇怪页面"}了：${errorMessage}`;
 }
@@ -1252,12 +1251,6 @@ function resolveSkipToTarget(stageKey, roundNumber, segmentId) {
     roundNumber,
     segmentId: segment.skipTo
   };
-}
-
-function findSegmentForAction(stageKey, roundNumber, actionId) {
-  const normalizedActionId = String(actionId || "").trim();
-  const segments = buildFixedStageSegments(stageKey, roundNumber);
-  return segments.find((segment) => segment.actionIds.includes(normalizedActionId)) || segments[0] || null;
 }
 
 function buildSegmentEntryActions(stageKey, roundNumber, segmentId) {
@@ -1636,7 +1629,6 @@ const FIXED_SCRIPT_STAGES = [
 ];
 
 let turnInFlight = false;
-let pendingResumeContext = null;
 let latestCaptureImageDataUrl = null;
 const SKIP_TO_NEXT_TURN = "__NEXT_TURN__";
 const SKIP_TO_NEXT_STAGE = "__NEXT_STAGE__";
@@ -1899,9 +1891,7 @@ function handleExternalInputInterrupted(error, contextLabel) {
   updateAutomation({
     status: "paused"
   });
-  if (runtimePointerContext) {
-    setPendingResumeContext(runtimePointerContext);
-  }
+  setPendingResumeContext(runtimePointerContext);
   updateAgent({
     phase: "waiting"
   });
@@ -2127,14 +2117,13 @@ function armAutomationScript(instruction, triggerConfig = null) {
 }
 
 function armResumeFailedStep() {
-  const context = pendingResumeContext || buildRuntimePointerResumeContext();
+  const context = buildRuntimePointerResumeContext();
   const hasRecoveryContext = Boolean(context?.stage?.key || context?.recoveryKind === "npc_reply_loop");
   if (!hasRecoveryContext) {
-    throw new Error("当前没有可继续的失败步骤。");
+    setPendingResumeContext(null);
+    return false;
   }
-  if (!pendingResumeContext && context) {
-    setPendingResumeContext(context);
-  }
+  setPendingResumeContext(context);
 
   const now = new Date();
   const startsAt = new Date(now.getTime() + FOLLOWUP_PROTECTION_DELAY_MS);
@@ -2157,6 +2146,7 @@ function armResumeFailedStep() {
     currentObjective: `先留两分钟鼠标脱离时间，之后从「${context.failedStepTitle || "失败步骤"}」继续`,
     lastAutonomousInstruction: context.plan?.intent || getState().agent.lastAutonomousInstruction
   });
+  return true;
 }
 
 function hasAutomationTrigger(instruction) {
@@ -2164,13 +2154,12 @@ function hasAutomationTrigger(instruction) {
 }
 
 function armSkipFailedSegment() {
-  const context = pendingResumeContext || buildRuntimePointerResumeContext();
+  const context = buildRuntimePointerResumeContext();
   if (!context?.skipTarget) {
-    throw new Error("当前失败环节没有可跳过的后继入口。");
+    setPendingResumeContext(context || null);
+    return false;
   }
-  if (!pendingResumeContext && context) {
-    setPendingResumeContext(context);
-  }
+  setPendingResumeContext(context);
 
   const now = new Date();
   const startsAt = new Date(now.getTime() + FOLLOWUP_PROTECTION_DELAY_MS);
@@ -2194,6 +2183,7 @@ function armSkipFailedSegment() {
     currentObjective: `先留两分钟鼠标脱离时间，之后跳过「${context.failedSegmentId || context.failedStepTitle || "失败环节"}」`,
     lastAutonomousInstruction: context.plan?.intent || getState().agent.lastAutonomousInstruction
   });
+  return true;
 }
 
 function hasChatAssistTrigger(instruction) {
@@ -2321,14 +2311,6 @@ function getFailureCode(error) {
   return String(error?.code || error?.workerPayload?.errorCode || "INPUT_EXECUTION_FAILED").trim();
 }
 
-function getFailureAttemptCount(error) {
-  return Number(
-    error?.workerPayload?.failedStep?.input?.attemptCount
-      || error?.workerPayload?.failedStep?.input?.retryCount
-      || 0
-  );
-}
-
 function buildStageWorkerActions(stageKey) {
   switch (stageKey) {
     case "street_wander":
@@ -2349,28 +2331,7 @@ function buildStageWorkerActions(stageKey) {
   }
 }
 
-function getRecoveryBudget(baseContext, error) {
-  const failureCode = getFailureCode(error);
-  const stageKey = baseContext?.stage?.key || "";
-
-  if (stageKey === "dark_close" && ["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(failureCode)) {
-    return DARK_CLOSE_RESTART_BUDGET;
-  }
-  if (stageKey === "dark_miaoqu" && ["STEALTH_ALERTED", "STEALTH_TARGET_RECOVERED"].includes(failureCode)) {
-    return DARK_CLOSE_RESTART_BUDGET;
-  }
-  if ((stageKey === "social_warm" || stageKey === "social_dark")
-    && ["NPC_CHAT_THRESHOLD_REVEALED", "NPC_VIEW_NOT_OPENED", "NPC_TARGET_SWITCH_FAILED"].includes(failureCode)) {
-    return 1;
-  }
-  if (failureCode === "ROUTE_STALLED") {
-    return 2;
-  }
-  return 0;
-}
-
 function clearPendingResumeContext({ preserveFailureMeta = false } = {}) {
-  pendingResumeContext = null;
   updateAutomation({
     resumeAvailable: false,
     resumeFailedStepTitle: null,
@@ -2394,7 +2355,6 @@ function clearPendingResumeContext({ preserveFailureMeta = false } = {}) {
 }
 
 function setPendingResumeContext(context) {
-  pendingResumeContext = context || null;
   updateAutomation({
     resumeAvailable: Boolean(context),
     resumeFailedStepTitle: context?.failedStepTitle || null,
@@ -2416,51 +2376,6 @@ function getFailedStepTitle(error) {
       || error?.workerPayload?.failedStep?.sourceType
       || "这一步"
   ).trim();
-}
-
-function buildResumeContextFromError(baseContext, error) {
-  const workerActions = Array.isArray(error?.workerActions) ? error.workerActions : [];
-  const failedStep = error?.workerPayload?.failedStep || null;
-  const stageKey = String(baseContext?.stage?.key || "");
-  const roundNumber = Math.max(1, Number(baseContext?.roundNumber || 1));
-  const completedCount = Array.isArray(error?.workerPayload?.steps) ? error.workerPayload.steps.length : 0;
-  const failedActionId = String(failedStep?.id || "");
-  const failedSegment = findSegmentForAction(stageKey, roundNumber, failedActionId);
-  const failedSegmentId = failedSegment?.segmentId || null;
-  const skipTarget = failedSegmentId
-    ? resolveSkipToTarget(stageKey, roundNumber, failedSegmentId)
-    : null;
-  return {
-    ...baseContext,
-    recoveryKind: "recovery_anchor_resolution",
-    failureCode: getFailureCode(error),
-    failedStepTitle: getFailedStepTitle(error),
-    failureMessageId: null,
-    stageKey: stageKey || null,
-    failedActionId,
-    failedSegmentId,
-    completedActionIds: workerActions.slice(0, Math.max(0, completedCount)).map((action) => String(action?.id || "")).filter(Boolean),
-    chunkWorkerActions: workerActions,
-    attemptCount: getFailureAttemptCount(error),
-    attemptBudget: getRecoveryBudget(baseContext, error),
-    workerActions: [],
-    skipTarget
-  };
-}
-
-function buildNpcReplyResumeContext(baseContext, error, execution) {
-  return {
-    ...baseContext,
-    recoveryKind: "npc_reply_loop",
-    failureCode: getFailureCode(error),
-    failedStepTitle: getFailedStepTitle(error),
-    failureMessageId: null,
-    stageKey: baseContext?.stage?.key || null,
-    attemptCount: 0,
-    attemptBudget: 0,
-    workerActions: [],
-    baseExecution: execution
-  };
 }
 
 async function resolveRecoveryExecutionPlan(context) {
@@ -2528,7 +2443,7 @@ function computeAutomationPositionForTarget(target) {
 async function executeSkippedSegment(context) {
   const skipTarget = context?.skipTarget || null;
   if (!skipTarget) {
-    throw new Error("当前失败环节没有配置 skipTo。");
+    return { mode: "noop" };
   }
 
   if (!skipTarget.stageKey || skipTarget.terminal === "completed") {
@@ -2560,7 +2475,7 @@ async function executeSkippedSegment(context) {
 
   const targetPosition = computeAutomationPositionForTarget(skipTarget);
   if (!targetPosition) {
-    throw new Error("跳过目标没有合法的 stage 位置。");
+    return { mode: "noop" };
   }
 
   updateAutomation({
@@ -3759,17 +3674,6 @@ async function finalizeFixedScriptTurnExecution({
           closeAfterSend: stage.key === "social_warm" || stage.key === "social_dark"
         });
       } catch (error) {
-        error.resumeContext = buildNpcReplyResumeContext({
-          stage,
-          roundNumber,
-          userInstruction,
-          scene,
-          perception,
-          interactionMode,
-          externalInputGuardEnabled,
-          perceptionSummary,
-          plan
-        }, error, execution);
         throw error;
       }
     }
@@ -4380,17 +4284,6 @@ async function runFixedScriptTurn({
         execution: failedExecution,
         error
       });
-      error.resumeContext = buildResumeContextFromError({
-        stage,
-        roundNumber,
-        userInstruction,
-        scene,
-        perception,
-        interactionMode,
-        externalInputGuardEnabled,
-        perceptionSummary,
-        plan
-      }, error);
       throw error;
     }
   }
@@ -4410,7 +4303,10 @@ async function runFixedScriptTurn({
 }
 
 function recordAutonomousFailure(error) {
-  const resumeContext = error?.resumeContext || null;
+  const resumeContext = buildRuntimePointerResumeContext({
+    failureCode: getFailureCode(error),
+    failedStepTitle: getFailedStepTitle(error)
+  });
   updateAutomation({
     lastFailureCode: getFailureCode(error),
     lastRecoveryKind: resumeContext?.recoveryKind || null,
@@ -4428,16 +4324,14 @@ function recordAutonomousFailure(error) {
 }
 
 async function resumeFailedAutomationStep() {
-  const context = pendingResumeContext;
+  const context = buildRuntimePointerResumeContext();
   if (!context?.stage?.key && context?.recoveryKind !== "npc_reply_loop") {
-    throw new Error("当前没有可继续的失败步骤。");
+    clearPendingResumeContext({ preserveFailureMeta: true });
+    return false;
   }
 
   await waitForTurnSlot();
   clearPendingResumeContext();
-  if (context.failureMessageId) {
-    removeMessage(context.failureMessageId);
-  }
 
   setLastError(null);
   setStatus("running");
@@ -4482,23 +4376,6 @@ async function resumeFailedAutomationStep() {
           externalInputGuardEnabled: context.externalInputGuardEnabled
         });
       } catch (error) {
-        error.resumeContext = buildNpcReplyResumeContext({
-          stage: context.stage,
-          roundNumber: context.roundNumber,
-          userInstruction: context.userInstruction,
-          scene: context.scene,
-          perception: latestPerception,
-          interactionMode: context.interactionMode,
-          externalInputGuardEnabled: context.externalInputGuardEnabled,
-          perceptionSummary,
-          plan: context.plan
-        }, error, context.baseExecution || {
-          executor: "WindowsInputExecutor",
-          steps: [],
-          rawSteps: [],
-          durationMs: 0,
-          outcome: "这一轮主动作已经完成。"
-        });
         throw error;
       }
 
@@ -4586,20 +4463,7 @@ async function resumeFailedAutomationStep() {
     appendLog("error", "失败步骤续跑失败", {
       error: error.message
     });
-    recordAutonomousFailure({
-      ...error,
-      resumeContext: error.resumeContext || buildResumeContextFromError({
-        stage: context.stage,
-        roundNumber: context.roundNumber,
-        userInstruction: context.userInstruction,
-        scene: context.scene,
-        perception: context.perception,
-        interactionMode: context.interactionMode,
-        externalInputGuardEnabled: context.externalInputGuardEnabled,
-        perceptionSummary: context.perceptionSummary,
-        plan: context.plan
-      }, error)
-    });
+    recordAutonomousFailure(error);
     await appendFailureRescueMessage({
       error,
       stageKey: context.stage?.key || "",
@@ -4610,6 +4474,7 @@ async function resumeFailedAutomationStep() {
   } finally {
     turnInFlight = false;
   }
+  return true;
 }
 
 async function runUserFixedScriptTurn({
@@ -4798,7 +4663,7 @@ async function maybeRunAutonomousTurn() {
         return;
       }
       if (armedActionKind === "skip_failed_segment") {
-        const context = pendingResumeContext;
+        const context = buildRuntimePointerResumeContext();
         clearPendingResumeContext({ preserveFailureMeta: true });
         updateAutomation({
           status: "running",
@@ -4808,6 +4673,11 @@ async function maybeRunAutonomousTurn() {
         });
         appendLog("info", "失败环节跳过已结束鼠标脱离保护，开始执行 skipTo");
         const skipExecution = await executeSkippedSegment(context);
+        if (skipExecution?.mode === "noop") {
+          updateAutomation({ status: "paused" });
+          updateAgent({ phase: "waiting" });
+          return;
+        }
         if (skipExecution?.mode === "inline_actions") {
           const latestPerception = getState().latestPerception || context?.perception || null;
           const perceptionSummary = perceptionSummaryBySource(latestPerception, "agent");

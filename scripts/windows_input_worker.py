@@ -185,6 +185,37 @@ class ActionExecutionError(RuntimeError):
         self.error_code = error_code
         self.failed_step = failed_step
 
+
+FATAL_ACTION_ERROR_CODES = {
+    "EXTERNAL_INPUT_INTERRUPTED",
+}
+
+FATAL_RUNTIME_ERROR_PREFIXES = (
+    "shortcut name is required",
+    "unknown shortcut:",
+    "open_named_npc_trade action requires",
+    "named_npc_trade_flow action requires",
+    "open_named_vendor_purchase action requires",
+    "Unsupported fixed vendor item:",
+    "Unsupported steal button index:",
+    "Current screen is not hawking screen",
+    "click_named_point action requires",
+    "type_text action requires",
+    "send_chat_message action requires",
+    "press_key action requires",
+    "Unsupported input action:",
+    "Unreachable miaoqu trigger state",
+)
+
+
+def is_fatal_action_error(exc: ActionExecutionError) -> bool:
+    return str(exc.error_code or "").strip() in FATAL_ACTION_ERROR_CODES
+
+
+def is_fatal_runtime_error(message: str) -> bool:
+    normalized = str(message or "").strip()
+    return any(normalized.startswith(prefix) for prefix in FATAL_RUNTIME_ERROR_PREFIXES)
+
 NPC_STAGE_ROIS = {
     "look_button": (0.26, 0.48, 0.40, 0.62),
     "moving_view_search": (0.22, 0.12, 0.76, 0.76),
@@ -4524,6 +4555,25 @@ def build_failed_step_payload(
     }
 
 
+def build_nonfatal_failed_step(
+    action: dict[str, Any],
+    message: str,
+    error_code: str = "INPUT_EXECUTION_FAILED",
+    failed_step: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = dict(failed_step or build_failed_step_payload(action, message, {}))
+    payload["id"] = str(payload.get("id") or action.get("id") or "")
+    payload["title"] = str(payload.get("title") or action.get("title") or action.get("type") or "")
+    payload["sourceType"] = payload.get("sourceType") or action.get("sourceType")
+    payload["status"] = "failed"
+    payload["detail"] = str(payload.get("detail") or message or "Action validation failed")
+    input_payload = dict(payload.get("input") or {})
+    input_payload["errorCode"] = str(input_payload.get("errorCode") or error_code or "INPUT_EXECUTION_FAILED")
+    input_payload["nonFatal"] = True
+    payload["input"] = input_payload
+    return payload
+
+
 def npc_stage_has_selectable_target(hwnd: int, stage_state: dict[str, Any], target_info: dict[str, Any]) -> bool:
     stage = str(stage_state.get("stage") or "none")
     if stage in NPC_READY_STAGES or stage == "npc_selected":
@@ -7196,18 +7246,46 @@ def main() -> None:
 
     try:
         for action in actions:
-            results.append(run_action(hwnd, action))
-    except ActionExecutionError as exc:
-        emit(
-            {
-                "ok": False,
-                "message": str(exc),
-                "errorCode": exc.error_code,
-                "steps": results,
-                "failedStep": exc.failed_step,
-            }
-        )
-        return
+            try:
+                results.append(run_action(hwnd, action))
+            except ActionExecutionError as exc:
+                if is_fatal_action_error(exc):
+                    emit(
+                        {
+                            "ok": False,
+                            "message": str(exc),
+                            "errorCode": exc.error_code,
+                            "steps": results,
+                            "failedStep": exc.failed_step,
+                        }
+                    )
+                    return
+                results.append(
+                    build_nonfatal_failed_step(
+                        action,
+                        str(exc),
+                        exc.error_code,
+                        exc.failed_step,
+                    )
+                )
+            except RuntimeError as exc:
+                if is_fatal_runtime_error(str(exc)):
+                    emit(
+                        {
+                            "ok": False,
+                            "message": str(exc),
+                            "errorCode": "INPUT_EXECUTION_FAILED",
+                            "steps": results,
+                        }
+                    )
+                    return
+                results.append(
+                    build_nonfatal_failed_step(
+                        action,
+                        str(exc),
+                        "INPUT_EXECUTION_FAILED",
+                    )
+                )
     except Exception as exc:
         emit(
             {
@@ -7225,6 +7303,7 @@ def main() -> None:
             "executor": "WindowsInputExecutor",
             "windowTitleKeyword": window_title_keyword,
             "steps": results,
+            "nonFatalFailureCount": sum(1 for step in results if step.get("status") == "failed"),
         }
     )
 
@@ -7264,19 +7343,48 @@ def main_v2() -> None:
 
     try:
         for action in actions:
-            results.append(run_action(hwnd, action))
-    except ActionExecutionError as exc:
-        emit(
-            {
-                "ok": False,
-                "message": str(exc),
-                "errorCode": exc.error_code,
-                "steps": results,
-                "failedStep": exc.failed_step,
-                "activationFallback": activation,
-            }
-        )
-        return
+            try:
+                results.append(run_action(hwnd, action))
+            except ActionExecutionError as exc:
+                if is_fatal_action_error(exc):
+                    emit(
+                        {
+                            "ok": False,
+                            "message": str(exc),
+                            "errorCode": exc.error_code,
+                            "steps": results,
+                            "failedStep": exc.failed_step,
+                            "activationFallback": activation,
+                        }
+                    )
+                    return
+                results.append(
+                    build_nonfatal_failed_step(
+                        action,
+                        str(exc),
+                        exc.error_code,
+                        exc.failed_step,
+                    )
+                )
+            except RuntimeError as exc:
+                if is_fatal_runtime_error(str(exc)):
+                    emit(
+                        {
+                            "ok": False,
+                            "message": str(exc),
+                            "errorCode": "INPUT_EXECUTION_FAILED",
+                            "steps": results,
+                            "activationFallback": activation,
+                        }
+                    )
+                    return
+                results.append(
+                    build_nonfatal_failed_step(
+                        action,
+                        str(exc),
+                        "INPUT_EXECUTION_FAILED",
+                    )
+                )
     except Exception as exc:
         emit(
             {
@@ -7296,6 +7404,7 @@ def main_v2() -> None:
             "windowTitleKeyword": window_title_keyword,
             "activationFallback": activation,
             "steps": results,
+            "nonFatalFailureCount": sum(1 for step in results if step.get("status") == "failed"),
         }
     )
 

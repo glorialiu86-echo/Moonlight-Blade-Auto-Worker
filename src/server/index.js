@@ -66,8 +66,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../../public");
 const port = Number(process.env.PORT || 3000);
 const AUTONOMOUS_INTERVAL_MS = 10000;
-const SCRIPT_START_PROTECTION_DELAY_MS = 2 * 60 * 1000;
-const FOLLOWUP_PROTECTION_DELAY_MS = 60 * 1000;
+const SCRIPT_START_PROTECTION_DELAY_MS = 30 * 1000;
+const FOLLOWUP_PROTECTION_DELAY_MS = 30 * 1000;
 const TURN_SLOT_POLL_MS = 150;
 const TURN_SLOT_TIMEOUT_MS = 45000;
 const CAPTURE_INTERVAL_MS = 10000;
@@ -1683,49 +1683,49 @@ function getAutomationTriggerConfig(instruction) {
       triggerWord: "street_wander",
       stageKeys: ["street_wander"],
       armedNotice: "",
-      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑闲逛 stage。",
+      armedObjective: "先留半分钟鼠标脱离时间，之后从城镇页开始跑闲逛 stage。",
       silentChatTrigger: true
     },
     sell_loop: {
       triggerWord: "sell_loop",
       stageKeys: ["sell_loop"],
       armedNotice: "",
-      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑买货卖货 stage。",
+      armedObjective: "先留半分钟鼠标脱离时间，之后从城镇页开始跑买货卖货 stage。",
       silentChatTrigger: true
     },
     social_warm: {
       triggerWord: "social_warm",
       stageKeys: ["social_warm"],
       armedNotice: "",
-      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑热聊 stage。",
+      armedObjective: "先留半分钟鼠标脱离时间，之后从城镇页开始跑热聊 stage。",
       silentChatTrigger: true
     },
     social_dark: {
       triggerWord: "social_dark",
       stageKeys: ["social_dark"],
       armedNotice: "",
-      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑搞钱聊天 stage。",
+      armedObjective: "先留半分钟鼠标脱离时间，之后从城镇页开始跑搞钱聊天 stage。",
       silentChatTrigger: true
     },
     dark_close: {
       triggerWord: "dark_close",
       stageKeys: ["dark_close"],
       armedNotice: "",
-      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑闷棍搜刮 stage。",
+      armedObjective: "先留半分钟鼠标脱离时间，之后从城镇页开始跑闷棍搜刮 stage。",
       silentChatTrigger: true
     },
     dark_miaoqu: {
       triggerWord: "dark_miaoqu",
       stageKeys: ["dark_miaoqu"],
       armedNotice: "",
-      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑妙取 stage。",
+      armedObjective: "先留半分钟鼠标脱离时间，之后从城镇页开始跑妙取 stage。",
       silentChatTrigger: true
     },
     ending_trade: {
       triggerWord: "ending_trade",
       stageKeys: ["ending_trade"],
       armedNotice: "",
-      armedObjective: "先留两分钟鼠标脱离时间，之后从城镇页开始跑收尾交易 stage。",
+      armedObjective: "先留半分钟鼠标脱离时间，之后从城镇页开始跑收尾交易 stage。",
       silentChatTrigger: true
     }
   };
@@ -1739,7 +1739,7 @@ function getAutomationTriggerConfig(instruction) {
       triggerWord: "我想敲他板砖",
       stageKeys: ["dark_close"],
       armedNotice: "收到，这轮直接走敲板砖的整套黑活：跑图、潜行、种蛊、闷棍、搜刮、后撤。",
-      armedObjective: "先留两分钟鼠标脱离时间，之后直接跑敲板砖整套黑活。"
+      armedObjective: "先留半分钟鼠标脱离时间，之后直接跑敲板砖整套黑活。"
     };
   }
 
@@ -1748,7 +1748,7 @@ function getAutomationTriggerConfig(instruction) {
       triggerWord: "我想偷点东西",
       stageKeys: ["dark_miaoqu"],
       armedNotice: "收到，这轮直接走妙取整套黑活：跑图、潜行、妙取、点击、后撤。",
-      armedObjective: "先留两分钟鼠标脱离时间，之后直接跑妙取整套黑活。"
+      armedObjective: "先留半分钟鼠标脱离时间，之后直接跑妙取整套黑活。"
     };
   }
 
@@ -1757,7 +1757,7 @@ function getAutomationTriggerConfig(instruction) {
       triggerWord: "加油",
       stageKeys: null,
       armedNotice: "收到加油啦！马上动脑筋～",
-      armedObjective: "先留两分钟鼠标脱离时间，之后再按既定安排动手"
+      armedObjective: "先留半分钟鼠标脱离时间，之后再按既定安排动手"
     };
   }
 
@@ -2124,7 +2124,7 @@ function armAutomationScript(instruction, triggerConfig = null) {
   updateAgent({
     mode: "autonomous",
     phase: "armed",
-    currentObjective: triggerConfig?.armedObjective || "先留两分钟鼠标脱离时间，之后再按既定安排动手",
+    currentObjective: triggerConfig?.armedObjective || "先留半分钟鼠标脱离时间，之后再按既定安排动手",
     queuedUserObjective: instruction,
     lastUserInstruction: instruction
   });
@@ -2157,7 +2157,7 @@ function armResumeFailedStep() {
   updateAgent({
     mode: "autonomous",
     phase: "armed",
-    currentObjective: `先留两分钟鼠标脱离时间，之后从「${context.failedStepTitle || "失败步骤"}」继续`,
+    currentObjective: `先留半分钟鼠标脱离时间，之后从「${context.failedStepTitle || "失败步骤"}」继续`,
     lastAutonomousInstruction: context.plan?.intent || getState().agent.lastAutonomousInstruction
   });
   return true;
@@ -2194,7 +2194,7 @@ function armSkipFailedSegment() {
   updateAgent({
     mode: "autonomous",
     phase: "armed",
-    currentObjective: `先留两分钟鼠标脱离时间，之后跳过「${context.failedSegmentId || context.failedStepTitle || "失败环节"}」`,
+    currentObjective: `先留半分钟鼠标脱离时间，之后跳过「${context.failedSegmentId || context.failedStepTitle || "失败环节"}」`,
     lastAutonomousInstruction: context.plan?.intent || getState().agent.lastAutonomousInstruction
   });
   return true;

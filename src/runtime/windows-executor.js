@@ -481,6 +481,7 @@ export function createFixedDarkCloseStageActions(options = {}) {
         confirmPointName: "teleport_confirm"
       }),
       createPressKeyAction("fixed-dark-close-2", "下马准备潜行", "1", { postDelayMs: 500 }),
+      createPressKeyAction("fixed-dark-close-2b", "矫正视角再进潜行", "v", { postDelayMs: 800 }),
     );
   }
   actions.push(

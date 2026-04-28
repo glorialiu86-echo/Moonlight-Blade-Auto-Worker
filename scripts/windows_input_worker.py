@@ -6058,6 +6058,12 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
     post_stealth_cooldown_ms = int(action.get("postStealthCooldownMs") or 5000)
     retry_backstep_ms = int(action.get("retryBackstepMs") or action.get("waitBetweenMs") or 180)
     retry_move_settle_ms = int(action.get("retryMoveSettleMs") or 140)
+    confirm_timeout_ms = int(
+        action.get("confirmTimeoutMs")
+        or action.get("stealthConfirmTimeoutMs")
+        or (settle_ms + max(0, retry_limit - 1) * (retry_backstep_ms + retry_move_settle_ms + settle_ms))
+    )
+    confirm_poll_interval_ms = int(action.get("confirmPollIntervalMs") or 120)
     consume_buff_once = bool(action.get("consumeBuffOnFirstSuccessOnly", False))
     buff_settle_ms = int(action.get("buffSettleMs") or 300)
     shortcut_key = SHORTCUT_KEYS.get("stealth", "2")
@@ -6081,14 +6087,21 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
             },
         }
 
-    for attempt_index in range(max(1, retry_limit)):
-        INPUT_GUARD.check_or_raise(title)
-        pydirectinput.press(shortcut_key)
-        INPUT_GUARD.refresh_baseline()
-        INPUT_GUARD.guarded_sleep(settle_ms, title)
+    INPUT_GUARD.check_or_raise(title)
+    pydirectinput.press(shortcut_key)
+    INPUT_GUARD.refresh_baseline()
+
+    started_at = time.time()
+    observed_at_ms = 0
+    first_probe = True
+    while observed_at_ms <= max(settle_ms, confirm_timeout_ms):
+        INPUT_GUARD.guarded_sleep(settle_ms if first_probe else max(40, confirm_poll_interval_ms), title)
+        first_probe = False
         exit_state = detect_exit_stealth_button(hwnd)
+        observed_at_ms = int((time.time() - started_at) * 1000)
         attempt_payload = {
-            "attemptIndex": attempt_index + 1,
+            "attemptIndex": len(attempts) + 1,
+            "observedAtMs": observed_at_ms,
             "exitStealthVisible": exit_state["visible"],
             "stealthVisual": exit_state,
         }
@@ -6111,42 +6124,35 @@ def run_enter_stealth_with_retry(hwnd: int, action: dict[str, Any]) -> dict[str,
                 "id": action_id,
                 "title": title,
                 "status": "performed",
-                "detail": f"Entered stealth on attempt {attempt_index + 1}",
+                "detail": f"Entered stealth after observing for {observed_at_ms}ms",
                 "input": {
                     "mode": "enter_stealth_with_retry",
-                    "retryCount": attempt_index + 1,
+                    "retryCount": 1,
                     "attempts": attempts,
                     "stealthVisual": exit_state,
                     "postStealthCooldownMs": post_stealth_cooldown_ms,
+                    "confirmTimeoutMs": confirm_timeout_ms,
+                    "confirmPollIntervalMs": confirm_poll_interval_ms,
                     "buffTriggered": buff_triggered,
                     "consumeBuffOnFirstSuccessOnly": consume_buff_once,
                 },
             }
-        if attempt_index < retry_limit - 1:
-            pydirectinput.keyDown("s")
-            INPUT_GUARD.refresh_baseline()
-            INPUT_GUARD.guarded_sleep(max(40, retry_backstep_ms), title)
-            pydirectinput.keyUp("s")
-            INPUT_GUARD.refresh_baseline()
-            INPUT_GUARD.guarded_sleep(max(0, retry_move_settle_ms), title)
-            attempt_payload["retryBackstepMs"] = retry_backstep_ms
-            attempt_payload["retryMoveSettleMs"] = retry_move_settle_ms
 
     failed_input = {
         "mode": "enter_stealth_with_retry",
-        "retryCount": len(attempts),
+        "retryCount": 1,
         "attempts": attempts,
         "stealthVisual": exit_state,
-        "retryBackstepMs": retry_backstep_ms,
-        "retryMoveSettleMs": retry_move_settle_ms,
+        "confirmTimeoutMs": confirm_timeout_ms,
+        "confirmPollIntervalMs": confirm_poll_interval_ms,
     }
     return build_nonfatal_failed_step(
         action,
-        "Failed to enter stealth after backstep retry within the configured retry budget",
+        "Failed to confirm stealth after a single stealth key press within the configured observe window",
         "STEALTH_ENTRY_BLOCKED",
         build_failed_step_payload(
             action,
-            "Stealth entry stayed blocked without entering grey stealth state after backstep retries",
+            "Stealth entry was only pressed once, then observed until timeout without confirming the exit-stealth button",
             failed_input,
         ),
     )

@@ -490,8 +490,7 @@ export function createFixedDarkCloseStageActions(options = {}) {
       retryBackstepMs: 180,
       retryMoveSettleMs: 140,
       postStealthCooldownMs: 0,
-      consumeBuffOnFirstSuccessOnly: roundNumber === 1,
-      buffSettleMs: 300
+      consumeBuffOnFirstSuccessOnly: false
     }),
     createWorkerAction("fixed-dark-close-4", "潜行后直接按 3 闷棍附近目标", "stealth_front_arc_strike", {
       knockoutTimeoutMs: 2600,

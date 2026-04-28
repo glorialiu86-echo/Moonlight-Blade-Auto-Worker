@@ -5112,6 +5112,7 @@ def run_click_menu_small_talk(hwnd: int, action: dict[str, Any]) -> dict[str, An
 def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     action_id = str(action.get("id") or "")
     title = str(action.get("title") or "confirm_small_talk_entry")
+    chat_input_delay_ms = max(0, int(action.get("chatInputDelayMs") or 5000))
     stage_before = detect_npc_interaction_stage(hwnd)
     confirm_dialog_click = click_named_point(hwnd, "small_talk_confirm_dialog")
     INPUT_GUARD.guarded_sleep(max(200, int(action.get("postConfirmInitialWaitMs") or 300)), title)
@@ -5151,6 +5152,7 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
     next_stage = next_stage_state["stage"]
     chat_input_click = None
     if next_stage == "chat_ready":
+        INPUT_GUARD.guarded_sleep(chat_input_delay_ms, title)
         chat_input_click = click_named_point(hwnd, "chat_input")
         INPUT_GUARD.guarded_sleep(80, title)
 
@@ -5166,6 +5168,7 @@ def run_confirm_small_talk_entry(hwnd: int, action: dict[str, Any]) -> dict[str,
             "mode": "confirm_small_talk_entry",
             "stageBefore": stage_before["stage"],
             "stageAfterConfirm": after_confirm_state["stage"],
+            "chatInputDelayMs": chat_input_delay_ms,
             **collect_npc_stage_input(hwnd, next_stage_state),
             **({"confirmDialogClick": confirm_dialog_click} if confirm_dialog_click else {}),
             **({"chatInputClick": chat_input_click} if chat_input_click else {}),

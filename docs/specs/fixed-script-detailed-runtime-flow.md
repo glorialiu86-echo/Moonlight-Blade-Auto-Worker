@@ -30,7 +30,7 @@
 - `sell_loop`：`2` 轮
 - `social_warm`：`1` 轮
 - `social_dark`：`1` 轮
-- `dark_close`：`1` 轮
+- `dark_close`：`3` 轮
 - `dark_miaoqu`：`8` 轮
 - `ending_trade`：`1` 轮
 

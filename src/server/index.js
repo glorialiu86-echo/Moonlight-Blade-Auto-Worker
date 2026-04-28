@@ -1598,7 +1598,7 @@ const FIXED_SCRIPT_STAGES = [
   },
   {
     key: "dark_close",
-    rounds: 1,
+    rounds: 3,
     instructionLabel: "正常路已经太慢了，直接潜行、闷棍、扛走、搜刮。",
     riskLevel: "high",
     actionTypes: ["stealth", "strike"],

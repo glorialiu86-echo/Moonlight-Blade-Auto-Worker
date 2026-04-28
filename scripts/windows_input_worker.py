@@ -309,7 +309,7 @@ ACTION_POINTS = {
     # clicks instead of keyboard shortcuts.
     "hawking_up_shelf_button": (1200 / 1904, 809 / 1041),
     "hawking_submit": (1778 / 1904, 923 / 1041),
-    "steal_button_1": (2371 / 2544, 614 / 1388),
+    "steal_button_1": (1158 / 1264, 294 / 721),
     "steal_button_2": (1916 / 2048, 704 / 1360),
     "steal_button_3": (1916 / 2048, 893 / 1360),
     "steal_button_4": (1916 / 2048, 1085 / 1360),

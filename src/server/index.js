@@ -2439,6 +2439,10 @@ async function resolveRecoveryExecutionPlan(context) {
   };
 }
 
+function executionHasFailedStep(execution) {
+  return Boolean((execution?.steps || []).some((step) => String(step?.status || "") === "failed"));
+}
+
 function computeAutomationPositionForTarget(target) {
   if (!target?.stageKey) {
     return null;
@@ -3853,15 +3857,43 @@ async function runFixedSocialGiftSequence({
   decisionAttempt = 1,
   emitCommentary = true
 }) {
-  const giftEntryExecution = await runFixedActionChunk({
-    actions: createFixedSocialGiftEntryActions({ includeAcquire: false, idPrefix: entryIdPrefix }),
-    options,
-    plan,
-    perceptionSummary,
-    commentaryText: getFixedStageActionCommentary(stage.key, roundNumber, "giftOpen"),
-    executions,
-    emitCommentary
-  });
+  const giftEntryActions = createFixedSocialGiftEntryActions({ includeAcquire: false, idPrefix: entryIdPrefix });
+  const maxRetryCount = 6;
+  let giftEntryExecution = null;
+
+  for (let attemptIndex = 0; attemptIndex < maxRetryCount; attemptIndex += 1) {
+    let entryFailed = false;
+    for (let actionIndex = 0; actionIndex < giftEntryActions.length; actionIndex += 1) {
+      const action = giftEntryActions[actionIndex];
+      const execution = await runFixedActionChunk({
+        actions: [action],
+        options,
+        plan,
+        perceptionSummary,
+        commentaryText: actionIndex === 0 ? getFixedStageActionCommentary(stage.key, roundNumber, "giftOpen") : "",
+        executions,
+        emitCommentary: emitCommentary && actionIndex === 0 && attemptIndex === 0
+      });
+      giftEntryExecution = execution;
+      if (executionHasFailedStep(execution)) {
+        entryFailed = true;
+        break;
+      }
+    }
+
+    if (!entryFailed && giftEntryExecution) {
+      break;
+    }
+  }
+
+  if (!giftEntryExecution || executionHasFailedStep(giftEntryExecution)) {
+    return {
+      giftPolicy: "gift_fixed",
+      favorLimit: null,
+      execution: giftEntryExecution
+    };
+  }
+
   const giftPolicy = getGiftPolicyFromExecution(giftEntryExecution) || "gift_fixed";
   const favorLimit = getGiftFavorLimitFromExecution(giftEntryExecution);
   if (emitCommentary) {
@@ -3876,6 +3908,13 @@ async function runFixedSocialGiftSequence({
     options
   );
   executions.push(resolveExecution);
+  if (executionHasFailedStep(resolveExecution)) {
+    return {
+      giftPolicy,
+      favorLimit,
+      execution: resolveExecution
+    };
+  }
   await appendGiftProgressCommentary({
     stage,
     plan,
@@ -3904,6 +3943,7 @@ async function runFixedSocialStageExecution({
   updateAutomation({ currentSegmentId: "stage_flow" });
   const approachActions = createFixedSocialApproachActions(stage.key);
   const talkActions = createFixedSocialTalkActions({ includeAcquire: false, idPrefix: "fixed-social-talk" });
+  const maxRetryCount = 6;
 
   await runFixedActionChunk({
     actions: approachActions.slice(0, 1),
@@ -3921,28 +3961,55 @@ async function runFixedSocialStageExecution({
     commentaryText: getFixedStageActionCommentary(stage.key, roundNumber, "arrive"),
     executions
   });
-  await runFixedSocialGiftSequence({
-    stage,
-    roundNumber,
-    plan,
-    perceptionSummary,
-    executions,
-    options,
-    entryIdPrefix: "fixed-social-gift-entry",
-    resolveIdPrefix: "fixed-social-gift-resolve",
-    decisionAttempt: 1
-  });
-  await runFixedActionChunk({
-    actions: talkActions,
-    options,
-    plan,
-    perceptionSummary,
-    commentaryText: getFixedStageActionCommentary(stage.key, roundNumber, "talk"),
-    executions
-  });
+
+  let giftResolved = false;
+  for (let attemptIndex = 0; attemptIndex < maxRetryCount; attemptIndex += 1) {
+    const giftSequenceResult = await runFixedSocialGiftSequence({
+      stage,
+      roundNumber,
+      plan,
+      perceptionSummary,
+      executions,
+      options,
+      entryIdPrefix: "fixed-social-gift-entry",
+      resolveIdPrefix: "fixed-social-gift-resolve",
+      decisionAttempt: attemptIndex + 1,
+      emitCommentary: attemptIndex === 0
+    });
+    if (!executionHasFailedStep(giftSequenceResult.execution)) {
+      giftResolved = true;
+      break;
+    }
+  }
+
+  let talkCompleted = false;
+  for (let attemptIndex = 0; attemptIndex < maxRetryCount; attemptIndex += 1) {
+    let talkFailed = false;
+    for (let actionIndex = 0; actionIndex < talkActions.length; actionIndex += 1) {
+      const action = talkActions[actionIndex];
+      const execution = await runFixedActionChunk({
+        actions: [action],
+        options,
+        plan,
+        perceptionSummary,
+        commentaryText: actionIndex === 0 ? getFixedStageActionCommentary(stage.key, roundNumber, "talk") : "",
+        executions,
+        emitCommentary: actionIndex === 0 && attemptIndex === 0
+      });
+      if (executionHasFailedStep(execution)) {
+        talkFailed = true;
+        break;
+      }
+    }
+    if (!talkFailed) {
+      talkCompleted = true;
+      break;
+    }
+  }
+
   return {
     ...mergeWorkerExecutions(executions),
-    outcomeKind: "completed"
+    outcomeKind: giftResolved && talkCompleted ? "completed" : "recovered"
   };
 }
 

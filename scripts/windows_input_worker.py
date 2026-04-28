@@ -7059,6 +7059,9 @@ def run_action(hwnd: int, action: dict[str, Any]) -> dict[str, Any]:
     if action_type == "stealth_spam_escape_backward":
         return run_stealth_spam_escape_backward(hwnd, action)
 
+    if action_type == "stealth_trigger_miaoqu":
+        return run_stealth_trigger_miaoqu(hwnd, action)
+
     if action_type == "click_fixed_steal_button_and_escape":
         return run_click_fixed_steal_button_and_escape(hwnd, action)
 

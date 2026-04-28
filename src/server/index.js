@@ -65,7 +65,7 @@ import { runWindowsActions } from "../runtime/windows-executor.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../../public");
 const port = Number(process.env.PORT || 3000);
-const AUTONOMOUS_INTERVAL_MS = 10000;
+const AUTONOMOUS_INTERVAL_MS = 1000;
 const SCRIPT_START_PROTECTION_DELAY_MS = 30 * 1000;
 const FOLLOWUP_PROTECTION_DELAY_MS = 30 * 1000;
 const TURN_SLOT_POLL_MS = 150;

@@ -28,14 +28,16 @@ const state = {
     lastProcessAt: 0,
     activityNotified: false,
     sending: false,
-    noiseFloorRms: 0
+    noiseFloorRms: 0,
+    hotFrameCount: 0
   }
 };
 
-const VOICE_ACTIVITY_RMS_THRESHOLD = 0.002;
-const VOICE_ACTIVITY_DYNAMIC_THRESHOLD_MULTIPLIER = 1.22;
+const VOICE_ACTIVITY_RMS_THRESHOLD = 0.0045;
+const VOICE_ACTIVITY_DYNAMIC_THRESHOLD_MULTIPLIER = 1.8;
+const VOICE_ACTIVITY_CONSECUTIVE_FRAMES = 3;
 const VOICE_AUTO_SEND_SILENCE_MS = 1000;
-const VOICE_MIN_SPEECH_MS = 450;
+const VOICE_MIN_SPEECH_MS = 700;
 const VOICE_CAPTURE_STALL_MS = 1800;
 const VOICE_AUTO_CAPTURE_RESUME_IDLE_MS = 20000;
 
@@ -505,6 +507,7 @@ function resetVoiceState() {
   state.voice.lastProcessAt = 0;
   state.voice.activityNotified = false;
   state.voice.noiseFloorRms = 0;
+  state.voice.hotFrameCount = 0;
 }
 
 function maybeReleaseAutoCaptureForVoiceIdle() {
@@ -824,6 +827,12 @@ async function startVoiceRecording() {
       }
 
       if (rms >= getVoiceActivityThreshold()) {
+        state.voice.hotFrameCount += 1;
+      } else {
+        state.voice.hotFrameCount = 0;
+      }
+
+      if (state.voice.hotFrameCount >= VOICE_ACTIVITY_CONSECUTIVE_FRAMES) {
         if (!state.voice.speechDetected) {
           state.voice.speechStartedAt = Date.now();
         }

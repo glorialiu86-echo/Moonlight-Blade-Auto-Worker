@@ -2606,7 +2606,7 @@ async function buildWatchCommentary({ imageInput, conversationMessages = [] }) {
     imageInput,
     historyMessages,
     prompt,
-    systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。籽岷的ID是“籽岷团队”或“米子山民弓虽”，他有两个号。",
+    systemPrompt: "你是籽小刀。你正在看籽岷玩天涯明月刀这个游戏。籽岷的游戏ID是“籽岷团队”和“米子山民弓虽”。",
     maxTokens: 80,
     temperature: 0.7
   });
@@ -2635,7 +2635,7 @@ async function buildWatchUserReply({ instruction, imageInput, conversationMessag
     imageInput,
     historyMessages,
     prompt,
-    systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。籽岷的ID是“籽岷团队”或“米子山民弓虽”，他有两个号。",
+    systemPrompt: "你是籽小刀。你正在看籽岷玩天涯明月刀这个游戏。籽岷的游戏ID是“籽岷团队”和“米子山民弓虽”。",
     maxTokens: 140,
     temperature: 0.65
   });

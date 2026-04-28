@@ -555,9 +555,9 @@ export function createFixedDarkMiaoquStageActions() {
       retryForwardMs: 0,
       retryMoveSettleMs: 0
     }),
-    createWorkerAction("fixed-dark-miaoqu-3", "盲点固定妙取按钮并在 1.5 秒后狂按 S 撤离", "click_fixed_steal_button_and_escape", {
+    createWorkerAction("fixed-dark-miaoqu-3", "盲点固定妙取按钮并在 1 秒后狂按 S 撤离", "click_fixed_steal_button_and_escape", {
       buttonIndex: 1,
-      escapeDelayMs: 1500,
+      escapeDelayMs: 1000,
       spamBackstepMs: 3000,
       spamIntervalMs: 80,
       moveSettleMs: 80

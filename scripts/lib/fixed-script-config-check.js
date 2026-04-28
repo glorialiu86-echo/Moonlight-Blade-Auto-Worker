@@ -6,7 +6,7 @@ export const expectedRounds = {
   sell_loop: 2,
   social_warm: 1,
   social_dark: 1,
-  dark_close: 3,
+  dark_close: 1,
   dark_miaoqu: 8,
   ending_trade: 1
 };

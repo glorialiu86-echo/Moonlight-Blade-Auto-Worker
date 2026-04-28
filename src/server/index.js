@@ -1608,7 +1608,7 @@ const FIXED_SCRIPT_STAGES = [
   },
   {
     key: "dark_miaoqu",
-    rounds: 8,
+    rounds: 4,
     instructionLabel: "正面放倒太显眼了，接下来只做独立妙取和脱离。",
     riskLevel: "high",
     actionTypes: ["stealth", "steal"],

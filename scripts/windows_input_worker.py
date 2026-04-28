@@ -4328,8 +4328,8 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
     item_click = click_named_point(hwnd, str(item_button["pointName"]))
     INPUT_GUARD.guarded_sleep(1000, title)
 
-    # max_quantity_click = click_named_point(hwnd, "vendor_purchase_max_quantity")
-    # INPUT_GUARD.guarded_sleep(1000, title)
+    max_quantity_click = click_named_point(hwnd, "vendor_purchase_max_quantity")
+    INPUT_GUARD.guarded_sleep(1000, title)
     buy_click = click_named_point(hwnd, "vendor_purchase_buy")
     INPUT_GUARD.guarded_sleep(post_buy_settle_ms, title)
     close_click = click_named_point(hwnd, "vendor_purchase_close")
@@ -4398,6 +4398,7 @@ def run_buy_current_vendor_item(hwnd: int, action: dict[str, Any]) -> dict[str, 
             "quantity": quantity,
             "itemButton": item_button,
             "itemClick": item_click,
+            "maxQuantityClick": max_quantity_click,
             "buyClick": buy_click,
             "closeClick": close_click,
             "escFallback": esc_fallback,

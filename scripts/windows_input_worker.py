@@ -5757,7 +5757,7 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
             error_code="STEALTH_TARGET_RECOVERED",
             failed_step=build_failed_step_payload(
                 action,
-                "Blind miaoqu click finished the escape rhythm but did not confirm 妙取成功",
+                "Blind miaoqu click finished the 5s wait and short retreat but did not confirm 妙取成功",
                 failed_input,
             ),
         )
@@ -5766,7 +5766,7 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Clicked the fixed gold miaoqu button, waited 1.2s, then escaped with two S backsteps",
+        "detail": "Clicked the fixed gold miaoqu button, waited 5s in place, then held S briefly to retreat",
         "input": {
             "mode": "click_fixed_steal_button_and_escape",
             **collect_npc_stage_input(hwnd, next_stage_state),

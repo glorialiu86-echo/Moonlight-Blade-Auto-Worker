@@ -1598,7 +1598,7 @@ const FIXED_SCRIPT_STAGES = [
   },
   {
     key: "dark_close",
-    rounds: 2,
+    rounds: 3,
     instructionLabel: "正常路已经太慢了，直接潜行、闷棍、扛走、搜刮。",
     riskLevel: "high",
     actionTypes: ["stealth", "strike"],
@@ -1608,7 +1608,7 @@ const FIXED_SCRIPT_STAGES = [
   },
   {
     key: "dark_miaoqu",
-    rounds: 6,
+    rounds: 8,
     instructionLabel: "正面放倒太显眼了，接下来只做独立妙取和脱离。",
     riskLevel: "high",
     actionTypes: ["stealth", "steal"],

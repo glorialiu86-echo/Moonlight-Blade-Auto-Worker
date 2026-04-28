@@ -556,12 +556,13 @@ export function createFixedDarkMiaoquStageActions() {
       retryForwardMs: 0,
       retryMoveSettleMs: 0
     }),
-    createWorkerAction("fixed-dark-miaoqu-3", "盲点固定妙取按钮并原地等 5 秒后短按 S 后撤", "click_fixed_steal_button_and_escape", {
+    createWorkerAction("fixed-dark-miaoqu-3", "盲点固定妙取按钮；每隔 5 秒验一次，金色页还在就继续点，回到世界页再短按 S 后撤", "click_fixed_steal_button_and_escape", {
       buttonIndex: 1,
       escapeDelayMs: 5000,
       spamBackstepMs: 1000,
       spamIntervalMs: 80,
-      moveSettleMs: 80
+      moveSettleMs: 80,
+      repeatClickLimit: 6
     }),
     createWorkerAction("fixed-dark-miaoqu-4", "退出潜行回到普通场景", "exit_stealth", {
       settleMs: 450

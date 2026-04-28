@@ -5675,6 +5675,7 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
     spam_backstep_ms = int(action.get("spamBackstepMs") or action.get("longBackstepMs") or 3000)
     spam_interval_ms = int(action.get("spamIntervalMs") or action.get("successCheckIntervalMs") or 80)
     move_settle_ms = int(action.get("moveSettleMs") or 80)
+    repeat_click_limit = max(1, int(action.get("repeatClickLimit") or 6))
     point_name = f"steal_button_{button_index}"
 
     if point_name not in ACTION_POINTS:
@@ -5703,11 +5704,29 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
         )
 
     steal_state = detect_steal_screen(hwnd)
+    click_attempts: list[dict[str, Any]] = []
     step_click = click_named_point(hwnd, point_name)
-    INPUT_GUARD.guarded_sleep(max(0, escape_delay_ms), title)
-
-    success_banner = detect_miaoqu_success_banner(hwnd)
-    after_steal_state = detect_steal_screen(hwnd)
+    click_attempts.append({
+        "phase": "initial",
+        "click": step_click,
+    })
+    success_banner = {"visible": False, "text": ""}
+    after_steal_state = steal_state
+    while True:
+        INPUT_GUARD.guarded_sleep(max(0, escape_delay_ms), title)
+        success_banner = detect_miaoqu_success_banner(hwnd)
+        after_steal_state = detect_steal_screen(hwnd)
+        if not after_steal_state["visible"]:
+            break
+        if len(click_attempts) >= repeat_click_limit:
+            break
+        repeat_click = click_named_point(hwnd, point_name)
+        click_attempts.append({
+            "phase": f"repeat_after_wait_{len(click_attempts)}",
+            "click": repeat_click,
+        })
+        INPUT_GUARD.guarded_sleep(max(40, move_settle_ms), title)
+    steal_screen_still_visible = after_steal_state["visible"]
     steal_success = success_banner["visible"] or (
         after_steal_state["visible"] and after_steal_state["text"] != steal_state["text"]
     )
@@ -5745,10 +5764,13 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
             "buttonIndex": button_index,
             "pointName": point_name,
             "click": step_click,
+            "clickAttempts": click_attempts,
             "escapeDelayMs": escape_delay_ms,
             "spamBackstepMs": spam_backstep_ms,
             "spamIntervalMs": spam_interval_ms,
             "spamPressCount": spam_press_count,
+            "stealScreenStillVisibleAfterWait": steal_screen_still_visible,
+            "repeatClickLimit": repeat_click_limit,
             "panelReadySource": ready_state["source"],
             "panelReadyVisual": ready_state["visual"],
         }
@@ -5757,7 +5779,7 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
             error_code="STEALTH_TARGET_RECOVERED",
             failed_step=build_failed_step_payload(
                 action,
-                "Blind miaoqu click finished the 5s wait and short retreat but did not confirm 妙取成功",
+                "Blind miaoqu click kept waiting 5s and re-clicking while the gold page stayed open, then still did not confirm 妙取成功",
                 failed_input,
             ),
         )
@@ -5766,7 +5788,7 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
         "id": action_id,
         "title": title,
         "status": "performed",
-        "detail": "Clicked the fixed gold miaoqu button, waited 5s in place, then held S briefly to retreat",
+        "detail": "Clicked the fixed gold miaoqu button, kept waiting 5s and re-clicking while the gold page stayed open, then held S briefly to retreat",
         "input": {
             "mode": "click_fixed_steal_button_and_escape",
             **collect_npc_stage_input(hwnd, next_stage_state),
@@ -5776,10 +5798,13 @@ def run_click_fixed_steal_button_and_escape(hwnd: int, action: dict[str, Any]) -
             "buttonIndex": button_index,
             "pointName": point_name,
             "click": step_click,
+            "clickAttempts": click_attempts,
             "escapeDelayMs": escape_delay_ms,
             "spamBackstepMs": spam_backstep_ms,
             "spamIntervalMs": spam_interval_ms,
             "spamPressCount": spam_press_count,
+            "stealScreenStillVisibleAfterWait": steal_screen_still_visible,
+            "repeatClickLimit": repeat_click_limit,
             "panelReadySource": ready_state["source"],
             "panelReadyVisual": ready_state["visual"],
         },

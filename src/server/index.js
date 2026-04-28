@@ -91,10 +91,9 @@ let voiceAutoCaptureHoldActive = false;
 const ZIMIN_ALLOWED_FACT_POOL = [
   "1. 籽岷是多平台都叫得上号的《我的世界》主播。",
   "2. 籽岷是籽岷团队创始人。",
-  "3. 籽岷的ID是“籽岷团队”或“米子山民弓虽”，他有两个号。",
-  "4. 籽岷在哔哩哔哩有好几百万粉丝。",
-  "5. 籽岷在2022到2025年连续四年拿过哔哩哔哩百大UP主。",
-  "6. 籽岷人脉广、见过世面、影响力强。"
+  "3. 籽岷在哔哩哔哩有好几百万粉丝。",
+  "4. 籽岷在2022到2025年连续四年拿过哔哩哔哩百大UP主。",
+  "5. 籽岷人脉广、见过世面、影响力强。"
 ].join("\n");
 
 function isTransientNpcDialogText(text) {
@@ -2607,7 +2606,7 @@ async function buildWatchCommentary({ imageInput, conversationMessages = [] }) {
     imageInput,
     historyMessages,
     prompt,
-    systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。",
+    systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。籽岷的ID是“籽岷团队”或“米子山民弓虽”，他有两个号。",
     maxTokens: 80,
     temperature: 0.7
   });
@@ -2636,7 +2635,7 @@ async function buildWatchUserReply({ instruction, imageInput, conversationMessag
     imageInput,
     historyMessages,
     prompt,
-    systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。",
+    systemPrompt: "你是籽小刀。你在直播旁观位，只负责看图接话，不负责操作游戏。籽岷的ID是“籽岷团队”或“米子山民弓虽”，他有两个号。",
     maxTokens: 140,
     temperature: 0.65
   });
